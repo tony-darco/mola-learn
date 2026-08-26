@@ -18,6 +18,29 @@ All four Phase 1 branches merged into `dev` in order D → A → C → B.
 - **Stale `.next` types** — deleting routes leaves generated types behind that
   fail typecheck. `rm -rf apps/web/.next` before a post-merge typecheck.
 
+## Found by smoke-testing the merged app (not by tests)
+
+### `AUTH_SECRET` was undocumented — sign-up and sign-in were completely broken
+62 passing tests, and the merged app could not authenticate anyone:
+`MissingSecret: Please define a 'secret'`. Agent D had it in its gitignored
+`.env.local`, so it worked on D's machine and nowhere else. It was mentioned in
+the README but absent from `.env.example`.
+
+Now in `.env.example` alongside `MOLA_ENCRYPTION_KEY`, which had the identical
+problem. **Two independent instances of the same failure mode in one branch** —
+a secret that lives only in an untracked file, where the test suite never
+exercises the path that needs it. Worth a CI check that boots the app with only
+`.env.example` populated.
+
+### Sign-up is not atomic
+The failed attempt still created the user row before erroring at the sign-in
+step, leaving an orphaned account whose owner was told only "there was a problem
+with the server configuration". A second attempt then reports "an account with
+that email already exists", which is confusing and wrong from the user's side.
+`signUpAction` should either roll back the insert when `signIn` fails, or treat
+"row exists but no session" as recoverable. Minor — it only surfaces on
+misconfiguration — but it is a real correctness gap.
+
 ## STILL OPEN — needs your decision
 - **Contract-4 sub-agent gap** (below). Not blocking now; blocks Agent E.
 - **Pointer-summary cost** (below). 88% of ingest wall-clock; a config change.
