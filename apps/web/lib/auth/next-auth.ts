@@ -19,17 +19,20 @@
  * here instead of raised as a contract issue because nothing frozen actually
  * blocks it.
  */
-import NextAuth, { AuthError, type NextAuthResult } from "next-auth";
+import NextAuth, { AuthError, type NextAuthResult, type Session } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { eq } from "drizzle-orm";
 import { db, users } from "@mola/db";
 import { verifyPassword } from "./password";
 
-// The explicit `NextAuthResult` annotation works around a pnpm-specific TS2742
-// portability error: with the package hoisted under a hashed `.pnpm/` path,
-// the plain inferred return type can't be named in this project's declaration
-// output. Purely a type-checker workaround — same object either way.
-const result: NextAuthResult = NextAuth({
+// The explicit `NextAuthResult` annotation on the destructuring below works
+// around a pnpm-specific TS2742 portability error: with @auth/core hoisted
+// under a hashed `.pnpm/` path, the plain inferred type of `auth` / `signIn`
+// can't be named from this package. Annotating an intermediate variable isn't
+// enough — TS re-infers on the second destructure — so the interface has to
+// sit directly on the exported binding itself. Purely a type-checker
+// workaround; same runtime object either way.
+const nextAuth = NextAuth({
   session: { strategy: "jwt" },
   trustHost: true,
   pages: { signIn: "/sign-in" },
@@ -73,5 +76,16 @@ const result: NextAuthResult = NextAuth({
   },
 });
 
-export const { handlers, auth, signIn, signOut } = result;
+export const { handlers, signIn, signOut }: NextAuthResult = nextAuth;
+
+// `auth`'s real type is an intersection of five call signatures (middleware,
+// route handler, getServerSideProps, ...) whose overloads reach into
+// next-auth's internal `./lib/index.js` / `./lib/types.js` — files outside its
+// public `exports` map, so TS can't print a portable name for them (TS2742),
+// even with `NextAuthResult` applied to the rest of the destructure above.
+// `getSession()` (lib/auth/session.ts) only ever calls the zero-argument form,
+// so re-typing to exactly that shape sidesteps the unnameable overloads
+// entirely rather than suppressing the check.
+export const auth: () => Promise<Session | null> = nextAuth.auth;
+
 export { AuthError };
