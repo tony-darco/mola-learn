@@ -24,15 +24,22 @@ Passwords are hashed with bcrypt and never logged. `getSession(): Promise<Sessio
 | null>` — the signature every route and `requireOwned` depend on — is
 unchanged; only its body is real now.
 
-Create an account at **`/sign-up`**, or sign in at **`/sign-in`** if you already
-have one. There are no seeded credentials — the Phase 0 seed still creates
-`alice@umbc.edu` and `bob@umbc.edu` as rows (so `pnpm db:seed` remains
-idempotent and the ownership fixtures still exist), but neither has a password
-set, so signing in as them isn't possible until you set one directly in the
-database. For a normal walkthrough, just sign up as a new user instead.
+Create an account at **`/sign-up`**, or sign in at **`/sign-in`**.
 
-`bob@umbc.edu` still exists to prove the ownership check: a second signed-up
-account requesting the first account's course or chat URL gets a 404, never a
+**Seeded accounts** — `pnpm db:seed` creates two, both with the password
+**`mola-dev-password`** (override with `SEED_PASSWORD`):
+
+| Account | Password | Owns |
+|---|---|---|
+| `alice@umbc.edu` | `mola-dev-password` | a term, CMSC 421, and chats |
+| `bob@umbc.edu` | `mola-dev-password` | nothing — he proves the ownership check |
+
+Dev convenience only. The seed is idempotent and backfills a hash onto users
+created before credentials auth existed, so re-running it repairs an account
+that cannot sign in rather than skipping it.
+
+Signing in as Bob and landing on an empty page is the ownership check working,
+not a broken seed. Bob requesting Alice's course or chat URL gets a 404, never a
 peek — see "Verifying the security boundary" below.
 
 ---
