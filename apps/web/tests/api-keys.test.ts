@@ -4,6 +4,7 @@
  * client — this asserts it never carries ciphertext/iv/authTag, both as a
  * pure unit check and against a real round trip through the encrypted table.
  */
+import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { apiKeys, db, users } from "@mola/db";
@@ -30,6 +31,13 @@ describe("saveApiKey / getPublicApiKey — real round trip through the encrypted
   let alice: { id: string };
 
   beforeAll(async () => {
+    // Provision a throwaway key rather than depending on the developer's
+    // .env.local — that file is gitignored, so a test that reads it passes
+    // only on the machine that wrote it and fails on every other one.
+    // The production code SHOULD throw when this is unset; that is asserted
+    // separately, and is why this is set here rather than defaulted in source.
+    process.env.MOLA_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
+
     const [a] = await db.select().from(users).where(eq(users.email, "alice@umbc.edu"));
     if (!a) throw new Error("run `pnpm db:seed` first");
     alice = a;
