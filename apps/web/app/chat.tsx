@@ -69,7 +69,9 @@ export function Chat(props: {
     <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", height: "100vh" }}>
       <aside style={{ borderRight: "1px solid var(--border)", padding: 20, background: "var(--panel)" }}>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>Mola</div>
-        <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 24 }}>{props.userName}</div>
+        <div style={{ fontSize: 13, color: "var(--muted)" }}>{props.userName}</div>
+        <a href="/dev-signin" style={{ fontSize: 12, color: "var(--accent)" }}>switch user</a>
+        <div style={{ height: 24 }} />
         {props.courseName && (
           <>
             <div style={{ fontSize: 12, textTransform: "uppercase", color: "var(--muted)" }}>Course</div>
