@@ -128,6 +128,19 @@ export async function POST(
           const compacted = await maybeCompact(chatId, session.userId);
           if (compacted) send({ type: "compacted", throughMessageId: compacted.throughMessageId });
         } catch (err) {
+          console.error(`chat ${chatId} stream failed mid-turn:`, err);
+          // A mid-stream failure (e.g. the LAN Ollama host dropping a long-lived
+          // connection) must not leave the row silently empty: the browser may
+          // already have rendered most of the answer via SSE deltas before the
+          // throw, and a reload should show that partial progress rather than a
+          // blank turn. Best-effort — a failure here must not mask the real error.
+          try {
+            await db.update(messages)
+              .set({ content: text, toolCalls: activity })
+              .where(eq(messages.id, assistantRow!.id));
+          } catch {
+            // Nothing more we can do; the error event below still reaches the client.
+          }
           send({ type: "error", message: err instanceof Error ? err.message : String(err) });
         } finally {
           controller.close();
