@@ -15,6 +15,32 @@ Both exist on the LAN host, so nothing is broken today — but two defaults for 
 same role will drift. Pick one at merge. Note the choice interacts with the
 performance finding below.
 
+### Sub-agent events are unreachable from the agent loop — contract 4 gap
+**Found by Agent A, verified by the orchestrator. This is a defect in Phase 0's
+contract, not in anyone's Phase 1 work.**
+
+`loop.ts:77` executes a tool as `const result = await tools.run(...)` — a plain
+`Promise<unknown>`. `Tool.execute` has no way to emit intermediate stream events.
+Meanwhile `subagent.ts` exports `streamSubagent()`, which yields `subagent_start`
+and `subagent_end`, and contract 6 defines both events. Nothing can call it from
+inside the loop, so **those two events can never fire.**
+
+Why it matters: §4 says the flashcard skill runs inside a sub-agent *every time*,
+including every amendment, and Agents G (quizzes) and H (mind maps) follow the
+same skill-wraps-sub-agent pattern. All three will want the collapsed
+"sub-agent working" row that the events exist to drive.
+
+Not blocking checkpoint 1 — no Phase 1 tool spawns a sub-agent. **It must be
+resolved before Agent E starts.**
+
+Recommended fix (additive, does not break existing tools): add an optional
+`emit?: (ev: StreamEvent) => void` to `ToolContext`. The loop passes one that
+pushes into a queue it drains around the `await`. Tools that ignore it are
+unaffected. The simple version surfaces events when the tool returns; real-time
+streaming needs a promise-based async queue, roughly another 20 lines.
+
+Agent A did the right thing here — flagged it rather than editing frozen code.
+
 ## Verified findings
 
 ### Pointer-summary generation dominates ingest cost
