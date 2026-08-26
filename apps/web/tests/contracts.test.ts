@@ -20,9 +20,12 @@ import { canEscalate, escalate } from "../lib/context/hint-ladder";
 let alice: { id: string }, bob: { id: string }, chat: { id: string; courseId: string | null };
 
 beforeAll(async () => {
-  [alice] = await db.select().from(users).where(eq(users.email, "alice@umbc.edu"));
-  [bob] = await db.select().from(users).where(eq(users.email, "bob@umbc.edu"));
-  [chat] = await db.select().from(chats).where(eq(chats.userId, alice.id));
+  const [a] = await db.select().from(users).where(eq(users.email, "alice@umbc.edu"));
+  const [b] = await db.select().from(users).where(eq(users.email, "bob@umbc.edu"));
+  if (!a || !b) throw new Error("run `pnpm db:seed` first");
+  const [c] = await db.select().from(chats).where(eq(chats.userId, a.id));
+  if (!c) throw new Error("run `pnpm db:seed` first");
+  alice = a; bob = b; chat = c;
 });
 
 describe("contract 2 — ownership (§9)", () => {
@@ -42,11 +45,16 @@ describe("contract 2 — ownership (§9)", () => {
   });
 
   it("makes a foreign row indistinguishable from a missing one", async () => {
-    const foreign = await requireOwned("chat", chat.id, { userId: bob.id, email: "b" })
-      .catch((e) => e as AuthzError);
-    const missing = await requireOwned(
-      "chat", "00000000-0000-0000-0000-000000000000", { userId: bob.id, email: "b" },
-    ).catch((e) => e as AuthzError);
+    const denial = async (id: string): Promise<AuthzError> => {
+      try {
+        await requireOwned("chat", id, { userId: bob.id, email: "b" });
+      } catch (e) {
+        if (e instanceof AuthzError) return e;
+      }
+      throw new Error("expected an AuthzError");
+    };
+    const foreign = await denial(chat.id);
+    const missing = await denial("00000000-0000-0000-0000-000000000000");
     expect(foreign.status).toBe(missing.status);
     expect(foreign.message).toBe(missing.message);
   });
@@ -65,11 +73,12 @@ describe("contract 5 — five-layer context assembly (§5)", () => {
 
   it("layer 1 reads the course summary from the courses row — one source of truth (§8)", async () => {
     const [course] = await db.select().from(courses).where(eq(courses.userId, alice.id));
+    expect(course?.summary).toBeTruthy();
     const ctx = await assembleContext({
-      userId: alice.id, chatId: chat.id, courseId: course.id,
+      userId: alice.id, chatId: chat.id, courseId: course!.id,
       tools: buildRegistry(), hintRung: null,
     });
-    expect(ctx.layers.identity).toContain(course.summary!.slice(0, 40));
+    expect(ctx.layers.identity).toContain(course!.summary!.slice(0, 40));
   });
 
   it("layer 3 injects tool names and one-line descriptions only", async () => {
