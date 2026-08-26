@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { chats, courses, db } from "@mola/db";
 import { getSession } from "@/lib/auth/session";
 import { Chat } from "./chat";
@@ -50,18 +50,27 @@ export default async function Home() {
 
   if (!chat) {
     // Not an error: a fresh account (or the seeded Bob, who owns nothing) has no
-    // chats yet — the §9 ownership model working, not a missing seed.
+    // chats yet — the §9 ownership model working, not a missing seed. They may
+    // still have a course with no chat started in it yet, so check separately
+    // rather than implying "no courses" when one exists.
+    const courseCountRows = await db
+      .select({ courseCount: sql<number>`count(*)::int` })
+      .from(courses)
+      .where(eq(courses.userId, session.userId));
+    const courseCount = courseCountRows[0]?.courseCount ?? 0;
+
     return (
       <main style={{ maxWidth: 560, margin: "80px auto", padding: "0 24px" }}>
         <h1 style={{ marginBottom: 4 }}>Mola</h1>
         <p style={{ color: "var(--muted)", marginTop: 0 }}>
-          Signed in as <strong>{session.email}</strong>, who has no courses or chats yet.
+          Signed in as <strong>{session.email}</strong>, who has no chats yet
+          {courseCount === 0 ? " and no courses yet" : ""}.
         </p>
-        <a href="/courses/new" style={{
+        <a href={courseCount === 0 ? "/courses/new" : "/courses"} style={{
           display: "inline-block", marginTop: 16, padding: "12px 20px", borderRadius: 10,
           background: "var(--accent)", color: "#fff", textDecoration: "none", fontWeight: 600,
         }}>
-          Add a course →
+          {courseCount === 0 ? "Add a course →" : "View your courses →"}
         </a>
       </main>
     );

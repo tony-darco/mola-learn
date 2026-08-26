@@ -32,6 +32,14 @@ function s3Client(): S3Client {
     endpoint: process.env.AWS_ENDPOINT_URL ?? "http://localhost:4566",
     region: process.env.AWS_REGION ?? "us-east-1",
     forcePathStyle: true,
+    // The SDK's default ("WHEN_SUPPORTED") bakes an x-amz-checksum-* header
+    // into the presigned URL's signature for any operation that supports one
+    // — PutObject does. That header is then part of what the signature
+    // covers, but the plain `fetch` PUT below never computes or sends a
+    // matching checksum (nothing here runs through the SDK's own request
+    // pipeline), so LocalStack rejects the request as an invalid checksum
+    // value. "WHEN_REQUIRED" only adds one when the operation demands it.
+    requestChecksumCalculation: "WHEN_REQUIRED",
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? "test",
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? "test",
