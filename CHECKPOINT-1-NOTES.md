@@ -41,6 +41,26 @@ streaming needs a promise-based async queue, roughly another 20 lines.
 
 Agent A did the right thing here — flagged it rather than editing frozen code.
 
+### Known merge conflict: `apps/web/app/chat.tsx` (Agents A and D)
+Both agents changed the same file in incompatible directions. It will not
+auto-merge, and the resolution is not "take one side".
+
+- **D** extended it: added a `hideSidebar?: boolean` prop and a sign-out action,
+  and passes `hideSidebar` from `app/(app)/courses/[id]/page.tsx:112` so the
+  course detail page can reuse the chat composer without a second sidebar.
+- **A** gutted it from 155 lines to 16, making it a compat shim over the new
+  `components/chat/ChatShell.tsx` — deliberately, so that D's `page.tsx` (which
+  A was told not to touch) kept working.
+
+A anticipated the collision and left the shim for exactly this reason, but its
+shim does **not** accept `hideSidebar`. Merge order is D → A, so A's version
+lands last and D's course page then passes an unknown prop: a typecheck error,
+and a duplicated sidebar if it were forced through.
+
+**Resolution at merge:** keep A's shim, add `hideSidebar?: boolean` to its props,
+and forward it into `ChatShell` (which needs to honour it). Small and
+well-defined — but it must be done deliberately, not by picking a side.
+
 ## Verified findings
 
 ### Pointer-summary generation dominates ingest cost
@@ -69,6 +89,17 @@ Verified independently: `clamd` listening on 127.0.0.1:3310, EICAR detected
 (`Infected files: 1`). A `StubScanner` exists for CI and is clearly labelled; it
 is not what is wired up. Do not let the stub become the default in any
 environment that accepts real uploads.
+
+### Agent D's tests were environment-dependent (fixed)
+D reported "32/32 green". Independently they were **3 failed / 29 passed**: the
+api-keys tests read `MOLA_ENCRYPTION_KEY` from `.env.local`, which is gitignored,
+so they passed only on the machine that wrote that file. Fixed on D's branch —
+the test now generates a throwaway key, and the var was added to `.env.example`
+where it was missing. Production behaviour is unchanged and still throws when the
+key is absent, which is correct for encryption at rest.
+
+Worth noting as a pattern: an agent verifying in its own environment can report
+green on a suite that fails everywhere else.
 
 ### Contract-3 asymmetry holds on the document side
 `grep -rn "Instruct:" apps/ingest/ingest/` returns only a docstring stating that
