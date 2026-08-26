@@ -9,6 +9,14 @@ import type { EmbeddingProvider } from "./types";
 
 const HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 
+/**
+ * Total timeout. Unlike chat this is a single non-streaming request over a
+ * bounded batch, so a duration cap is the right shape. Without it a stalled
+ * host blocks an ingest worker indefinitely — the job never fails, never
+ * retries, and the document sits in `indexing` forever.
+ */
+const EMBED_TIMEOUT_MS = Number(process.env.OLLAMA_EMBED_TIMEOUT_MS ?? 300_000);
+
 export class SelfHostedEmbeddingProvider implements EmbeddingProvider {
   readonly id = "self-hosted";
   readonly model = EMBEDDING.model;
@@ -20,6 +28,7 @@ export class SelfHostedEmbeddingProvider implements EmbeddingProvider {
     const res = await fetch(`${HOST}/api/embed`, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
       body: JSON.stringify({
         model: this.model,
         input: texts.map((t) => formatForEmbedding(t, kind)),

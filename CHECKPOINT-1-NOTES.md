@@ -61,6 +61,29 @@ and a duplicated sidebar if it were forced through.
 and forward it into `ChatShell` (which needs to honour it). Small and
 well-defined — but it must be done deliberately, not by picking a side.
 
+### FIXED on `main`: un-timeouted fetch in both LLM providers
+Agent C hit this as an indefinite hang in its golden-set harness, correctly
+diagnosed it, worked around it from its own side, and flagged the real fix as
+out of its scope. It was Phase 0 code, and on inspection it was worse than
+reported:
+
+- `ollama.ts` aborted only if a caller passed a signal. Nothing forced one.
+- `embedding.ts` had **no signal at all** — a stalled host would block an ingest
+  worker forever, with the job never failing, never retrying, and the document
+  stuck in `indexing`.
+
+Fixed on `main`:
+- **Chat: an inactivity timeout, not a duration cap** (`OLLAMA_STALL_TIMEOUT_MS`,
+  default 120s). A legitimate generation on a 27B reasoning model runs for
+  minutes — B measured a single summary call at 178s — so a total cap would kill
+  good requests. Silence is what is never legitimate. Composes with a
+  caller-supplied signal so a client disconnect still aborts.
+- **Embedding: a total cap** (`OLLAMA_EMBED_TIMEOUT_MS`, default 300s), which is
+  the right shape for a single non-streaming request over a bounded batch.
+
+Two regression tests, including the negative case: a slow-but-progressing stream
+must survive a stall window it exceeds in total duration.
+
 ## Verified findings
 
 ### Pointer-summary generation dominates ingest cost

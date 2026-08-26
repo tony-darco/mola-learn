@@ -4,6 +4,17 @@ import type { CompletionRequest, LLMProvider, Message } from "./types";
 const HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "qwen3.5:27b";
 
+/**
+ * Inactivity timeout, not a total-duration cap.
+ *
+ * A legitimate generation on a 27B reasoning model can run for minutes, so a
+ * total timeout would kill good requests. What is never legitimate is the
+ * connection going silent: no headers, or no token for this long. Without this
+ * a stalled Ollama host hangs the request forever — which is exactly what
+ * happened to the retrieval golden-set harness before it was found.
+ */
+const STALL_TIMEOUT_MS = Number(process.env.OLLAMA_STALL_TIMEOUT_MS ?? 120_000);
+
 type OllamaChunk = {
   message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] };
   done?: boolean;
@@ -18,10 +29,17 @@ export class OllamaProvider implements LLMProvider {
   async *stream(req: CompletionRequest): AsyncIterable<ProviderStreamEvent> {
     const messages: Message[] = [{ role: "system", content: req.system }, ...req.messages];
 
+    // Composed so a caller-supplied signal (client disconnect) and the stall
+    // timeout both abort the request; whichever fires first wins.
+    const stall = new StallTimer(STALL_TIMEOUT_MS);
+    const signal = req.signal
+      ? AbortSignal.any([req.signal, stall.signal])
+      : stall.signal;
+
     const res = await fetch(`${HOST}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      signal: req.signal,
+      signal,
       body: JSON.stringify({
         model: this.model,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -39,6 +57,7 @@ export class OllamaProvider implements LLMProvider {
     });
 
     if (!res.ok || !res.body) {
+      stall.clear();
       yield { type: "error", message: `ollama ${res.status}: ${await res.text()}` };
       return;
     }
@@ -48,9 +67,11 @@ export class OllamaProvider implements LLMProvider {
     let buffer = "";
     let toolCallSeq = 0;
 
+    try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      stall.kick(); // bytes arrived — restart the silence clock
       buffer += decoder.decode(value, { stream: true });
 
       // Ollama emits newline-delimited JSON; the last fragment may be partial.
@@ -86,5 +107,44 @@ export class OllamaProvider implements LLMProvider {
         }
       }
     }
+    } catch (err) {
+      if (stall.fired) {
+        yield {
+          type: "error",
+          message: `ollama stalled: no data for ${STALL_TIMEOUT_MS}ms`,
+        };
+        return;
+      }
+      throw err;
+    } finally {
+      stall.clear();
+    }
+  }
+}
+
+/** Aborts when no progress has been reported for `ms`. Reset with `kick()`. */
+class StallTimer {
+  private readonly controller = new AbortController();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  fired = false;
+
+  constructor(private readonly ms: number) {
+    this.kick();
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  kick(): void {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.fired = true;
+      this.controller.abort();
+    }, this.ms);
+  }
+
+  clear(): void {
+    clearTimeout(this.timer);
   }
 }
