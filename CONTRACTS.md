@@ -122,15 +122,17 @@ Fill in a stub; do not change the return shape or the layer order.
 
 ## Known issues
 
-**Small dev models occasionally emit tool calls as text.** Observed once with
-`llama3.2` on a compound question ("what number *and* who teaches"): instead of a
-structured `tool_calls` field, the model emitted
-`{"name": "read_course_fact", "parameters": {...}}` as message content, which
-streamed straight to the user as visible JSON. Not reproducible — 7/7 clean runs
-afterwards, including the same prompt.
+*(none open)*
 
-Left unfixed deliberately: the target chat model is `qwen3.5:27b`, and a
-speculative parser built against an intermittent failure of a non-target model
-could not be tested honestly. **Agent A**, if you see this on the real model, the
-fix belongs in `lib/llm/ollama.ts` (the provider adapter that knows the offered
-tool names), not in the loop.
+**Resolved — tool calls leaking as text.** Seen once with `llama3.2` on a compound
+question: the model emitted `{"name": "read_course_fact", ...}` as message content
+instead of a structured `tool_calls` field, and it streamed to the user as visible
+JSON. Re-tested on the target model `qwen3.5:27b`: 3/3 clean, two correctly
+structured calls each. Small-model artifact, not a loop defect. No fix was written.
+
+**Resolved — the model announced the hint rung.** `qwen3.5:27b` opened replies with
+"Let me help with a **teaching hint**" and "**Bottom-Out Hint:**", which tells the
+student they are being walked up a ladder. `SOCRATIC_BASE` in
+`lib/context/hint-ladder.ts` now forbids naming the scaffolding; re-tested 3/3 clean
+across all three rungs. **Agent F**, keep that rule when you build out the full
+rulebook — it is easy to lose in a rewrite.
