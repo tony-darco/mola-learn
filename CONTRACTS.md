@@ -18,7 +18,8 @@ Run `pnpm --filter @mola/web test` before and after your changes.
   the course detail page renders and the student edits. Do not cache it anywhere.
 - Migrations: `pnpm db:generate` → review the SQL → `pnpm db:migrate`. Never
   hand-edit an applied migration.
-- **`document_chunks.embedding` does not exist yet** — see contract 3.
+- `document_chunks.embedding` is `vector(1024)`, nullable — a chunk is
+  grep/BM25-searchable from extraction; the vector lands later, async (§7).
 
 ## 2 — Ownership check
 `apps/web/lib/auth/ownership.ts` → `requireOwned(kind, id, session?)`
@@ -47,14 +48,36 @@ embeddings cannot be billed to a student's key by accident. Do not add `embed` t
 No provider SDK is imported outside `lib/llm/`. Get a provider via
 `getChatProvider(userId)` — never construct one directly.
 
-> ### ⚠ BLOCKED: `EMBEDDING.dim` (plan item S1.4)
-> `packages/shared/src/embedding.ts` has `model: null, dim: null`, and
-> `requireEmbeddingConfig()` throws. This is deliberate — the width is permanent
-> once migrated, and it is pending a benchmark of 2–3 candidates against ~20 real
-> syllabus questions.
->
-> **Agents B and C:** build everything else; the vector tool degrades to
-> grep/BM25 until the column exists. Do not pick a dimension to unblock yourself.
+### Embedding model — RESOLVED (S1.4)
+
+`qwen3-embedding:0.6b`, **1024 dims**, stored at native width — never truncated.
+`packages/shared/src/embedding.ts` is the one source; the Drizzle column reads
+`EMBEDDING.dim` and a test asserts the Postgres column width still matches it.
+
+**Do not substitute a larger variant.** The 4B/8B models in this family are
+deliberately not chosen. Quality saturates early — 0.6B is within a fraction of
+8B on English retrieval — while 8B's 4096 dims would quadruple per-chunk storage,
+index build time, index memory and per-comparison arithmetic on RDS for a delta
+not measurable at pilot scale. If retrieval quality later proves limiting, the fix
+is a **reranker over the top-50** (`qwen3-reranker`, same family, two-stage) — a
+Phase 2 addition with no schema commitment. **Do not raise a contract-change
+request to enlarge the embedder.**
+
+**The model is instruction-aware and asymmetric.** Queries take a task prefix;
+stored documents do not. `EmbeddingProvider.embed(texts, kind)` takes `kind` with
+no default, so neither side can omit it by accident:
+
+- **Agent B (ingest):** `embed(chunks, "document")` — raw text, no prefix.
+- **Agent C (retrieval):** `embed([query], "query")` — prefixed.
+
+Both read `EMBEDDING_TASK` from `packages/shared`. Changing that string affects
+query embeddings only, so it needs no re-embed and no version bump.
+
+**Run the embedder CPU-only** (`options: { num_gpu: 0 }`, already set). Ingestion
+is batch and offline and must never contend with the chat model for VRAM.
+
+The 32K context window and multilingual capability are unused. **Do not widen
+chunks to exploit the context window.**
 
 ## 4 — Agent loop, tool registry, sub-agent spawner
 `apps/web/lib/agent/{loop,registry,subagent}.ts`
@@ -110,6 +133,20 @@ Fill in a stub; do not change the return shape or the layer order.
 - **Ingest is triggered by the `jobs` table in Phase 1** — one trigger, not two.
   Keep the worker entrypoint clean so Phase 3 can swap in S3 events as wiring.
 - **API keys are never returned to the client after save**, and never logged (§9).
+
+## Golden set
+
+`evals/golden/` — 20 questions against a real UMBC syllabus, with verbatim answers
+read off the source. Run it at every integration checkpoint:
+
+```bash
+pnpm --filter @mola/evals golden -- --txt <extracted.txt> --explain
+```
+
+Baseline and findings: `evals/golden/RESULTS.md`. Two things there matter for
+Phase 1 — vector and BM25 fail in *opposite* directions (the empirical case for
+§6's three-tool agent), and the query prefix showed no measurable benefit on a
+syllabus corpus, so re-measure on a textbook before treating it as settled.
 
 ## Working agreement
 

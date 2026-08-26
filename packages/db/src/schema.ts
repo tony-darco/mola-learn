@@ -7,8 +7,9 @@
 import { sql } from "drizzle-orm";
 import {
   index, integer, jsonb, pgEnum, pgTable, real, text,
-  timestamp, uniqueIndex, uuid,
+  timestamp, uniqueIndex, uuid, vector,
 } from "drizzle-orm/pg-core";
+import { EMBEDDING } from "@mola/shared";
 
 const id = () => uuid("id").primaryKey().defaultRandom();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -164,10 +165,13 @@ export const documents = pgTable("documents", {
  * Extracted text lives HERE, not S3 — S3 cannot be searched in place (§12).
  * grep and BM25 both run against this table.
  *
- * NOTE: the `embedding` column is intentionally ABSENT from this migration.
- * Its width is permanent and blocked on S1.4. It arrives in a follow-up
- * migration once the benchmark lands; `embedding_model` / `embedding_version`
- * are here from day one so that migration can target rows precisely.
+ * `embedding` is the model's NATIVE width, stored untruncated. Nullable, because
+ * a chunk exists and is grep/BM25-searchable from the moment it is extracted —
+ * embedding lands later, asynchronously (§7).
+ *
+ * `embedding_model` / `embedding_version` identify which rows a future backfill
+ * would need to touch, so a model change stays a targeted migration rather than
+ * re-embed-everything-and-hope.
  */
 export const documentChunks = pgTable("document_chunks", {
   id: id(),
@@ -177,6 +181,7 @@ export const documentChunks = pgTable("document_chunks", {
   text: text("text").notNull(),
   /** Free-form locator carried onto artifact SourceRefs: "ch.3", "§2.1". */
   locator: text("locator"),
+  embedding: vector("embedding", { dimensions: EMBEDDING.dim }),
   embeddingModel: text("embedding_model"),
   embeddingVersion: integer("embedding_version"),
   createdAt: createdAt(),
@@ -185,6 +190,10 @@ export const documentChunks = pgTable("document_chunks", {
   index("chunks_user_idx").on(t.userId),
   index("chunks_fts_idx").using("gin", sql`to_tsvector('english', ${t.text})`),
   index("chunks_trgm_idx").using("gin", sql`${t.text} gin_trgm_ops`),
+  // Cosine, matching the model's already-L2-normalised output. HNSW over IVFFlat:
+  // no training step, and it does not degrade as the corpus grows during a semester.
+  index("chunks_embedding_idx")
+    .using("hnsw", t.embedding.op("vector_cosine_ops")),
 ]);
 
 // ── Artifacts (mirrors contract 6) ───────────────────────────────────────────

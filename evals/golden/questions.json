@@ -1,0 +1,26 @@
+{
+  "corpus": "IS 300 – Management Information Systems, Spring 2026 (UMBC), syllabus",
+  "note": "Each question has a verbatim answer string that MUST appear in a retrieved chunk for the retrieval to count as a hit. Answers were read off the source document, not generated.",
+  "questions": [
+    { "q": "Who is the instructor for this course?",                       "expect": "Michelle Antero" },
+    { "q": "What is the professor's email address?",                       "expect": "mantero1@umbc.edu" },
+    { "q": "Which office is the instructor in?",                           "expect": "ITE 411A" },
+    { "q": "What course do I need to take before this one?",               "expect": "MGMT210" },
+    { "q": "Which textbook is required?",                                  "expect": "Rainer" },
+    { "q": "What edition of the textbook do we use?",                      "expect": "Tenth edition" },
+    { "q": "How many exams are there in the course?",                      "expect": "four exams" },
+    { "q": "What material does the first exam cover?",                     "expect": "Chapters 1 – 4" },
+    { "q": "When is the second exam?",                                     "expect": "Mar. 13" },
+    { "q": "Which chapters are on exam 3?",                                "expect": "Chapters 9 – 12" },
+    { "q": "When is the last exam?",                                       "expect": "May 8" },
+    { "q": "How many points is the whole course out of?",                  "expect": "659" },
+    { "q": "What do I need to score to get an A?",                         "expect": "593-659" },
+    { "q": "How much of my grade do the exams make up?",                   "expect": "60%" },
+    { "q": "What percentage is the annotated bibliography worth?",         "expect": "10%" },
+    { "q": "How much is class participation worth?",                       "expect": "1%" },
+    { "q": "What happens if I turn a deliverable in late?",                "expect": "50%" },
+    { "q": "Am I allowed to use ChatGPT to write my assignments?",         "expect": "not allowed" },
+    { "q": "What tool is used to check my work for plagiarism?",           "expect": "SafeAssign" },
+    { "q": "What score should I aim for on each learning outcome?",        "expect": "70%" }
+  ]
+}

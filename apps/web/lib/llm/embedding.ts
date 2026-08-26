@@ -1,39 +1,44 @@
 /**
  * The platform-owned embedding provider (contract 3).
  *
- * Constructing this THROWS while S1.4 is unresolved, by design: a
- * silently-wrong vector width is far more expensive to discover later than a
- * loud failure now. Phase 1 agents B and C are the first real consumers.
+ * Never selectable per user, and never reachable from a BYOK key — the split in
+ * types.ts is what enforces that structurally.
  */
-import { requireEmbeddingConfig } from "@mola/shared";
+import { EMBEDDING, formatForEmbedding, type EmbeddingKind } from "@mola/shared";
 import type { EmbeddingProvider } from "./types";
 
 const HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 
 export class SelfHostedEmbeddingProvider implements EmbeddingProvider {
   readonly id = "self-hosted";
-  readonly model: string;
-  readonly dim: number;
+  readonly model = EMBEDDING.model;
+  readonly dim = EMBEDDING.dim;
 
-  constructor() {
-    const cfg = requireEmbeddingConfig();
-    this.model = cfg.model;
-    this.dim = cfg.dim;
-  }
+  async embed(texts: string[], kind: EmbeddingKind): Promise<number[][]> {
+    if (texts.length === 0) return [];
 
-  async embed(texts: string[]): Promise<number[][]> {
     const res = await fetch(`${HOST}/api/embed`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: this.model, input: texts }),
+      body: JSON.stringify({
+        model: this.model,
+        input: texts.map((t) => formatForEmbedding(t, kind)),
+        // CPU-only, explicitly. Ingestion is batch and offline and must never
+        // contend with the chat model for VRAM.
+        options: { num_gpu: 0 },
+      }),
     });
     if (!res.ok) throw new Error(`embed failed: ${res.status} ${await res.text()}`);
 
     const { embeddings } = (await res.json()) as { embeddings: number[][] };
+
+    // Guards against a model swap that silently changes width — the one failure
+    // that would corrupt the index rather than error.
     for (const v of embeddings) {
       if (v.length !== this.dim) {
         throw new Error(
-          `embedding width mismatch: model returned ${v.length}, EMBEDDING.dim is ${this.dim}`,
+          `embedding width mismatch: ${this.model} returned ${v.length}, ` +
+            `EMBEDDING.dim is ${this.dim}`,
         );
       }
     }

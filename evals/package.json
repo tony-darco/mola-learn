@@ -1,0 +1,13 @@
+{
+  "name": "@mola/evals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "golden": "tsx golden/run.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": { "@mola/shared": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.10.2", "tsx": "^4.19.2" }
+}

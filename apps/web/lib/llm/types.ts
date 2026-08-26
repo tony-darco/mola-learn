@@ -7,7 +7,7 @@
  *
  * No provider SDK is imported anywhere outside lib/llm/.
  */
-import type { ProviderStreamEvent } from "@mola/shared";
+import type { EmbeddingKind, ProviderStreamEvent } from "@mola/shared";
 
 export type Message = {
   role: "system" | "user" | "assistant" | "tool";
@@ -52,5 +52,14 @@ export interface EmbeddingProvider {
   readonly id: string;
   readonly model: string;
   readonly dim: number;
-  embed(texts: string[]): Promise<number[][]>;
+
+  /**
+   * `kind` is REQUIRED and has no default, deliberately.
+   *
+   * Qwen3-Embedding is asymmetric: queries carry a task-instruction prefix,
+   * stored documents do not. Getting it wrong degrades retrieval measurably and
+   * fails silently. Forcing the caller to name the side makes that impossible to
+   * omit by accident — Agents B ("document") and C ("query") each state it.
+   */
+  embed(texts: string[], kind: EmbeddingKind): Promise<number[][]>;
 }

@@ -6,10 +6,10 @@
  * Requires the local stack: `pnpm up && pnpm db:migrate && pnpm db:seed`.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
-  EMBEDDING, artifactToolResultSchema, decodeSSE, encodeSSE,
-  isArtifactToolResult, requireEmbeddingConfig,
+  EMBEDDING, EMBEDDING_TASK, artifactToolResultSchema, decodeSSE, encodeSSE,
+  formatForEmbedding, isArtifactToolResult,
 } from "@mola/shared";
 import { chats, courses, db, users } from "@mola/db";
 import { AuthzError, requireOwned } from "../lib/auth/ownership";
@@ -143,12 +143,33 @@ describe("contract 6 — artifacts and stream taxonomy", () => {
   });
 });
 
-describe("contract 3 — embedding config is blocked, loudly (S1.4)", () => {
-  it("has no frozen dimension yet", () => {
-    expect(EMBEDDING.dim).toBeNull();
+describe("contract 3 — embedding config (S1.4 resolved)", () => {
+  it("is frozen at the model's native width", () => {
+    expect(EMBEDDING.model).toBe("qwen3-embedding:0.6b");
+    expect(EMBEDDING.dim).toBe(1024);
   });
 
-  it("throws rather than letting a caller proceed with an unset width", () => {
-    expect(() => requireEmbeddingConfig()).toThrow(/S1\.4/);
+  it("matches the vector column width in Postgres", async () => {
+    const [row] = await db.execute(sql`
+      select a.atttypmod as width
+      from pg_attribute a
+      where a.attrelid = 'document_chunks'::regclass and a.attname = 'embedding'
+    `);
+    // A drift here means the schema and the model disagree, which corrupts the
+    // index silently rather than erroring.
+    expect((row as { width: number }).width).toBe(EMBEDDING.dim);
+  });
+
+  it("prefixes queries but never documents (the asymmetry)", () => {
+    const raw = "why does the working set model reduce thrashing";
+    expect(formatForEmbedding(raw, "document")).toBe(raw);
+    expect(formatForEmbedding(raw, "query")).toBe(
+      `Instruct: ${EMBEDDING_TASK}\nQuery: ${raw}`,
+    );
+  });
+
+  it("keeps the two sides genuinely distinct", () => {
+    const t = "page replacement";
+    expect(formatForEmbedding(t, "query")).not.toBe(formatForEmbedding(t, "document"));
   });
 });
