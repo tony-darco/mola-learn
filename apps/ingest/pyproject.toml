@@ -14,7 +14,10 @@ dependencies = [
   "clamd>=1.0.2",
 ]
 
-[dependency-groups]
+# Declared as an extra rather than a PEP 735 dependency-group so the documented
+# `pip install -e ".[dev]"` actually resolves it — the extras syntax does not
+# read [dependency-groups].
+[project.optional-dependencies]
 dev = [
   "pytest>=8.0",
 ]

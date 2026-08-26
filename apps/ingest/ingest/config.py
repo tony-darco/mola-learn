@@ -45,7 +45,7 @@ class Config:
     embed_version: int = field(default_factory=lambda: _int("EMBED_VERSION", 1))
 
     ollama_host: str = field(default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://192.168.1.17:11434"))
-    chat_model: str = field(default_factory=lambda: os.environ.get("MOLA_CHAT_MODEL", "qwen3.6:27b"))
+    chat_model: str = field(default_factory=lambda: os.environ.get("MOLA_CHAT_MODEL", "qwen3.5:27b"))
 
     scanner: str = field(default_factory=lambda: os.environ.get("INGEST_SCANNER", "clamd"))
     clamd_host: str = field(default_factory=lambda: os.environ.get("CLAMD_HOST", "127.0.0.1"))

@@ -1,4 +1,31 @@
-# Integration checkpoint 1 — running notes
+# Integration checkpoint 1 — COMPLETE
+
+All four Phase 1 branches merged into `dev` in order D → A → C → B.
+**4/4 typecheck · 62 web tests · 21 ingest tests.**
+
+## Resolved during the merge
+- **`chat.tsx` conflict (A/D)** — kept A's shim, added `hideSidebar` to it and to
+  `ChatShell`, added a `.chat-layout--bare` CSS variant. Combined both sides
+  rather than taking either.
+- **Chat-model divergence** — unified on `qwen3.5:27b`, the established
+  project-wide default. `apps/ingest` had drifted to `qwen3.6:27b`; its measured
+  178s timing was taken on 3.6 and is annotated as such. Env-overridable, so
+  trivially reversible if 3.6 was deliberate.
+- **`pnpm-lock.yaml`** — regenerated rather than hand-merged.
+- **Ingest dev extras** — `[dependency-groups]` (PEP 735) moved to
+  `[project.optional-dependencies]` so the README's documented
+  `pip install -e ".[dev]"` actually resolves. It previously failed.
+- **Stale `.next` types** — deleting routes leaves generated types behind that
+  fail typecheck. `rm -rf apps/web/.next` before a post-merge typecheck.
+
+## STILL OPEN — needs your decision
+- **Contract-4 sub-agent gap** (below). Not blocking now; blocks Agent E.
+- **Pointer-summary cost** (below). 88% of ingest wall-clock; a config change.
+
+---
+
+## Original notes
+
 
 Findings the orchestrator verified independently, to be resolved at merge time.
 Merge order per the plan: **D → A → C → B**.
