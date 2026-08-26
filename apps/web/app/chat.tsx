@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { decodeSSE, type HintRung } from "@mola/shared";
+import { signOutAction } from "@/lib/auth/actions";
 
 type Turn = { role: "user" | "assistant"; text: string; tools: string[] };
 
@@ -10,6 +11,8 @@ export function Chat(props: {
   chatTitle: string;
   courseName: string | null;
   userName: string;
+  /** The course detail page supplies its own nav chrome and chat-list pills. */
+  hideSidebar?: boolean;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -66,11 +69,24 @@ export function Chat(props: {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", height: "100vh" }}>
+    <div style={{ display: "grid", gridTemplateColumns: props.hideSidebar ? "1fr" : "260px 1fr", height: "100%" }}>
+      {!props.hideSidebar && (
       <aside style={{ borderRight: "1px solid var(--border)", padding: 20, background: "var(--panel)" }}>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>Mola</div>
-        <div style={{ fontSize: 13, color: "var(--muted)" }}>{props.userName}</div>
-        <a href="/dev-signin" style={{ fontSize: 12, color: "var(--accent)" }}>switch user</a>
+        <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10 }}>{props.userName}</div>
+        <nav style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+          <a href="/courses" style={{ color: "var(--accent)" }}>Courses</a>
+          <a href="/profile" style={{ color: "var(--accent)" }}>Profile</a>
+          <a href="/settings" style={{ color: "var(--accent)" }}>Settings</a>
+          <form action={signOutAction}>
+            <button
+              type="submit"
+              style={{ background: "none", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", font: "inherit" }}
+            >
+              Sign out
+            </button>
+          </form>
+        </nav>
         <div style={{ height: 24 }} />
         {props.courseName && (
           <>
@@ -81,6 +97,7 @@ export function Chat(props: {
         <div style={{ fontSize: 12, textTransform: "uppercase", color: "var(--muted)" }}>Chats</div>
         <div style={{ padding: "6px 0" }}>{props.chatTitle}</div>
       </aside>
+      )}
 
       <main style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ flex: 1, overflowY: "auto", padding: "32px 24px" }}>

@@ -26,6 +26,12 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   university: text("university"),
   year: yearEnum("year"),
+  /**
+   * Credentials-provider auth (Agent D, Phase 1). Nullable — an OAuth-only
+   * user (none exist yet) would never set one. Never selected into an API
+   * response; only compared server-side in the Auth.js authorize() callback.
+   */
+  passwordHash: text("password_hash"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

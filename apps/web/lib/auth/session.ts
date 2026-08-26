@@ -1,30 +1,24 @@
 /**
- * The session seam. Agent D replaces the BODY of `getSession` with real
- * Auth.js v5; every caller — including contract 2 — codes against this
- * signature and does not change.
+ * The session seam. Contract 2 and every route code against this signature —
+ * it does not change. The body now calls real Auth.js v5 (`lib/auth/next-auth.ts`)
+ * instead of trusting a plain cookie.
+ *
+ * The import of `./next-auth` is dynamic, not static, deliberately: that module
+ * pulls in the `next-auth` package, which internally imports `next/server` in a
+ * way that only resolves inside Next.js's own bundler/runtime. `ownership.ts`
+ * (contract 2, frozen) imports this file statically, and `ownership.ts` is
+ * itself imported by `tests/contracts.test.ts`, which runs under plain Vitest
+ * — no Next.js runtime present. A static import here would make loading
+ * `ownership.ts` alone fail the Phase 0 test suite before a single assertion
+ * runs. Every contract-2 test supplies its `Session` explicitly, so the real
+ * `getSession()` body — and therefore this import — never executes in tests;
+ * deferring it to call time keeps that true without changing the signature.
  */
-import { cookies } from "next/headers";
-
 export type Session = { userId: string; email: string };
 
-/**
- * DEV ONLY. Reads a plain cookie so the Phase 0 thin slice and the §9
- * cross-user denial test can run before Auth.js is wired.
- *
- * Hard-fails at module scope in production so it cannot ship by accident —
- * this is a scaffold, not an auth system.
- */
-if (process.env.NODE_ENV === "production" && !process.env.MOLA_REAL_AUTH) {
-  throw new Error(
-    "Dev session shim is active in production. Agent D must replace " +
-      "lib/auth/session.ts with Auth.js before any deploy.",
-  );
-}
-
 export async function getSession(): Promise<Session | null> {
-  const jar = await cookies();
-  const userId = jar.get("mola_dev_user")?.value;
-  const email = jar.get("mola_dev_email")?.value;
-  if (!userId || !email) return null;
-  return { userId, email };
+  const { auth } = await import("./next-auth");
+  const session = await auth();
+  if (!session?.user?.id || !session.user.email) return null;
+  return { userId: session.user.id, email: session.user.email };
 }
