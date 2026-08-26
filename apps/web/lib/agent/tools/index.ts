@@ -1,5 +1,8 @@
 import { ToolRegistry } from "../registry";
 import { courseFactsTool } from "./course-facts";
+import { grepSearchTool } from "./grep-search";
+import { bm25SearchTool } from "./bm25-search";
+import { vectorSearchTool } from "./vector-search";
 
 /**
  * The single place tools are wired up. Phase 1 agents add their tools HERE
@@ -7,5 +10,12 @@ import { courseFactsTool } from "./course-facts";
  * provider's tool specs stay in sync automatically.
  */
 export function buildRegistry(): ToolRegistry {
-  return new ToolRegistry().register(courseFactsTool);
+  return new ToolRegistry()
+    .register(courseFactsTool)
+    .register(grepSearchTool)
+    .register(bm25SearchTool)
+    .register(vectorSearchTool);
 }
+
+/** The retrieval agent's tool allowlist (§6) — used by runRetrievalAgent's subagent spec. */
+export const RETRIEVAL_TOOL_NAMES = ["grep_search", "bm25_search", "vector_search"] as const;

@@ -125,9 +125,31 @@ async function buildLayer3(
     // Status is surfaced so the retrieval agent gets a clear "not indexed"
     // signal and falls back to grep/BM25 rather than guessing (§6).
     ...(docs.length
-      ? docs.map((d) => `- [${d.kind}] ${d.title} — status: ${d.status}`)
+      ? docs.map((d) => {
+          const oneLiner = pointerOneLiner(d.pointerMd);
+          const base = `- [${d.kind}] ${d.title} — status: ${d.status}`;
+          return oneLiner ? `${base} — ${oneLiner}` : base;
+        })
       : ["(none uploaded yet)"]),
   ].join("\n");
+}
+
+/**
+ * A document's pointer file (§7, populated by Agent B) is a SKILL.md-styled
+ * markdown with title, topic summary, foreword-style summary and embedding
+ * status — never injected here in full (§7: "the pointer is what gets
+ * injected into layer 3; never the full content"). Layer 3 gets names plus
+ * one-line descriptions only, so this pulls just the first line of actual
+ * content out of it. Null until Agent B's pipeline populates it.
+ */
+function pointerOneLiner(pointerMd: string | null): string | null {
+  if (!pointerMd) return null;
+  const line = pointerMd
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith("#"));
+  if (!line) return null;
+  return line.length > 140 ? `${line.slice(0, 140)}…` : line;
 }
 
 async function buildLayer4Text(courseId: string | null, rung: HintRung | null): Promise<string> {
