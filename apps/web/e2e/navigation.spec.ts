@@ -30,15 +30,20 @@ test.describe("live-turn dependent navigation checks", () => {
     await page.goto("/");
     await newGeneralChat(page);
 
-    await sendMessage(page, "Just acknowledge this message in one short sentence.");
+    const messageText = "Just acknowledge this message in one short sentence.";
+    await sendMessage(page, messageText);
 
-    const beforeReload = await page.locator(".turn-user").last().innerText();
     const assistantBefore = await page.locator(".turn-assistant .markdown").last().innerText();
     expect(assistantBefore.length).toBeGreaterThan(0);
 
     await page.reload();
 
-    await expect(page.locator(".turn-user").last()).toHaveText(beforeReload, { timeout: 15_000 });
+    // toContainText rather than an exact round-tripped toHaveText: innerText()
+    // (used if you capture "before" text) and toHaveText's own normalization
+    // disagree on the whitespace between the "You" role label and the
+    // message paragraph, which is a comparison-method mismatch, not a
+    // real content difference.
+    await expect(page.locator(".turn-user").last()).toContainText(messageText, { timeout: 15_000 });
     await expect(page.locator(".turn-assistant .markdown").last()).not.toBeEmpty({ timeout: 15_000 });
   });
 
