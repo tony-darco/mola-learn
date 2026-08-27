@@ -48,16 +48,38 @@ export async function pullHint(page: Page): Promise<string | null> {
   return match?.[1] ?? null;
 }
 
-/** Creates a new general (course-less) chat via the sidebar and navigates to it. */
-export async function newGeneralChat(page: Page): Promise<string> {
-  await page.getByRole("button", { name: "+ New chat" }).click();
-  await page.waitForURL(/\/chats\/[0-9a-f-]+$/);
-  return page.url().split("/").pop()!;
+/**
+ * Clicks whatever creates a new chat and returns its id, read directly off
+ * the POST /api/chat JSON response rather than off the URL. `waitForURL`
+ * with a generic `/\/chats\/.../ ` pattern is a trap here: if we're already
+ * on SOME /chats/:id page (e.g. right after `newGeneralChat`), it resolves
+ * immediately against the CURRENT url instead of waiting for the new
+ * navigation — silently returning the previous chat's id.
+ */
+async function clickAndGetNewChatId(page: Page, action: () => Promise<void>): Promise<string> {
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => new URL(r.url()).pathname === "/api/chat" && r.request().method() === "POST"),
+    action(),
+  ]);
+  const { id } = (await response.json()) as { id: string };
+  await page.waitForURL(`**/chats/${id}`);
+  return id;
 }
 
-/** Creates a new chat scoped to (the first/only seeded) course, via the sidebar "+". */
+/** Creates a new general (course-less) chat via the sidebar and navigates to it. */
+export async function newGeneralChat(page: Page): Promise<string> {
+  return clickAndGetNewChatId(page, () => page.getByRole("button", { name: "+ New chat" }).click());
+}
+
+/**
+ * Creates a new chat scoped to (the first/only seeded) course, via the
+ * sidebar "+" next to the course section header.
+ *
+ * Note: that button's accessible name is its visible text, "+" — its
+ * `title="New chat in {course.name}"` attribute is only a tooltip, not part
+ * of the accname computation when the element already has text content — so
+ * this locates it by class rather than by an (incorrect) accessible name.
+ */
 export async function newCourseChat(page: Page): Promise<string> {
-  await page.getByRole("button", { name: /New chat in/i }).click();
-  await page.waitForURL(/\/chats\/[0-9a-f-]+$/);
-  return page.url().split("/").pop()!;
+  return clickAndGetNewChatId(page, () => page.locator(".sidebar-section-add").first().click());
 }
