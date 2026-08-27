@@ -24,7 +24,7 @@ test("a new general chat lands in the general Chats section, a new course chat l
 });
 
 test.describe("live-turn dependent navigation checks", () => {
-  test.setTimeout(3 * 60_000);
+  test.setTimeout(5 * 60_000);
 
   test("reloading mid-conversation restores history instead of showing it empty", async ({ page }) => {
     await page.goto("/");

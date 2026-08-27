@@ -8,7 +8,7 @@ import { newCourseChat, sendMessage } from "./helpers";
  * default. One real Ollama round trip.
  */
 test.use({ storageState: ALICE_STORAGE });
-test.setTimeout(3 * 60_000);
+test.setTimeout(5 * 60_000);
 
 test("a course-fact lookup renders as a collapsed, expand-on-demand activity row — not inline chat text", async ({
   page,

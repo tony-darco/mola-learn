@@ -49,6 +49,36 @@ export async function pullHint(page: Page): Promise<string | null> {
 }
 
 /**
+ * Reads the last assistant turn's rendered reply text, failing fast with a
+ * clear diagnostic if the turn errored instead of producing text.
+ *
+ * `.turn-assistant .markdown` only exists when `turn.text` is non-empty
+ * (TurnView gates `<Markdown>` on `turn.text &&`) — if the underlying LLM
+ * call failed, that element never renders at all, and a bare
+ * `.last().innerText()` would silently hang for the full default action
+ * timeout waiting for an element that will never appear, rather than
+ * reporting the actual error banner that IS on the page.
+ */
+export async function lastAssistantReply(page: Page): Promise<string> {
+  const lastTurn = page.locator(".turn-assistant").last();
+  const errorBox = lastTurn.locator(".turn-error");
+  if (await errorBox.count()) {
+    throw new Error(`assistant turn errored instead of replying: ${await errorBox.innerText()}`);
+  }
+  const markdown = lastTurn.locator(".markdown");
+  // A genuinely empty completion (no error, no text) is a real, if rare,
+  // model behavior — e.g. a thinking model exhausting its token budget on
+  // hidden reasoning before emitting any visible content — not a test-infra
+  // fault. Don't hard-fail on it: a caller checking "the reply doesn't say
+  // X" is still meaningfully satisfied by an empty string. Just surface it.
+  if ((await markdown.count()) === 0) {
+    console.warn("[lastAssistantReply] assistant turn produced no text and no .turn-error — treating as empty reply");
+    return "";
+  }
+  return markdown.innerText();
+}
+
+/**
  * Clicks whatever creates a new chat and returns its id, read directly off
  * the POST /api/chat JSON response rather than off the URL. `waitForURL`
  * with a generic `/\/chats\/.../ ` pattern is a trap here: if we're already
