@@ -1,0 +1,63 @@
+import type { Page, Response } from "@playwright/test";
+import { expect } from "@playwright/test";
+
+/**
+ * A real Ollama round trip on the target model (qwen3.5:27b, a "thinking"
+ * model — see CONTRACTS.md's resolved-issues section) can run well past
+ * Playwright's ~5s default. 120s is generous but bounded; actual observed
+ * timings are reported alongside each spec's results.
+ */
+export const LLM_TIMEOUT_MS = 120_000;
+
+/**
+ * Sends whatever `action` does (a Send-button click or a Hint-button click),
+ * waits for the underlying POST to `/api/chat/:id` to finish, and returns it
+ * so the caller can inspect the raw SSE body (e.g. for the `hint_state`
+ * event's exact rung, which the UI deliberately never displays as text).
+ *
+ * Waiting on the composer input's disabled→enabled cycle (rather than on any
+ * particular DOM text) is what makes this reliable regardless of how long
+ * the model takes to finish streaming.
+ */
+export async function triggerTurnAndWait(page: Page, action: () => Promise<void>): Promise<Response> {
+  const input = page.getByPlaceholder("Ask about your course…");
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (r) => /\/api\/chat\/[^/]+$/.test(new URL(r.url()).pathname) && r.request().method() === "POST",
+      { timeout: LLM_TIMEOUT_MS + 10_000 },
+    ),
+    action(),
+  ]);
+  await expect(input).toBeDisabled({ timeout: 5_000 });
+  await expect(input).toBeEnabled({ timeout: LLM_TIMEOUT_MS });
+  return response;
+}
+
+export async function sendMessage(page: Page, text: string): Promise<Response> {
+  const input = page.getByPlaceholder("Ask about your course…");
+  await input.fill(text);
+  return triggerTurnAndWait(page, () => page.getByRole("button", { name: "Send", exact: true }).click());
+}
+
+/** Pulls a hint and returns the rung the server actually served, read off the raw SSE body. */
+export async function pullHint(page: Page): Promise<string | null> {
+  const hintButton = page.getByRole("button", { name: /hint/i });
+  const response = await triggerTurnAndWait(page, () => hintButton.click());
+  const body = await response.text();
+  const match = body.match(/"type":"hint_state"[^}]*"rung":"(\w+)"/);
+  return match?.[1] ?? null;
+}
+
+/** Creates a new general (course-less) chat via the sidebar and navigates to it. */
+export async function newGeneralChat(page: Page): Promise<string> {
+  await page.getByRole("button", { name: "+ New chat" }).click();
+  await page.waitForURL(/\/chats\/[0-9a-f-]+$/);
+  return page.url().split("/").pop()!;
+}
+
+/** Creates a new chat scoped to (the first/only seeded) course, via the sidebar "+". */
+export async function newCourseChat(page: Page): Promise<string> {
+  await page.getByRole("button", { name: /New chat in/i }).click();
+  await page.waitForURL(/\/chats\/[0-9a-f-]+$/);
+  return page.url().split("/").pop()!;
+}

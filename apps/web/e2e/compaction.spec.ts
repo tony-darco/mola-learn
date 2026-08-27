@@ -1,0 +1,43 @@
+import { test, expect } from "@playwright/test";
+import { ALICE_STORAGE, COMPACTION_CHAT } from "./fixtures";
+
+/**
+ * Compaction (§4): older turns collapse behind a summary by default, the raw
+ * transcript is always retrievable, and nothing is destructively hidden.
+ *
+ * Seeded directly via the DB in global-setup.ts rather than generated through
+ * a real 16+ turn LLM conversation — 20 raw turns with a boundary at turn 12
+ * (COMPACT_THRESHOLD=16, KEEP_RAW=8 in lib/agent/compaction.ts), mirroring
+ * exactly what `maybeCompact` would have written.
+ */
+test.use({ storageState: ALICE_STORAGE });
+
+test("older turns collapse behind a summary by default, and the raw transcript expands without a request", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: COMPACTION_CHAT }).click();
+
+  const banner = page.locator(".compacted-banner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("12 earlier messages summarized");
+
+  // Collapsed by default: the earliest raw turns are not on the page...
+  await expect(page.locator(".turn", { hasText: "User message 1" })).toHaveCount(0);
+  // ...but the kept tail (last 8 raw turns) IS shown.
+  await expect(page.locator(".turn", { hasText: "User message 7" })).toBeVisible();
+  await expect(page.locator(".turn", { hasText: "Assistant reply 10" })).toBeVisible();
+
+  // The summary itself is retrievable on demand.
+  await banner.getByRole("button", { name: "Show summary" }).click();
+  await expect(banner).toContainText("process scheduling fundamentals");
+
+  // Nothing was destructively hidden — the raw folded turns expand in place.
+  await banner.getByRole("button", { name: "Show raw messages" }).click();
+  await expect(page.locator(".turn", { hasText: "User message 1" })).toBeVisible();
+  await expect(page.locator(".turn", { hasText: "Assistant reply 6" })).toBeVisible();
+
+  // And collapse again.
+  await banner.getByRole("button", { name: "Collapse raw messages" }).click();
+  await expect(page.locator(".turn", { hasText: "User message 1" })).toHaveCount(0);
+});
