@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./Sidebar";
-import { SettingsModal } from "./SettingsModal";
+import { SettingsModal, type SettingsSection } from "./SettingsModal";
 import { SearchModal } from "./SearchModal";
-import { RefreshSidebarContext } from "./shell-context";
+import { OpenSettingsContext, RefreshSidebarContext } from "./shell-context";
 import type { ChatSummary, CourseSummary } from "./types";
 
 type ListResponse = { chats: ChatSummary[]; courses: CourseSummary[] };
@@ -35,7 +35,13 @@ export function AppShell({
   const [courses, setCourses] = useState<CourseSummary[]>(initialCourses);
   const [newChatBusy, setNewChatBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [searchOpen, setSearchOpen] = useState(false);
+
+  const openSettings = useCallback((section?: SettingsSection) => {
+    setSettingsSection(section ?? "general");
+    setSettingsOpen(true);
+  }, []);
 
   const activeChatId = pathname.startsWith("/chats/") ? (pathname.split("/")[2] ?? "") : "";
 
@@ -78,21 +84,23 @@ export function AppShell({
 
   return (
     <RefreshSidebarContext.Provider value={refreshSidebar}>
-      <div className="chat-layout">
-        <Sidebar
-          userName={userName}
-          activeChatId={activeChatId}
-          chats={chats}
-          courses={courses}
-          onNewChat={handleNewChat}
-          newChatBusy={newChatBusy}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenSearch={() => setSearchOpen(true)}
-        />
-        {children}
-      </div>
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} chats={chats} courses={courses} />
+      <OpenSettingsContext.Provider value={openSettings}>
+        <div className="chat-layout">
+          <Sidebar
+            userName={userName}
+            activeChatId={activeChatId}
+            chats={chats}
+            courses={courses}
+            onNewChat={handleNewChat}
+            newChatBusy={newChatBusy}
+            onOpenSettings={openSettings}
+            onOpenSearch={() => setSearchOpen(true)}
+          />
+          {children}
+        </div>
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} initialSection={settingsSection} />
+        <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} chats={chats} courses={courses} />
+      </OpenSettingsContext.Provider>
     </RefreshSidebarContext.Provider>
   );
 }

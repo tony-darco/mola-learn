@@ -4,12 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Starts a chat scoped to this course. Creates the chat, then hands the
- * typed text to the chat page as a prefilled draft (`?draft=`) rather than
- * sending it itself — the student still presses Send there, so a slow
+ * Starts a chat, optionally scoped to a course. Creates the chat, then hands
+ * the typed text to the chat page as a prefilled draft (`?draft=`) rather
+ * than sending it itself — the student still presses Send there, so a slow
  * network doesn't silently drop their first message.
  */
-export function NewCourseChatComposer({ courseId }: { courseId: string }) {
+export function NewCourseChatComposer({ courseId, placeholder }: { courseId?: string; placeholder?: string }) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -21,7 +21,7 @@ export function NewCourseChatComposer({ courseId }: { courseId: string }) {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ courseId }),
+        body: JSON.stringify(courseId ? { courseId } : {}),
       });
       if (!res.ok) throw new Error(`failed to create chat (${res.status})`);
       const { id } = (await res.json()) as { id: string };
@@ -46,7 +46,7 @@ export function NewCourseChatComposer({ courseId }: { courseId: string }) {
               void start();
             }
           }}
-          placeholder="How can I help you today?"
+          placeholder={placeholder ?? "How can I help you today?"}
           disabled={busy}
           rows={1}
           className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"

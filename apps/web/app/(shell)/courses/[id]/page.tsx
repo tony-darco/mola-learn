@@ -8,6 +8,7 @@ import { NewCourseChatComposer } from "@/components/chat/NewCourseChatComposer";
 import { CourseSummaryField } from "@/components/chat/CourseSummaryField";
 import { CourseInstructionsField } from "@/components/chat/CourseInstructionsField";
 import { CourseMemoryField } from "@/components/chat/CourseMemoryField";
+import { CourseBreadcrumb } from "@/components/chat/CourseBreadcrumb";
 
 export const dynamic = "force-dynamic";
 
@@ -36,10 +37,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
   return (
     <main className="overflow-y-auto py-8 pl-4 pr-6">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-3 text-sm">
-          <Link href="/courses" className="text-accent no-underline">Courses</Link>
-          <span className="text-fg-muted"> / {course.name}</span>
-        </div>
+        <CourseBreadcrumb courseName={course.name} />
         <h1 className="mb-3 text-3xl font-semibold text-fg">
           {course.number ? `${course.number} — ` : ""}{course.name}
         </h1>

@@ -1,13 +1,15 @@
 "use server";
 
 import { eq } from "drizzle-orm";
-import { redirect } from "next/navigation";
 import { db, terms, users } from "@mola/db";
 import { requireSession } from "@/lib/auth/ownership";
 
 const YEARS = ["first", "second", "third", "fourth", "fifth"] as const;
 type Year = (typeof YEARS)[number];
 
+// Called directly (not via <form action>) from the settings modal's Profile
+// section, which stays open across the save — a redirect here would trigger
+// an implicit page refresh and close it.
 export async function updateProfileAction(formData: FormData) {
   const session = await requireSession();
   const name = String(formData.get("name") ?? "").trim();
@@ -18,7 +20,6 @@ export async function updateProfileAction(formData: FormData) {
   if (!name) throw new Error("name is required");
 
   await db.update(users).set({ name, university, year, updatedAt: new Date() }).where(eq(users.id, session.userId));
-  redirect("/profile");
 }
 
 /**
@@ -32,5 +33,4 @@ export async function addTermAction(formData: FormData) {
   if (!label) throw new Error("a term label is required");
 
   await db.insert(terms).values({ userId: session.userId, label });
-  redirect("/profile");
 }

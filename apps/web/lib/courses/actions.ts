@@ -18,6 +18,9 @@ async function requireOwnTerm(userId: string, termId: string) {
   return term;
 }
 
+// Called directly from the settings modal's Courses section (POST
+// /api/courses), not via <form action> — the modal stays open and shows the
+// new course in its list rather than navigating away.
 export async function createCourseAction(formData: FormData) {
   const session = await requireSession();
 
@@ -46,7 +49,7 @@ export async function createCourseAction(formData: FormData) {
     });
   }
 
-  redirect(`/courses/${course!.id}`);
+  return course!;
 }
 
 // These three actions back "no Save button" fields (CourseSummaryField,

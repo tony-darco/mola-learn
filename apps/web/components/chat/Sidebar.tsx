@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { signOutAction } from "@/lib/auth/actions";
 import { ChatLink } from "./ChatLink";
+import type { SettingsSection } from "./SettingsModal";
 import type { ChatSummary, CourseSummary } from "./types";
 
 // Placeholders for features not built yet — styled like the Courses/Chats
@@ -37,7 +38,7 @@ export function Sidebar({
   courses: CourseSummary[];
   onNewChat: (courseId: string | null) => void;
   newChatBusy: boolean;
-  onOpenSettings: () => void;
+  onOpenSettings: (section?: SettingsSection) => void;
   onOpenSearch: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -97,7 +98,7 @@ export function Sidebar({
     <aside className="relative flex h-full shrink-0 flex-col border-r border-border bg-sidebar" style={{ width }}>
       <div className="flex h-full flex-col gap-1 overflow-y-auto px-4 py-4">
         <div className="flex min-h-[25vh] flex-col">
-          <div className="px-1 text-xl font-semibold text-fg">Mola</div>
+          <Link href="/chat" className="px-1 text-xl font-semibold text-fg no-underline">Mola</Link>
 
           <button
             type="button"
@@ -159,20 +160,26 @@ export function Sidebar({
           <div className="relative border-t border-border pt-3">
             {menuOpen && (
               <div className="absolute bottom-full left-0 mb-1 w-full rounded-lg border border-border bg-surface p-1 shadow-lg">
-                <Link
-                  href="/courses"
-                  className="block rounded-md px-2.5 py-1.5 text-sm text-fg no-underline hover:bg-bg"
-                  onClick={() => setMenuOpen(false)}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenSettings("courses");
+                  }}
+                  className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
                 >
                   Courses
-                </Link>
-                <Link
-                  href="/profile"
-                  className="block rounded-md px-2.5 py-1.5 text-sm text-fg no-underline hover:bg-bg"
-                  onClick={() => setMenuOpen(false)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenSettings("profile");
+                  }}
+                  className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
                 >
                   Profile
-                </Link>
+                </button>
                 <button
                   type="button"
                   onClick={() => {

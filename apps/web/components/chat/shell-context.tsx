@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { SettingsSection } from "./SettingsModal";
 
 /**
  * Lets content nested under AppShell (a chat sending its first message, a
@@ -10,3 +11,12 @@ import { createContext, useContext } from "react";
 export const RefreshSidebarContext = createContext<() => void>(() => {});
 
 export const useRefreshSidebar = () => useContext(RefreshSidebarContext);
+
+/**
+ * Lets content nested under AppShell (the sidebar's own menu, a course
+ * page's breadcrumb) open the settings modal to a specific section without
+ * needing it passed down as a prop through every layer.
+ */
+export const OpenSettingsContext = createContext<(section?: SettingsSection) => void>(() => {});
+
+export const useOpenSettings = () => useContext(OpenSettingsContext);
