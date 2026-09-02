@@ -39,15 +39,22 @@
   --radius-md: 8px;
   --radius-lg: 12px;
 }
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; height: 100%; }
-body {
-  background: var(--bg);
-  color: var(--text);
-  font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+/* Plain element resets, in Tailwind's `base` layer so any utility class
+   (text-fg, etc.) reliably wins over them — an unlayered rule here would
+   otherwise beat a layered utility regardless of specificity, which is
+   exactly how sidebar links ended up stuck accent-colored despite
+   `text-fg`. */
+@layer base {
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { color: var(--accent); }
+  button { font: inherit; }
 }
-a { color: var(--accent); }
-button { font: inherit; }
 
 /* ── Chat layout ─────────────────────────────────────────────────────────── */
 

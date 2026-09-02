@@ -321,23 +321,21 @@ export function ChatShell(props: {
         newChatBusy={newChatBusy}
       />
 
-      <main className="chat-main">
-        <div className="flex items-center justify-end border-b border-border px-4 py-2">
-          <button
-            type="button"
-            className={`flex h-8 w-8 items-center justify-center rounded-md border text-sm ${
-              artifactPreviewOpen
-                ? "border-accent bg-accent text-accent-fg"
-                : "border-border bg-surface text-fg-muted hover:bg-bg"
-            }`}
-            onClick={() => setArtifactPreviewOpen((o) => !o)}
-            title="Preview artifact renderers (dev)"
-            aria-label="Preview artifact renderers"
-            aria-expanded={artifactPreviewOpen}
-          >
-            ⧉
-          </button>
-        </div>
+      <main className="chat-main relative">
+        <button
+          type="button"
+          className={`absolute right-4 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border text-sm ${
+            artifactPreviewOpen
+              ? "border-accent bg-accent text-accent-fg"
+              : "border-border bg-surface text-fg-muted hover:bg-bg"
+          }`}
+          onClick={() => setArtifactPreviewOpen((o) => !o)}
+          title="Preview artifact renderers (dev)"
+          aria-label="Preview artifact renderers"
+          aria-expanded={artifactPreviewOpen}
+        >
+          ⧉
+        </button>
 
         <div className="flex min-h-0 flex-1">
           <div className="chat-scroll" ref={scrollRef}>
@@ -379,39 +377,39 @@ export function ChatShell(props: {
 
         <div className="border-t border-border bg-surface px-6 py-4">
           <div className="chat-column">
-            <div className="rounded-2xl border border-border bg-bg p-2.5">
-              <div className="flex items-end gap-2">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => {
-                    setInput(e.target.value);
-                    e.target.style.height = "auto";
-                    e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void send(false);
-                    }
-                  }}
-                  placeholder="Ask about your course…"
-                  disabled={busy}
-                  rows={1}
-                  className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
-                />
-                <button
-                  type="button"
-                  className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:cursor-default disabled:opacity-50"
-                  onClick={() => void send(false)}
-                  disabled={busy || !input.trim()}
-                >
-                  Send
-                </button>
-              </div>
-              <div className="mt-2 flex items-center gap-3 px-1">
-                <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
-              </div>
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void send(false);
+                  }
+                }}
+                placeholder="Ask about your course…"
+                disabled={busy}
+                rows={1}
+                className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+                onClick={() => void send(false)}
+                disabled={busy || !input.trim()}
+                title="Send"
+                aria-label="Send"
+              >
+                ⏎
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-3 px-1">
+              <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
             </div>
           </div>
         </div>
