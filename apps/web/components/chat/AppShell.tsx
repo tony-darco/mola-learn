@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 import { SettingsModal } from "./SettingsModal";
+import { SearchModal } from "./SearchModal";
 import { RefreshSidebarContext } from "./shell-context";
 import type { ChatSummary, CourseSummary } from "./types";
 
@@ -34,6 +35,7 @@ export function AppShell({
   const [courses, setCourses] = useState<CourseSummary[]>(initialCourses);
   const [newChatBusy, setNewChatBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const activeChatId = pathname.startsWith("/chats/") ? (pathname.split("/")[2] ?? "") : "";
 
@@ -85,10 +87,12 @@ export function AppShell({
           onNewChat={handleNewChat}
           newChatBusy={newChatBusy}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSearch={() => setSearchOpen(true)}
         />
         {children}
       </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} chats={chats} courses={courses} />
     </RefreshSidebarContext.Provider>
   );
 }
