@@ -342,7 +342,9 @@ export function ChatMain({ chatId }: { chatId: string }) {
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
+                      // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
+                      // virtual keyboards report `key: "Unidentified"` for Enter/Return.
+                      if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
                         e.preventDefault();
                         void send(false);
                       }

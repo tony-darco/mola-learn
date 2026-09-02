@@ -21,8 +21,12 @@ export function CourseSummaryField({ courseId, summary }: { courseId: string; su
         rows={2}
         placeholder="What this course is about…"
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
+          console.log("DEBUG2", JSON.stringify({ key: e.key, keyCode: e.keyCode, which: e.which, shift: e.shiftKey }));
+          // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
+          // virtual keyboards report `key: "Unidentified"` for Enter/Return.
+          if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
             e.preventDefault();
+            console.log("DEBUG2 submitting");
             formRef.current?.requestSubmit();
           }
         }}

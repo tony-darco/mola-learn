@@ -35,7 +35,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
   ]);
 
   return (
-    <main className="overflow-y-auto px-6 py-8">
+    <main className="overflow-y-auto py-8 pl-4 pr-6">
       <div className="mx-auto max-w-4xl">
         <div className="mb-3 text-[13px]">
           <Link href="/courses" className="text-accent no-underline">Courses</Link>

@@ -39,7 +39,9 @@ export function NewCourseChatComposer({ courseId }: { courseId: string }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
+            // virtual keyboards report `key: "Unidentified"` for Enter/Return.
+            if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
               e.preventDefault();
               void start();
             }
