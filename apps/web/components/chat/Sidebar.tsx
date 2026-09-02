@@ -6,6 +6,10 @@ import { signOutAction } from "@/lib/auth/actions";
 import { ChatLink } from "./ChatLink";
 import type { ChatSummary, CourseSummary } from "./types";
 
+// Placeholders for features not built yet — styled like the Courses/Chats
+// section headers, sitting above Courses. Not wired to anything yet.
+const PLACEHOLDER_SECTIONS = ["Quizzes", "Flashcards", "Plan", "Schedule"] as const;
+
 /**
  * Courses are a navigational list here — clicking one goes to its own page
  * (course details, its recent chats, its memory/context), not an inline
@@ -39,42 +43,48 @@ export function Sidebar({
   const sortedChats = useMemo(() => [...chats].sort((a, b) => b.isPinned - a.isPinned), [chats]);
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-sidebar px-3 py-4">
-      <div className="px-1 text-base font-semibold text-fg">Mola</div>
+    <aside className="flex h-full w-72 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-sidebar px-3 py-4">
+      <div className="flex min-h-[25vh] flex-col">
+        <div className="px-1 text-xl font-semibold text-fg">Mola</div>
 
-      <button
-        type="button"
-        className="mb-2 mt-3 px-2.5 py-1 text-left text-sm text-fg hover:bg-surface disabled:cursor-default disabled:opacity-50"
-        onClick={() => onNewChat(null)}
-        disabled={newChatBusy}
-      >
-        + New chat
-      </button>
+        <button
+          type="button"
+          className="mb-2 mt-3 px-2.5 py-1.5 text-left text-base text-fg hover:bg-surface disabled:cursor-default disabled:opacity-50"
+          onClick={() => onNewChat(null)}
+          disabled={newChatBusy}
+        >
+          + New chat
+        </button>
 
-      {/* Reserved for other sidebar sections between "New chat" and
-          "Courses" — e.g. artifacts, saved items — as they're built. */}
-      <div className="mb-4" />
-
-      {courses.length > 0 && (
-        <div className="mb-6">
-          <div className="mb-1 px-1 py-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Courses</div>
-          {courses.map((course) => (
-            <Link
-              key={course.id}
-              href={`/courses/${course.id}`}
-              className="block truncate rounded-md px-2 py-1.5 text-[13.5px] text-fg no-underline hover:bg-surface"
-            >
-              {course.number ? `${course.number} ` : ""}
-              {course.name}
-            </Link>
+        <div className="mb-4 flex flex-col gap-0.5">
+          {PLACEHOLDER_SECTIONS.map((label) => (
+            <div key={label} className="px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">
+              {label}
+            </div>
           ))}
         </div>
-      )}
+
+        {courses.length > 0 && (
+          <div className="mb-6">
+            <div className="mb-1 px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">Courses</div>
+            {courses.map((course) => (
+              <Link
+                key={course.id}
+                href={`/courses/${course.id}`}
+                className="block truncate rounded-md px-2 py-1.5 text-sm text-fg no-underline hover:bg-surface"
+              >
+                {course.number ? `${course.number} ` : ""}
+                {course.name}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="mb-3">
-        <div className="mb-1 px-1 py-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Chats</div>
+        <div className="mb-1 px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">Chats</div>
         {sortedChats.length === 0 && (
-          <div className="px-1 py-1 text-xs text-fg-muted">No chats yet</div>
+          <div className="px-1 py-1 text-sm text-fg-muted">No chats yet</div>
         )}
         {sortedChats.map((chat) => (
           <ChatLink key={chat.id} chat={chat} active={chat.id === activeChatId} courses={courses} />
@@ -85,7 +95,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={onOpenSearch}
-          className="flex items-center gap-2 rounded-md px-1 py-1.5 text-left text-sm text-fg-muted hover:bg-surface hover:text-fg"
+          className="flex items-center gap-2 rounded-md px-1 py-1.5 text-left text-base text-fg-muted hover:bg-surface hover:text-fg"
         >
           <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="11" cy="11" r="7" />
