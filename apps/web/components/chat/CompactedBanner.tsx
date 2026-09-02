@@ -23,19 +23,23 @@ export function CompactedBanner({
   const [showSummary, setShowSummary] = useState(false);
 
   return (
-    <div className="compacted-banner">
-      <div className="compacted-banner-row">
+    <div className="mb-4 rounded-lg border border-border bg-surface px-3.5 py-2.5">
+      <div className="flex items-center gap-3 text-[13px] text-fg-muted">
         <span>
           {hiddenCount} earlier message{hiddenCount === 1 ? "" : "s"} summarized
         </span>
-        <button type="button" onClick={() => setShowSummary((s) => !s)}>
+        <button type="button" className="text-[13px] text-accent" onClick={() => setShowSummary((s) => !s)}>
           {showSummary ? "Hide summary" : "Show summary"}
         </button>
-        <button type="button" onClick={onToggle}>
+        <button type="button" className="text-[13px] text-accent" onClick={onToggle}>
           {expanded ? "Collapse raw messages" : "Show raw messages"}
         </button>
       </div>
-      {showSummary && <div className="compacted-summary">{boundary.summary}</div>}
+      {showSummary && (
+        <div className="mt-2 whitespace-pre-wrap border-t border-border pt-2 text-[13.5px] text-fg">
+          {boundary.summary}
+        </div>
+      )}
     </div>
   );
 }
