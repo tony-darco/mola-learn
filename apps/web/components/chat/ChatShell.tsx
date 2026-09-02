@@ -5,11 +5,9 @@ import { useRouter } from "next/navigation";
 import type { ArtifactRecord, HintRung } from "@mola/shared";
 import { canEscalate as computeCanEscalate } from "@/lib/context/hint-ladder";
 import { Sidebar } from "./Sidebar";
-import { Markdown } from "./Markdown";
-import { ActivityRow } from "./ActivityRow";
+import { TurnView } from "./TurnView";
 import { HintControl } from "./HintControl";
 import { CompactedBanner } from "./CompactedBanner";
-import { ArtifactBlock } from "./artifacts/ArtifactBlock";
 import { parseSSEChunk } from "./sse";
 import { ARTIFACT_FIXTURES } from "./fixtures";
 import type { ActivityEntry, ChatSummary, CompactionBoundary, CourseSummary, Turn } from "./types";
@@ -393,19 +391,6 @@ export function ChatShell(props: {
           </div>
         </div>
       </main>
-    </div>
-  );
-}
-
-function TurnView({ turn }: { turn: Turn }) {
-  return (
-    <div className={`turn turn-${turn.role}`}>
-      <div className="turn-role">{turn.role === "user" ? "You" : "Mola"}</div>
-      {turn.activity.map((a) => <ActivityRow key={a.id} entry={a} />)}
-      {turn.text && <Markdown text={turn.text} />}
-      {!turn.text && turn.streaming && <div className="turn-thinking">…</div>}
-      {turn.artifacts.map((a) => <ArtifactBlock key={a.id} artifact={a} />)}
-      {turn.error && <div className="turn-error">⚠ {turn.error}</div>}
     </div>
   );
 }
