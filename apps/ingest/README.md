@@ -96,7 +96,7 @@ path is exercised separately, below.
 Ran against the real 20-page syllabus at
 `/Users/tdarco/Documents/IS 300 Spring 2026_Syllabus_MAntero(1).pdf` through
 the full stack: real clamd, real LocalStack S3, real `mola_b` Postgres, real
-Ollama (`qwen3-embedding:0.6b` for embeddings, `qwen3.5:27b` for the pointer
+Ollama (`qwen3-embedding:0.6b` for embeddings, `qwen3.6:27b` for the pointer
 summary).
 
 ```bash
@@ -113,13 +113,15 @@ python -c "from ingest.worker import run_once; run_once()"
 | scan (clamd) + sniff + policy + move RAW->SAFE | a few seconds |
 | extract (PyMuPDF) + chunk + insert | well under 1s |
 | embed 37 chunks, 3 batches of 16 (`qwen3-embedding:0.6b`, CPU-only) | ~21s |
-| pointer summary (`qwen3.5:27b` chat call) | ~178s |
+| pointer summary (chat call) | ~178s |
 
-Note: this timing was measured against `qwen3.6:27b`, which was the default
-before checkpoint 1 unified the project on `qwen3.5:27b`. Re-measure if the
-exact number matters.
+Note: this timing was measured against `qwen3.6:27b`. The project briefly
+unified on `qwen3.5:27b` at checkpoint 1, then moved back to `qwen3.6:27b` when
+`qwen3.5:27b` was retired from the shared Ollama host. So this number is once
+again measured against the live default — but re-measure if the exact figure
+matters, since the underlying host/hardware may have changed too.
 
-The chat-model call dominates: `qwen3.5:27b` is a "thinking" model and burns
+The chat-model call dominates: `qwen3.6:27b` is a "thinking" model and burns
 most of its time on hidden reasoning tokens even for a short two-paragraph
 summary (confirmed separately — a trivial "say hello" prompt to the same
 model took ~80s end to end). This is a model-choice cost, not a pipeline

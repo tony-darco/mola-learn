@@ -2,7 +2,7 @@ import type { ProviderStreamEvent } from "@mola/shared";
 import type { CompletionRequest, LLMProvider, Message } from "./types";
 
 const HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
-export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "qwen3.5:27b";
+export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "qwen3.6:27b";
 
 /**
  * Inactivity timeout, not a total-duration cap.

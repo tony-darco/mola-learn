@@ -76,7 +76,7 @@ MOLA_RAW_BUCKET=mola-raw
 
 ```
 OLLAMA_HOST=http://192.168.1.17:11434
-MOLA_CHAT_MODEL=qwen3.5:27b
+MOLA_CHAT_MODEL=qwen3.6:27b
 ```
 
 That machine must be reachable and running Ollama. To use a different one, change
