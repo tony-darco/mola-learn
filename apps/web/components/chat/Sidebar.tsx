@@ -54,16 +54,12 @@ export function Sidebar({
         + New chat
       </button>
 
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search chats…"
-        className="mb-3 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
-      />
+      {/* Reserved for other sidebar sections between "New chat" and
+          "Courses" — e.g. artifacts, saved items — as they're built. */}
+      <div className="mb-4" />
 
       {courses.length > 0 && (
-        <div className="mb-3">
+        <div className="mb-6">
           <div className="mb-1 px-1 py-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Courses</div>
           {courses.map((course) => (
             <Link
@@ -80,6 +76,13 @@ export function Sidebar({
 
       <div className="mb-3">
         <div className="mb-1 px-1 py-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Chats</div>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search chats…"
+          className="mb-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
+        />
         {filteredChats.length === 0 && (
           <div className="px-1 py-1 text-xs text-fg-muted">{q ? "No matches" : "No chats yet"}</div>
         )}

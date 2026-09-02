@@ -49,6 +49,13 @@ export async function createCourseAction(formData: FormData) {
   redirect(`/courses/${course!.id}`);
 }
 
+// These three actions back "no Save button" fields (CourseSummaryField,
+// CourseInstructionsField, CourseMemoryField) that submit on Enter/blur while
+// the student is still on the page — deliberately no redirect() here. A
+// redirect back to the same URL triggers a full RSC refresh of the page,
+// which is exactly the visible "reload" flash those fields are meant to
+// avoid; the write lands quietly and the already-rendered form just keeps
+// its current value.
 export async function updateCourseSummaryAction(formData: FormData) {
   const session = await requireSession();
   const courseId = String(formData.get("courseId") ?? "");
@@ -56,7 +63,6 @@ export async function updateCourseSummaryAction(formData: FormData) {
 
   await requireOwned("course", courseId, session);
   await db.update(courses).set({ summary: summary || null }).where(eq(courses.id, courseId));
-  redirect(`/courses/${courseId}`);
 }
 
 export async function updateCourseInstructionsAction(formData: FormData) {
@@ -67,7 +73,6 @@ export async function updateCourseInstructionsAction(formData: FormData) {
 
   await requireOwned("course", courseId, session);
   await db.update(courses).set({ professor, instructions }).where(eq(courses.id, courseId));
-  redirect(`/courses/${courseId}`);
 }
 
 /** Panel 2 — per-course memory (§8). One row per course; upsert on the unique index. */
@@ -84,7 +89,6 @@ export async function updateCourseMemoryAction(formData: FormData) {
   } else if (content) {
     await db.insert(courseMemory).values({ userId: session.userId, courseId, content });
   }
-  redirect(`/courses/${courseId}`);
 }
 
 /** Panel 3 — Context. Same three-step handoff as course creation (§12). */

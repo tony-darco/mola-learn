@@ -1,15 +1,25 @@
 "use client";
 
-import { useRef } from "react";
 import { updateCourseSummaryAction } from "@/lib/courses/actions";
 
-/** The course description, up top — no Save button; Enter saves, Shift+Enter breaks a line. */
+/**
+ * The course description, up top — no Save button; Enter saves, Shift+Enter
+ * breaks a line, and losing focus saves too. Calls the server action
+ * directly as a function rather than binding it to a <form action>: a bound
+ * form action triggers an implicit page refresh on every submit (even
+ * without a redirect() in the action), which is exactly the visible reload
+ * this field is meant to avoid.
+ */
 export function CourseSummaryField({ courseId, summary }: { courseId: string; summary: string | null }) {
-  const formRef = useRef<HTMLFormElement>(null);
+  async function save(value: string) {
+    const fd = new FormData();
+    fd.set("courseId", courseId);
+    fd.set("summary", value);
+    await updateCourseSummaryAction(fd);
+  }
 
   return (
-    <form ref={formRef} action={updateCourseSummaryAction} className="flex flex-col items-start gap-1.5">
-      <input type="hidden" name="courseId" value={courseId} />
+    <div className="flex flex-col items-start gap-1.5">
       {summary === null && (
         <p className="text-[13px] text-fg-muted">
           Generating… the syllabus hasn&rsquo;t been processed into a summary yet.
@@ -25,14 +35,12 @@ export function CourseSummaryField({ courseId, summary }: { courseId: string; su
           // virtual keyboards report `key: "Unidentified"` for Enter/Return.
           if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
             e.preventDefault();
-            formRef.current?.requestSubmit();
+            void save(e.currentTarget.value);
           }
         }}
-        // Belt-and-suspenders: also save when focus leaves the field (click
-        // away, tab to the next field), not only on Enter.
-        onBlur={() => formRef.current?.requestSubmit()}
+        onBlur={(e) => void save(e.currentTarget.value)}
         className="w-full resize-none rounded-md border-none bg-transparent px-0 py-0 text-[15px] text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
       />
-    </form>
+    </div>
   );
 }
