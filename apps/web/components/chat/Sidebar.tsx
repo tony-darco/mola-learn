@@ -6,9 +6,11 @@ import { signOutAction } from "@/lib/auth/actions";
 import type { ChatSummary, CourseSummary } from "./types";
 
 /**
- * Conversation list, grouped the way §8 splits Courses (siloed) from Chats
- * (general): a chat with a courseId is grouped under its course; courseId
- * null lands in the flat "Chats" section.
+ * Courses are a navigational list here — clicking one goes to its own page
+ * (course details, its recent chats, its memory/context), not an inline
+ * sublist. Every chat, regardless of which course it belongs to, shows in
+ * one flat "Chats" list, newest first — that's also where a chat started
+ * from this sidebar lands.
  */
 export function Sidebar({
   userName,
@@ -26,25 +28,13 @@ export function Sidebar({
   newChatBusy: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [menuOpen, setMenuOpen] = useState(false);
 
   const q = query.trim().toLowerCase();
-  const matches = (chat: ChatSummary) => !q || chat.title.toLowerCase().includes(q);
-
-  const byCourse = new Map<string, ChatSummary[]>();
-  const general: ChatSummary[] = [];
-  for (const c of chats) {
-    if (c.courseId) {
-      const list = byCourse.get(c.courseId) ?? [];
-      list.push(c);
-      byCourse.set(c.courseId, list);
-    } else {
-      general.push(c);
-    }
-  }
-
-  const filteredGeneral = useMemo(() => general.filter(matches), [general, q]);
+  const filteredChats = useMemo(
+    () => chats.filter((c) => !q || c.title.toLowerCase().includes(q)),
+    [chats, q],
+  );
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-sidebar px-3 py-4">
@@ -67,56 +57,28 @@ export function Sidebar({
         className="mb-3 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
       />
 
-      {courses.map((course) => {
-        const courseChats = (byCourse.get(course.id) ?? []).filter(matches);
-        if (q && courseChats.length === 0) return null;
-        const isCollapsed = collapsed[course.id] ?? false;
-        return (
-          <div className="mb-3" key={course.id}>
-            <button
-              type="button"
-              className="mb-1 flex w-full items-center justify-between gap-2 rounded-md px-1 py-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted hover:text-fg"
-              onClick={() => setCollapsed((c) => ({ ...c, [course.id]: !isCollapsed }))}
-              aria-expanded={!isCollapsed}
+      {courses.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 px-1 py-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Courses</div>
+          {courses.map((course) => (
+            <Link
+              key={course.id}
+              href={`/courses/${course.id}`}
+              className="block truncate rounded-md px-2 py-1.5 text-[13.5px] text-fg no-underline hover:bg-surface"
             >
-              <span className="flex min-w-0 items-center gap-1.5 truncate">
-                <span className="text-[10px]">{isCollapsed ? "▸" : "▾"}</span>
-                <span className="truncate">
-                  {course.number ? `${course.number} ` : ""}
-                  {course.name}
-                </span>
-              </span>
-              <span
-                role="button"
-                tabIndex={0}
-                className="shrink-0 rounded px-1 text-sm normal-case text-fg-muted hover:text-accent"
-                title={`New chat in ${course.name}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!newChatBusy) onNewChat(course.id);
-                }}
-              >
-                +
-              </span>
-            </button>
-            {!isCollapsed && (
-              <>
-                {courseChats.length === 0 && <div className="px-1 py-1 text-xs text-fg-muted">No chats yet</div>}
-                {courseChats.map((chat) => (
-                  <ChatLink key={chat.id} chat={chat} active={chat.id === activeChatId} />
-                ))}
-              </>
-            )}
-          </div>
-        );
-      })}
+              {course.number ? `${course.number} ` : ""}
+              {course.name}
+            </Link>
+          ))}
+        </div>
+      )}
 
       <div className="mb-3">
         <div className="mb-1 px-1 py-0.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Chats</div>
-        {filteredGeneral.length === 0 && (
-          <div className="px-1 py-1 text-xs text-fg-muted">{q ? "No matches" : "No general chats yet"}</div>
+        {filteredChats.length === 0 && (
+          <div className="px-1 py-1 text-xs text-fg-muted">{q ? "No matches" : "No chats yet"}</div>
         )}
-        {filteredGeneral.map((chat) => (
+        {filteredChats.map((chat) => (
           <ChatLink key={chat.id} chat={chat} active={chat.id === activeChatId} />
         ))}
       </div>

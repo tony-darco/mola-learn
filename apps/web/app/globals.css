@@ -57,13 +57,6 @@ button { font: inherit; }
   height: 100vh;
 }
 
-/* Embedded in the course detail page, which draws its own chrome: no sidebar
-   column, and height comes from the container rather than the viewport. */
-.chat-layout--bare {
-  grid-template-columns: 1fr;
-  height: 100%;
-}
-
 .chat-main {
   display: flex;
   flex-direction: column;

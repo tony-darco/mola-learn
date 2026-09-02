@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { ArtifactRecord, HintRung } from "@mola/shared";
 import { canEscalate as computeCanEscalate } from "@/lib/context/hint-ladder";
 import { Sidebar } from "./Sidebar";
@@ -72,13 +72,9 @@ export function ChatShell(props: {
   initialCourseId: string | null;
   initialCourseName: string | null;
   userName: string;
-  /**
-   * The course detail page supplies its own nav chrome and chat-list pills, so
-   * it embeds this composer without a second sidebar.
-   */
-  hideSidebar?: boolean;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -141,6 +137,18 @@ export function ChatShell(props: {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [turns]);
+
+  // A chat started from a course page's composer (NewCourseChatComposer)
+  // carries the student's typed text over as a prefilled draft rather than
+  // sending it itself — this just fills the box; the student still presses
+  // Send.
+  useEffect(() => {
+    const draft = searchParams.get("draft");
+    if (!draft) return;
+    setInput(draft);
+    router.replace(`/chats/${props.chatId}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.chatId]);
 
   function patchTurn(id: string, fn: (t: Turn) => Turn) {
     setTurns((ts) => ts.map((t) => (t.id === id ? fn(t) : t)));
@@ -301,19 +309,17 @@ export function ChatShell(props: {
   const visibleTurns = boundaryIdx >= 0 ? turns.slice(boundaryIdx + 1) : turns;
 
   return (
-    <div className={props.hideSidebar ? "chat-layout chat-layout--bare" : "chat-layout"}>
-      {!props.hideSidebar && (
-        <Sidebar
-          userName={props.userName}
-          activeChatId={props.chatId}
-          chats={chats.length ? chats : [{ id: props.chatId, title: props.initialTitle, courseId: props.initialCourseId, updatedAt: "" }]}
-          courses={courses.length ? courses : props.initialCourseName && props.initialCourseId
-            ? [{ id: props.initialCourseId, name: props.initialCourseName, number: null }]
-            : []}
-          onNewChat={handleNewChat}
-          newChatBusy={newChatBusy}
-        />
-      )}
+    <div className="chat-layout">
+      <Sidebar
+        userName={props.userName}
+        activeChatId={props.chatId}
+        chats={chats.length ? chats : [{ id: props.chatId, title: props.initialTitle, courseId: props.initialCourseId, updatedAt: "" }]}
+        courses={courses.length ? courses : props.initialCourseName && props.initialCourseId
+          ? [{ id: props.initialCourseId, name: props.initialCourseName, number: null }]
+          : []}
+        onNewChat={handleNewChat}
+        newChatBusy={newChatBusy}
+      />
 
       <main className="chat-main">
         <div className="flex items-center justify-end border-b border-border px-4 py-2">

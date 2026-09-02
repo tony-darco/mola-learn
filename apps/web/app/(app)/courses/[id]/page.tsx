@@ -1,24 +1,24 @@
-import type { CSSProperties } from "react";
+import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { courseMemory, db, documents, scheduleItems } from "@mola/db";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
 import {
-  createCourseChatAction, listCourseChats, updateCourseInstructionsAction,
+  listCourseChats, updateCourseInstructionsAction,
   updateCourseMemoryAction, updateCourseSummaryAction, uploadCourseDocumentAction,
 } from "@/lib/courses/actions";
-import { Chat } from "@/app/chat";
+import { NewCourseChatComposer } from "@/components/chat/NewCourseChatComposer";
 
 export const dynamic = "force-dynamic";
 
-export default async function CourseDetailPage({
-  params, searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ chat?: string }>;
-}) {
+const card = "rounded-xl border border-border bg-surface p-4";
+const cardTitle = "mb-2 text-sm font-semibold text-fg";
+const input = "rounded-lg border border-border bg-bg px-2.5 py-2 text-[13px] text-fg placeholder:text-fg-muted";
+const smallButton =
+  "self-start rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg";
+
+export default async function CourseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: courseId } = await params;
-  const { chat: chatIdParam } = await searchParams;
   const session = await requireSession();
 
   const course = await requireOwned("course", courseId, session).catch((err) => {
@@ -33,32 +33,24 @@ export default async function CourseDetailPage({
     listCourseChats(session.userId, courseId),
   ]);
 
-  let selectedChat = courseChats[0] ?? null;
-  if (chatIdParam) {
-    const found = await requireOwned("chat", chatIdParam, session).catch((err) => {
-      if (err instanceof AuthzError) notFound();
-      throw err;
-    });
-    if (found.courseId !== courseId) notFound();
-    selectedChat = found;
-  }
-
   return (
     <div>
-      <div style={{ marginBottom: 4 }}>
-        <a href="/courses" style={{ fontSize: 13, color: "var(--accent)" }}>← Courses</a>
+      <div className="text-[13px]">
+        <Link href="/courses" className="text-accent no-underline">Courses</Link>
+        <span className="text-fg-muted"> / {course.name}</span>
       </div>
-      <h1 style={{ marginBottom: 4 }}>
+      <h1 className="mb-2 mt-1 text-2xl font-semibold text-fg">
         {course.number ? `${course.number} — ` : ""}{course.name}
       </h1>
 
-      <SummaryCard courseId={course.id} summary={course.summary} />
+      <SummaryText courseId={course.id} summary={course.summary} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 24, marginTop: 24, alignItems: "start" }}>
-        <div>
-          <ChatColumn courseId={course.id} chats={courseChats} selectedChat={selectedChat} userEmail={session.email} />
+      <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_340px]">
+        <div className="flex flex-col gap-4">
+          <NewCourseChatComposer courseId={course.id} />
+          <RecentChats chats={courseChats} />
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="flex flex-col gap-4">
           <InstructionsPanel courseId={course.id} professor={course.professor} instructions={course.instructions} />
           <MemoryPanel courseId={course.id} content={memory[0]?.content ?? ""} />
           <ContextPanel courseId={course.id} docs={docs} />
@@ -69,50 +61,27 @@ export default async function CourseDetailPage({
   );
 }
 
-// ── Main column ──────────────────────────────────────────────────────────────
+// ── Recent chats ─────────────────────────────────────────────────────────────
 
-function ChatColumn({
-  courseId, chats, selectedChat, userEmail,
-}: {
-  courseId: string;
-  chats: { id: string; title: string }[];
-  selectedChat: { id: string; title: string } | null;
-  userEmail: string;
-}) {
+function RecentChats({ chats }: { chats: { id: string; title: string; updatedAt: Date }[] }) {
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-        {chats.map((c) => (
-          <a
-            key={c.id}
-            href={`/courses/${courseId}?chat=${c.id}`}
-            style={{
-              padding: "6px 12px", borderRadius: 20, fontSize: 13, textDecoration: "none",
-              border: "1px solid var(--border)",
-              background: c.id === selectedChat?.id ? "var(--accent)" : "var(--panel)",
-              color: c.id === selectedChat?.id ? "#fff" : "var(--text)",
-            }}
-          >
-            {c.title}
-          </a>
-        ))}
-        <form action={createCourseChatAction}>
-          <input type="hidden" name="courseId" value={courseId} />
-          <button type="submit" style={{
-            padding: "6px 12px", borderRadius: 20, fontSize: 13, cursor: "pointer",
-            border: "1px dashed var(--border)", background: "none", color: "var(--muted)",
-          }}>
-            + New chat
-          </button>
-        </form>
-      </div>
-
-      {selectedChat ? (
-        <div style={{ height: "70vh", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-          <Chat chatId={selectedChat.id} chatTitle={selectedChat.title} courseName={null} userName={userEmail} hideSidebar />
-        </div>
+      <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Recent chats</div>
+      {chats.length === 0 ? (
+        <p className="px-1 text-[13.5px] text-fg-muted">No chats in this course yet — start one above.</p>
       ) : (
-        <p style={{ color: "var(--muted)" }}>No chats in this course yet — start one above.</p>
+        <div className="flex flex-col gap-1">
+          {chats.map((c) => (
+            <Link
+              key={c.id}
+              href={`/chats/${c.id}`}
+              className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-fg no-underline hover:bg-surface"
+            >
+              <span className="truncate text-[13.5px]">{c.title}</span>
+              <span className="shrink-0 text-xs text-fg-muted">{c.updatedAt.toLocaleDateString()}</span>
+            </Link>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -120,25 +89,22 @@ function ChatColumn({
 
 // ── Summary — §8: single source of truth, editable by the student ──────────
 
-function SummaryCard({ courseId, summary }: { courseId: string; summary: string | null }) {
+function SummaryText({ courseId, summary }: { courseId: string; summary: string | null }) {
   return (
-    <div style={card}>
-      <div style={cardTitle}>Summary</div>
+    <form action={updateCourseSummaryAction} className="flex flex-col items-start gap-1.5">
+      <input type="hidden" name="courseId" value={courseId} />
       {summary === null && (
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+        <p className="text-[13px] text-fg-muted">
           Generating… the syllabus hasn&rsquo;t been processed into a summary yet.
         </p>
       )}
-      <form action={updateCourseSummaryAction}>
-        <input type="hidden" name="courseId" value={courseId} />
-        <textarea
-          name="summary" defaultValue={summary ?? ""} rows={3}
-          placeholder="Generating…"
-          style={{ ...input, width: "100%", resize: "vertical", fontFamily: "inherit" }}
-        />
-        <button type="submit" style={{ ...smallButton, marginTop: 8 }}>Save summary</button>
-      </form>
-    </div>
+      <textarea
+        name="summary" defaultValue={summary ?? ""} rows={2}
+        placeholder="What this course is about…"
+        className="w-full resize-none rounded-md border-none bg-transparent px-0 py-0 text-[15px] text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
+      />
+      <button type="submit" className="text-xs text-accent">Save</button>
+    </form>
   );
 }
 
@@ -148,17 +114,17 @@ function InstructionsPanel({
   courseId, professor, instructions,
 }: { courseId: string; professor: string | null; instructions: string | null }) {
   return (
-    <div style={card}>
-      <div style={cardTitle}>Instructions</div>
-      <form action={updateCourseInstructionsAction} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className={card}>
+      <div className={cardTitle}>Instructions</div>
+      <form action={updateCourseInstructionsAction} className="flex flex-col gap-2">
         <input type="hidden" name="courseId" value={courseId} />
-        <input name="professor" defaultValue={professor ?? ""} placeholder="Professor" style={input} />
+        <input name="professor" defaultValue={professor ?? ""} placeholder="Professor" className={input} />
         <textarea
           name="instructions" defaultValue={instructions ?? ""} rows={4}
           placeholder="Tone, notation, what this professor tests on…"
-          style={{ ...input, resize: "vertical", fontFamily: "inherit" }}
+          className={`${input} resize-y font-sans`}
         />
-        <button type="submit" style={smallButton}>Save</button>
+        <button type="submit" className={smallButton}>Save</button>
       </form>
     </div>
   );
@@ -168,19 +134,17 @@ function InstructionsPanel({
 
 function MemoryPanel({ courseId, content }: { courseId: string; content: string }) {
   return (
-    <div style={card}>
-      <div style={cardTitle}>Memory</div>
-      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0 }}>
-        Scoped to this course only.
-      </p>
-      <form action={updateCourseMemoryAction} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className={card}>
+      <div className={cardTitle}>Memory</div>
+      <p className="mt-0 text-xs text-fg-muted">Scoped to this course only.</p>
+      <form action={updateCourseMemoryAction} className="flex flex-col gap-2">
         <input type="hidden" name="courseId" value={courseId} />
         <textarea
           name="content" defaultValue={content} rows={4}
           placeholder="Nothing recorded yet."
-          style={{ ...input, resize: "vertical", fontFamily: "inherit" }}
+          className={`${input} resize-y font-sans`}
         />
-        <button type="submit" style={smallButton}>Save</button>
+        <button type="submit" className={smallButton}>Save</button>
       </form>
     </div>
   );
@@ -189,38 +153,38 @@ function MemoryPanel({ courseId, content }: { courseId: string; content: string 
 // ── Panel 3 — Context ────────────────────────────────────────────────────────
 
 const STATUS_COLOR: Record<string, string> = {
-  scanning: "var(--muted)", extracting: "var(--muted)", indexing: "var(--muted)",
-  ready: "var(--accent)", failed: "#c0392b", quarantined: "#c0392b",
+  scanning: "text-fg-muted", extracting: "text-fg-muted", indexing: "text-fg-muted",
+  ready: "text-accent", failed: "text-red-600 dark:text-red-400", quarantined: "text-red-600 dark:text-red-400",
 };
 
 function ContextPanel({
   courseId, docs,
 }: { courseId: string; docs: { id: string; title: string; kind: string; status: string }[] }) {
   return (
-    <div style={card}>
-      <div style={cardTitle}>Context</div>
+    <div className={card}>
+      <div className={cardTitle}>Context</div>
       {docs.length === 0 ? (
-        <p style={{ fontSize: 13, color: "var(--muted)" }}>No documents yet.</p>
+        <p className="text-[13px] text-fg-muted">No documents yet.</p>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: "0 0 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <ul className="mb-3 flex list-none flex-col gap-1.5 p-0">
           {docs.map((d) => (
-            <li key={d.id} style={{ fontSize: 13, display: "flex", justifyContent: "space-between", gap: 8 }}>
-              <span>{d.title}</span>
-              <span style={{ color: STATUS_COLOR[d.status] ?? "var(--muted)", fontSize: 12 }}>{d.status}</span>
+            <li key={d.id} className="flex items-center justify-between gap-2 text-[13px] text-fg">
+              <span className="truncate">{d.title}</span>
+              <span className={`shrink-0 text-xs ${STATUS_COLOR[d.status] ?? "text-fg-muted"}`}>{d.status}</span>
             </li>
           ))}
         </ul>
       )}
-      <form action={uploadCourseDocumentAction} encType="multipart/form-data" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <form action={uploadCourseDocumentAction} className="flex flex-col gap-2">
         <input type="hidden" name="courseId" value={courseId} />
-        <select name="kind" defaultValue="student_notes" style={input}>
+        <select name="kind" defaultValue="student_notes" className={input}>
           <option value="textbook">Textbook</option>
           <option value="lecture_transcript">Lecture transcript</option>
           <option value="student_notes">My notes</option>
           <option value="syllabus">Syllabus</option>
         </select>
-        <input name="file" type="file" required style={input} />
-        <button type="submit" style={smallButton}>Upload</button>
+        <input name="file" type="file" required className={input} />
+        <button type="submit" className={smallButton}>Upload</button>
       </form>
     </div>
   );
@@ -230,16 +194,14 @@ function ContextPanel({
 
 function SchedulePanel({ items }: { items: { id: string; title: string; dueAt: Date | null }[] }) {
   return (
-    <div style={card}>
-      <div style={cardTitle}>Schedule</div>
+    <div className={card}>
+      <div className={cardTitle}>Schedule</div>
       {items.length === 0 ? (
-        <p style={{ fontSize: 13, color: "var(--muted)" }}>
-          Nothing yet — the calendar integration isn&rsquo;t wired up.
-        </p>
+        <p className="text-[13px] text-fg-muted">Nothing yet — the calendar integration isn&rsquo;t wired up.</p>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+        <ul className="flex list-none flex-col gap-1.5 p-0">
           {items.map((i) => (
-            <li key={i.id} style={{ fontSize: 13 }}>
+            <li key={i.id} className="text-[13px] text-fg">
               {i.title}{i.dueAt ? ` — ${i.dueAt.toLocaleDateString()}` : ""}
             </li>
           ))}
@@ -248,19 +210,3 @@ function SchedulePanel({ items }: { items: { id: string; title: string; dueAt: D
     </div>
   );
 }
-
-// ── Shared styles ────────────────────────────────────────────────────────────
-
-const card: CSSProperties = {
-  border: "1px solid var(--border)", borderRadius: 12, padding: 16, background: "var(--panel)",
-};
-const cardTitle: CSSProperties = { fontWeight: 600, marginBottom: 8, fontSize: 14 };
-const input: CSSProperties = {
-  padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)",
-  background: "var(--bg)", color: "var(--text)", font: "inherit", fontSize: 13,
-};
-const smallButton: CSSProperties = {
-  padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)",
-  background: "var(--accent)", color: "#fff", cursor: "pointer", font: "inherit",
-  fontSize: 13, fontWeight: 600, alignSelf: "flex-start",
-};

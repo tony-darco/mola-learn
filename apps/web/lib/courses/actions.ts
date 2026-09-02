@@ -101,20 +101,6 @@ export async function uploadCourseDocumentAction(formData: FormData) {
   redirect(`/courses/${courseId}`);
 }
 
-/** Reuses the Phase 0 chat thin slice — a chat scoped to this course (§8). */
-export async function createCourseChatAction(formData: FormData) {
-  const session = await requireSession();
-  const courseId = String(formData.get("courseId") ?? "");
-  await requireOwned("course", courseId, session);
-
-  const [chat] = await db
-    .insert(chats)
-    .values({ userId: session.userId, courseId, title: "New chat" })
-    .returning();
-
-  redirect(`/courses/${courseId}?chat=${chat!.id}`);
-}
-
 export async function listCourseChats(userId: string, courseId: string) {
   return db
     .select()
