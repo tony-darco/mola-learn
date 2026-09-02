@@ -20,6 +20,7 @@ export function Sidebar({
   courses,
   onNewChat,
   newChatBusy,
+  onOpenSettings,
 }: {
   userName: string;
   activeChatId: string;
@@ -27,6 +28,7 @@ export function Sidebar({
   courses: CourseSummary[];
   onNewChat: (courseId: string | null) => void;
   newChatBusy: boolean;
+  onOpenSettings: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -45,7 +47,7 @@ export function Sidebar({
 
       <button
         type="button"
-        className="mb-2 mt-3 rounded-lg border border-dashed border-border px-2.5 py-2 text-left text-sm text-fg hover:bg-surface disabled:cursor-default disabled:opacity-50"
+        className="mb-2 mt-3 px-2.5 py-1 text-left text-sm text-fg hover:bg-surface disabled:cursor-default disabled:opacity-50"
         onClick={() => onNewChat(null)}
         disabled={newChatBusy}
       >
@@ -103,13 +105,16 @@ export function Sidebar({
             >
               Profile
             </Link>
-            <Link
-              href="/settings"
-              className="block rounded-md px-2.5 py-1.5 text-sm text-fg no-underline hover:bg-bg"
-              onClick={() => setMenuOpen(false)}
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onOpenSettings();
+              }}
+              className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
             >
               Settings
-            </Link>
+            </button>
             <form action={signOutAction}>
               <button
                 type="submit"
