@@ -35,7 +35,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
   ]);
 
   return (
-    <main className="overflow-y-auto py-8 pl-4 pr-6">
+    <main className="flex-1 min-w-0 overflow-y-auto py-8 pl-4 pr-6">
       <div className="mx-auto max-w-7xl">
         <CourseBreadcrumb courseName={course.name} />
         <h1 className="mb-3 text-3xl font-semibold text-fg">
