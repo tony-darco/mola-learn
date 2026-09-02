@@ -5,9 +5,10 @@ import { courseMemory, db, documents, scheduleItems } from "@mola/db";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
 import {
   listCourseChats, updateCourseInstructionsAction,
-  updateCourseMemoryAction, updateCourseSummaryAction, uploadCourseDocumentAction,
+  updateCourseMemoryAction, uploadCourseDocumentAction,
 } from "@/lib/courses/actions";
 import { NewCourseChatComposer } from "@/components/chat/NewCourseChatComposer";
+import { CourseSummaryField } from "@/components/chat/CourseSummaryField";
 
 export const dynamic = "force-dynamic";
 
@@ -34,30 +35,32 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
   ]);
 
   return (
-    <div>
-      <div className="text-[13px]">
-        <Link href="/courses" className="text-accent no-underline">Courses</Link>
-        <span className="text-fg-muted"> / {course.name}</span>
-      </div>
-      <h1 className="mb-2 mt-1 text-2xl font-semibold text-fg">
-        {course.number ? `${course.number} — ` : ""}{course.name}
-      </h1>
-
-      <SummaryText courseId={course.id} summary={course.summary} />
-
-      <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_340px]">
-        <div className="flex flex-col gap-4">
-          <NewCourseChatComposer courseId={course.id} />
-          <RecentChats chats={courseChats} />
+    <main className="overflow-y-auto p-8">
+      <div className="mx-auto max-w-4xl">
+        <div className="text-[13px]">
+          <Link href="/courses" className="text-accent no-underline">Courses</Link>
+          <span className="text-fg-muted"> / {course.name}</span>
         </div>
-        <div className="flex flex-col gap-4">
-          <InstructionsPanel courseId={course.id} professor={course.professor} instructions={course.instructions} />
-          <MemoryPanel courseId={course.id} content={memory[0]?.content ?? ""} />
-          <ContextPanel courseId={course.id} docs={docs} />
-          <SchedulePanel items={schedule} />
+        <h1 className="mb-2 mt-1 text-2xl font-semibold text-fg">
+          {course.number ? `${course.number} — ` : ""}{course.name}
+        </h1>
+
+        <CourseSummaryField courseId={course.id} summary={course.summary} />
+
+        <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_340px]">
+          <div className="flex flex-col gap-4">
+            <NewCourseChatComposer courseId={course.id} />
+            <RecentChats chats={courseChats} />
+          </div>
+          <div className="flex flex-col gap-4">
+            <InstructionsPanel courseId={course.id} professor={course.professor} instructions={course.instructions} />
+            <MemoryPanel courseId={course.id} content={memory[0]?.content ?? ""} />
+            <ContextPanel courseId={course.id} docs={docs} />
+            <SchedulePanel items={schedule} />
+          </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -84,27 +87,6 @@ function RecentChats({ chats }: { chats: { id: string; title: string; updatedAt:
         </div>
       )}
     </div>
-  );
-}
-
-// ── Summary — §8: single source of truth, editable by the student ──────────
-
-function SummaryText({ courseId, summary }: { courseId: string; summary: string | null }) {
-  return (
-    <form action={updateCourseSummaryAction} className="flex flex-col items-start gap-1.5">
-      <input type="hidden" name="courseId" value={courseId} />
-      {summary === null && (
-        <p className="text-[13px] text-fg-muted">
-          Generating… the syllabus hasn&rsquo;t been processed into a summary yet.
-        </p>
-      )}
-      <textarea
-        name="summary" defaultValue={summary ?? ""} rows={2}
-        placeholder="What this course is about…"
-        className="w-full resize-none rounded-md border-none bg-transparent px-0 py-0 text-[15px] text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
-      />
-      <button type="submit" className="text-xs text-accent">Save</button>
-    </form>
   );
 }
 

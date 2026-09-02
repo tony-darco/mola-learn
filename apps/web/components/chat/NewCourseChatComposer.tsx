@@ -51,11 +51,13 @@ export function NewCourseChatComposer({ courseId }: { courseId: string }) {
         />
         <button
           type="button"
-          className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:cursor-default disabled:opacity-50"
+          className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
           onClick={() => void start()}
           disabled={busy}
+          title="Start chat"
+          aria-label="Start chat"
         >
-          {busy ? "Starting…" : "Start chat"}
+          ⏎
         </button>
       </div>
     </div>

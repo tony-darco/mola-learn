@@ -4,13 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ArtifactRecord, HintRung } from "@mola/shared";
 import { canEscalate as computeCanEscalate } from "@/lib/context/hint-ladder";
-import { Sidebar } from "./Sidebar";
 import { TurnView } from "./TurnView";
 import { HintControl } from "./HintControl";
 import { CompactedBanner } from "./CompactedBanner";
 import { ArtifactPreviewPanel } from "./ArtifactPreviewPanel";
 import { parseSSEChunk } from "./sse";
-import type { ActivityEntry, ChatSummary, CompactionBoundary, CourseSummary, Turn } from "./types";
+import { useRefreshSidebar } from "./shell-context";
+import type { ActivityEntry, CompactionBoundary, Turn } from "./types";
 
 type HistoryResponse = {
   chat: { id: string; title: string; courseId: string | null };
@@ -22,8 +22,6 @@ type HistoryResponse = {
   artifacts: ArtifactRecord[];
   compactionBoundary: CompactionBoundary | null;
 };
-
-type ListResponse = { chats: ChatSummary[]; courses: CourseSummary[] };
 
 function turnsFromHistory(data: HistoryResponse): Turn[] {
   const rows = data.messages
@@ -66,15 +64,15 @@ function lastRung(turns: Turn[]): HintRung | null {
   return null;
 }
 
-export function ChatShell(props: {
-  chatId: string;
-  initialTitle: string;
-  initialCourseId: string | null;
-  initialCourseName: string | null;
-  userName: string;
-}) {
+/**
+ * The main content pane for a single chat — messages, composer, artifact
+ * preview. Rendered as `children` inside the persistent AppShell, which owns
+ * the sidebar; this component has no sidebar of its own.
+ */
+export function ChatMain({ chatId }: { chatId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const refreshSidebar = useRefreshSidebar();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -84,9 +82,6 @@ export function ChatShell(props: {
   const [boundary, setBoundary] = useState<CompactionBoundary | null>(null);
   const [expandedCompacted, setExpandedCompacted] = useState(false);
   const [input, setInput] = useState("");
-  const [chats, setChats] = useState<ChatSummary[]>([]);
-  const [courses, setCourses] = useState<CourseSummary[]>([]);
-  const [newChatBusy, setNewChatBusy] = useState(false);
   const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -98,7 +93,7 @@ export function ChatShell(props: {
     setLoading(true);
     setLoadError(null);
 
-    fetch(`/api/chat/${props.chatId}`)
+    fetch(`/api/chat/${chatId}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`failed to load chat (${res.status})`);
         return (await res.json()) as HistoryResponse;
@@ -121,18 +116,7 @@ export function ChatShell(props: {
       });
 
     return () => { cancelled = true; };
-  }, [props.chatId]);
-
-  useEffect(() => {
-    fetch("/api/chat")
-      .then((res) => (res.ok ? (res.json() as Promise<ListResponse>) : null))
-      .then((data) => {
-        if (!data) return;
-        setChats(data.chats);
-        setCourses(data.courses);
-      })
-      .catch(() => { /* sidebar list is a convenience, not load-bearing */ });
-  }, [props.chatId, turns.length]);
+  }, [chatId]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -146,16 +130,16 @@ export function ChatShell(props: {
     const draft = searchParams.get("draft");
     if (!draft) return;
     setInput(draft);
-    router.replace(`/chats/${props.chatId}`);
+    router.replace(`/chats/${chatId}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.chatId]);
+  }, [chatId]);
 
   function patchTurn(id: string, fn: (t: Turn) => Turn) {
     setTurns((ts) => ts.map((t) => (t.id === id ? fn(t) : t)));
   }
 
   async function refetchHistory() {
-    const res = await fetch(`/api/chat/${props.chatId}`);
+    const res = await fetch(`/api/chat/${chatId}`);
     if (!res.ok) return;
     const data = (await res.json()) as HistoryResponse;
     setTurns(turnsFromHistory(data));
@@ -187,7 +171,7 @@ export function ChatShell(props: {
     ]);
 
     try {
-      const res = await fetch(`/api/chat/${props.chatId}`, {
+      const res = await fetch(`/api/chat/${chatId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: text, pullHint }),
@@ -277,6 +261,9 @@ export function ChatShell(props: {
         // summary text client-side.
         await refetchHistory();
       }
+      // The chat's title may have just changed from "New chat" to something
+      // real (or moved position by recency) — let the sidebar know.
+      refreshSidebar();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       patchTurn(assistantTurnId, (t) => ({ ...t, error: message, streaming: false }));
@@ -285,137 +272,105 @@ export function ChatShell(props: {
     }
   }
 
-  async function handleNewChat(courseId: string | null) {
-    if (newChatBusy) return;
-    setNewChatBusy(true);
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ courseId }),
-      });
-      if (!res.ok) throw new Error(`failed to create chat (${res.status})`);
-      const { id } = (await res.json()) as { id: string };
-      router.push(`/chats/${id}`);
-    } catch {
-      // Sidebar action failing is non-fatal — the user stays where they are.
-    } finally {
-      setNewChatBusy(false);
-    }
-  }
-
   const boundaryIdx = boundary ? turns.findIndex((t) => t.id === boundary.upToMessageId) : -1;
   const hiddenTurns = boundaryIdx >= 0 ? turns.slice(0, boundaryIdx + 1) : [];
   const visibleTurns = boundaryIdx >= 0 ? turns.slice(boundaryIdx + 1) : turns;
 
   return (
-    <div className="chat-layout">
-      <Sidebar
-        userName={props.userName}
-        activeChatId={props.chatId}
-        chats={chats.length ? chats : [{ id: props.chatId, title: props.initialTitle, courseId: props.initialCourseId, updatedAt: "" }]}
-        courses={courses.length ? courses : props.initialCourseName && props.initialCourseId
-          ? [{ id: props.initialCourseId, name: props.initialCourseName, number: null }]
-          : []}
-        onNewChat={handleNewChat}
-        newChatBusy={newChatBusy}
-      />
+    <main className="chat-main relative">
+      <button
+        type="button"
+        className={`absolute right-4 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border text-sm ${
+          artifactPreviewOpen
+            ? "border-accent bg-accent text-accent-fg"
+            : "border-border bg-surface text-fg-muted hover:bg-bg"
+        }`}
+        onClick={() => setArtifactPreviewOpen((o) => !o)}
+        title="Preview artifact renderers (dev)"
+        aria-label="Preview artifact renderers"
+        aria-expanded={artifactPreviewOpen}
+      >
+        ⧉
+      </button>
 
-      <main className="chat-main relative">
-        <button
-          type="button"
-          className={`absolute right-4 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border text-sm ${
-            artifactPreviewOpen
-              ? "border-accent bg-accent text-accent-fg"
-              : "border-border bg-surface text-fg-muted hover:bg-bg"
-          }`}
-          onClick={() => setArtifactPreviewOpen((o) => !o)}
-          title="Preview artifact renderers (dev)"
-          aria-label="Preview artifact renderers"
-          aria-expanded={artifactPreviewOpen}
-        >
-          ⧉
-        </button>
+      <div className="flex min-h-0 flex-1">
+        <div className="chat-scroll" ref={scrollRef}>
+          <div className="chat-column">
+            {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
+            {loadError && (
+              <div className="py-2 text-red-700 dark:text-red-400">
+                Couldn&apos;t load this conversation: {loadError}
+              </div>
+            )}
 
-        <div className="flex min-h-0 flex-1">
-          <div className="chat-scroll" ref={scrollRef}>
-            <div className="chat-column">
-              {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
-              {loadError && (
-                <div className="py-2 text-red-700 dark:text-red-400">
-                  Couldn&apos;t load this conversation: {loadError}
-                </div>
-              )}
+            {!loading && !loadError && turns.length === 0 && (
+              <p className="text-fg-muted">
+                Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
+              </p>
+            )}
 
-              {!loading && !loadError && turns.length === 0 && (
-                <p className="text-fg-muted">
-                  Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
-                </p>
-              )}
+            {!loading && !loadError && hiddenTurns.length > 0 && boundary && (
+              <CompactedBanner
+                boundary={boundary}
+                hiddenCount={hiddenTurns.length}
+                expanded={expandedCompacted}
+                onToggle={() => setExpandedCompacted((e) => !e)}
+              />
+            )}
 
-              {!loading && !loadError && hiddenTurns.length > 0 && boundary && (
-                <CompactedBanner
-                  boundary={boundary}
-                  hiddenCount={hiddenTurns.length}
-                  expanded={expandedCompacted}
-                  onToggle={() => setExpandedCompacted((e) => !e)}
-                />
-              )}
+            {!loading && !loadError && expandedCompacted && hiddenTurns.map((t) => (
+              <TurnView key={t.id} turn={t} />
+            ))}
 
-              {!loading && !loadError && expandedCompacted && hiddenTurns.map((t) => (
-                <TurnView key={t.id} turn={t} />
-              ))}
-
-              {!loading && !loadError && visibleTurns.map((t) => (
-                <TurnView key={t.id} turn={t} />
-              ))}
-            </div>
+            {!loading && !loadError && visibleTurns.map((t) => (
+              <TurnView key={t.id} turn={t} />
+            ))}
           </div>
-
-          {artifactPreviewOpen && <ArtifactPreviewPanel onClose={() => setArtifactPreviewOpen(false)} />}
         </div>
 
-        <div className="px-6 py-4">
-          <div className="chat-column">
-            <div className="rounded-2xl border border-border bg-surface p-2.5">
-              <div className="flex items-end gap-2">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => {
-                    setInput(e.target.value);
-                    e.target.style.height = "auto";
-                    e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void send(false);
-                    }
-                  }}
-                  placeholder="Ask about your course…"
-                  disabled={busy}
-                  rows={1}
-                  className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
-                />
-                <div className="flex shrink-0 items-center gap-2">
-                  <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
-                    onClick={() => void send(false)}
-                    disabled={busy || !input.trim()}
-                    title="Send"
-                    aria-label="Send"
-                  >
-                    ⏎
-                  </button>
-                </div>
+        {artifactPreviewOpen && <ArtifactPreviewPanel onClose={() => setArtifactPreviewOpen(false)} />}
+      </div>
+
+      <div className="px-6 py-4">
+        <div className="chat-column">
+          <div className="rounded-2xl border border-border bg-surface p-2.5">
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void send(false);
+                  }
+                }}
+                placeholder="Ask about your course…"
+                disabled={busy}
+                rows={1}
+                className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+              />
+              <div className="flex shrink-0 items-center gap-2">
+                <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
+                <button
+                  type="button"
+                  className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+                  onClick={() => void send(false)}
+                  disabled={busy || !input.trim()}
+                  title="Send"
+                  aria-label="Send"
+                >
+                  ⏎
+                </button>
               </div>
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
