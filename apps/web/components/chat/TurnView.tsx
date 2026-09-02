@@ -25,7 +25,7 @@ export function TurnView({ turn }: { turn: Turn }) {
 
         {turn.error && (
           <div className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-[13.5px] text-red-700 dark:text-red-400">
-            ⚠ {turn.error}
+            {turn.error}
           </div>
         )}
       </div>

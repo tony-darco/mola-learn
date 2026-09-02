@@ -375,41 +375,43 @@ export function ChatShell(props: {
           {artifactPreviewOpen && <ArtifactPreviewPanel onClose={() => setArtifactPreviewOpen(false)} />}
         </div>
 
-        <div className="border-t border-border bg-surface px-6 py-4">
+        <div className="px-6 py-4">
           <div className="chat-column">
-            <div className="flex items-end gap-2">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => {
-                  setInput(e.target.value);
-                  e.target.style.height = "auto";
-                  e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void send(false);
-                  }
-                }}
-                placeholder="Ask about your course…"
-                disabled={busy}
-                rows={1}
-                className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
-              />
-              <button
-                type="button"
-                className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
-                onClick={() => void send(false)}
-                disabled={busy || !input.trim()}
-                title="Send"
-                aria-label="Send"
-              >
-                ⏎
-              </button>
-            </div>
-            <div className="mt-2 flex items-center gap-3 px-1">
-              <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
+            <div className="rounded-2xl border border-border bg-surface p-2.5">
+              <div className="flex items-end gap-2">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    e.target.style.height = "auto";
+                    e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void send(false);
+                    }
+                  }}
+                  placeholder="Ask about your course…"
+                  disabled={busy}
+                  rows={1}
+                  className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+                />
+                <div className="flex shrink-0 items-center gap-2">
+                  <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+                    onClick={() => void send(false)}
+                    disabled={busy || !input.trim()}
+                    title="Send"
+                    aria-label="Send"
+                  >
+                    ⏎
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
