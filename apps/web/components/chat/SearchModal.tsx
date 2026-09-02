@@ -47,15 +47,15 @@ export function SearchModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-32 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/25 pt-32 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[60vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
+        className="flex max-h-[65vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <svg className="h-4 w-4 shrink-0 text-fg-muted" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+          <svg className="h-5 w-5 shrink-0 text-fg-muted" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="11" cy="11" r="7" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
@@ -64,24 +64,24 @@ export function SearchModal({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats and courses…"
-            className="flex-1 bg-transparent text-fg placeholder:text-fg-muted focus:outline-none"
+            className="flex-1 bg-transparent text-lg text-fg placeholder:text-fg-muted focus:outline-none"
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex-1 overflow-y-auto p-3">
           {matchedCourses.length === 0 && matchedChats.length === 0 && (
-            <div className="px-2 py-6 text-center text-sm text-fg-muted">No results</div>
+            <div className="px-2 py-8 text-center text-base text-fg-muted">No results</div>
           )}
 
           {matchedCourses.length > 0 && (
-            <div className="mb-2">
-              <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Courses</div>
+            <div className="mb-3">
+              <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Courses</div>
               {matchedCourses.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   onClick={() => go(`/courses/${c.id}`)}
-                  className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm text-fg hover:bg-bg"
+                  className="flex w-full items-center rounded-md px-3 py-2.5 text-left text-base text-fg hover:bg-bg"
                 >
                   <span className="truncate">
                     {c.number ? `${c.number} ` : ""}
@@ -94,16 +94,16 @@ export function SearchModal({
 
           {matchedChats.length > 0 && (
             <div>
-              <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Chats</div>
+              <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Chats</div>
               {matchedChats.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   onClick={() => go(`/chats/${c.id}`)}
-                  className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left text-sm text-fg hover:bg-bg"
+                  className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left text-base text-fg hover:bg-bg"
                 >
                   <span className="truncate">{c.title}</span>
-                  <span className="shrink-0 text-xs text-fg-muted">{new Date(c.updatedAt).toLocaleDateString()}</span>
+                  <span className="shrink-0 text-sm text-fg-muted">{new Date(c.updatedAt).toLocaleDateString()}</span>
                 </button>
               ))}
             </div>
