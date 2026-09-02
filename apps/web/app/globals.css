@@ -79,45 +79,12 @@ button { font: inherit; }
 
 /* ── Turns ───────────────────────────────────────────────────────────────── */
 
-.turn { margin-bottom: 26px; }
-.turn-role { font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
-.turn-thinking { color: var(--muted); }
-.turn-error {
-  margin-top: 8px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(179, 68, 31, 0.1);
-  color: #b3441f;
-  font-size: 13.5px;
-}
-
 .markdown { line-height: 1.65; }
 .markdown p { margin: 0 0 0.8em; }
 .markdown p:last-child { margin-bottom: 0; }
 .markdown ul, .markdown ol { padding-left: 1.4em; }
 .markdown table { border-collapse: collapse; width: 100%; margin: 0.8em 0; }
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
-.inline-code {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 5px;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.9em;
-}
-.code-block {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 16px;
-  overflow-x: auto;
-  margin: 0.8em 0;
-}
-.code-block code {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
-  white-space: pre;
-}
 
 /* ── Activity rows (tool calls / sub-agents) ────────────────────────────── */
 
