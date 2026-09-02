@@ -294,82 +294,84 @@ export function ChatMain({ chatId }: { chatId: string }) {
       </button>
 
       <div className="flex min-h-0 flex-1">
-        <div className="chat-scroll" ref={scrollRef}>
-          <div className="chat-column">
-            {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
-            {loadError && (
-              <div className="py-2 text-red-700 dark:text-red-400">
-                Couldn&apos;t load this conversation: {loadError}
-              </div>
-            )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="chat-scroll" ref={scrollRef}>
+            <div className="chat-column">
+              {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
+              {loadError && (
+                <div className="py-2 text-red-700 dark:text-red-400">
+                  Couldn&apos;t load this conversation: {loadError}
+                </div>
+              )}
 
-            {!loading && !loadError && turns.length === 0 && (
-              <p className="text-fg-muted">
-                Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
-              </p>
-            )}
+              {!loading && !loadError && turns.length === 0 && (
+                <p className="text-fg-muted">
+                  Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
+                </p>
+              )}
 
-            {!loading && !loadError && hiddenTurns.length > 0 && boundary && (
-              <CompactedBanner
-                boundary={boundary}
-                hiddenCount={hiddenTurns.length}
-                expanded={expandedCompacted}
-                onToggle={() => setExpandedCompacted((e) => !e)}
-              />
-            )}
+              {!loading && !loadError && hiddenTurns.length > 0 && boundary && (
+                <CompactedBanner
+                  boundary={boundary}
+                  hiddenCount={hiddenTurns.length}
+                  expanded={expandedCompacted}
+                  onToggle={() => setExpandedCompacted((e) => !e)}
+                />
+              )}
 
-            {!loading && !loadError && expandedCompacted && hiddenTurns.map((t) => (
-              <TurnView key={t.id} turn={t} />
-            ))}
+              {!loading && !loadError && expandedCompacted && hiddenTurns.map((t) => (
+                <TurnView key={t.id} turn={t} />
+              ))}
 
-            {!loading && !loadError && visibleTurns.map((t) => (
-              <TurnView key={t.id} turn={t} />
-            ))}
+              {!loading && !loadError && visibleTurns.map((t) => (
+                <TurnView key={t.id} turn={t} />
+              ))}
+            </div>
           </div>
-        </div>
 
-        {artifactPreviewOpen && <ArtifactPreviewPanel onClose={() => setArtifactPreviewOpen(false)} />}
-      </div>
-
-      <div className="px-6 py-4">
-        <div className="chat-column">
-          <div className="rounded-2xl border border-border bg-surface p-2.5">
-            <div className="flex items-end gap-2">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => {
-                  setInput(e.target.value);
-                  e.target.style.height = "auto";
-                  e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void send(false);
-                  }
-                }}
-                placeholder="Ask about your course…"
-                disabled={busy}
-                rows={1}
-                className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
-              />
-              <div className="flex shrink-0 items-center gap-2">
-                <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
-                <button
-                  type="button"
-                  className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
-                  onClick={() => void send(false)}
-                  disabled={busy || !input.trim()}
-                  title="Send"
-                  aria-label="Send"
-                >
-                  ⏎
-                </button>
+          <div className="px-6 py-4">
+            <div className="chat-column">
+              <div className="rounded-2xl border border-border bg-surface p-2.5">
+                <div className="flex items-end gap-2">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      e.target.style.height = "auto";
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void send(false);
+                      }
+                    }}
+                    placeholder="Ask about your course…"
+                    disabled={busy}
+                    rows={1}
+                    className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+                  />
+                  <div className="flex shrink-0 items-center gap-2">
+                    <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+                      onClick={() => void send(false)}
+                      disabled={busy || !input.trim()}
+                      title="Send"
+                      aria-label="Send"
+                    >
+                      ⏎
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
+
+        {artifactPreviewOpen && <ArtifactPreviewPanel onClose={() => setArtifactPreviewOpen(false)} />}
       </div>
     </main>
   );

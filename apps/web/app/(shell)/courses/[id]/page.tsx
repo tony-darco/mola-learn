@@ -35,13 +35,13 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
   ]);
 
   return (
-    <main className="overflow-y-auto p-8">
+    <main className="overflow-y-auto px-6 py-8">
       <div className="mx-auto max-w-4xl">
-        <div className="text-[13px]">
+        <div className="mb-3 text-[13px]">
           <Link href="/courses" className="text-accent no-underline">Courses</Link>
           <span className="text-fg-muted"> / {course.name}</span>
         </div>
-        <h1 className="mb-2 mt-1 text-2xl font-semibold text-fg">
+        <h1 className="mb-3 text-2xl font-semibold text-fg">
           {course.number ? `${course.number} — ` : ""}{course.name}
         </h1>
 
