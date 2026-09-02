@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { signOutAction } from "@/lib/auth/actions";
 import type { ChatSummary, CourseSummary } from "./types";
 
 /**
@@ -26,6 +27,7 @@ export function Sidebar({
 }) {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const q = query.trim().toLowerCase();
   const matches = (chat: ChatSummary) => !q || chat.title.toLowerCase().includes(q);
@@ -119,14 +121,52 @@ export function Sidebar({
         ))}
       </div>
 
-      <div className="mt-auto flex items-center gap-2 border-t border-border pt-3">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-fg">
-          {userName.slice(0, 1).toUpperCase()}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-sm text-fg">{userName}</span>
-        <a href="/dev-signin" className="shrink-0 text-xs text-fg-muted hover:text-accent">
-          switch
-        </a>
+      <div className="relative mt-auto border-t border-border pt-3">
+        {menuOpen && (
+          <div className="absolute bottom-full left-0 mb-1 w-full rounded-lg border border-border bg-surface p-1 shadow-lg">
+            <Link
+              href="/courses"
+              className="block rounded-md px-2.5 py-1.5 text-sm text-fg no-underline hover:bg-bg"
+              onClick={() => setMenuOpen(false)}
+            >
+              Courses
+            </Link>
+            <Link
+              href="/profile"
+              className="block rounded-md px-2.5 py-1.5 text-sm text-fg no-underline hover:bg-bg"
+              onClick={() => setMenuOpen(false)}
+            >
+              Profile
+            </Link>
+            <Link
+              href="/settings"
+              className="block rounded-md px-2.5 py-1.5 text-sm text-fg no-underline hover:bg-bg"
+              onClick={() => setMenuOpen(false)}
+            >
+              Settings
+            </Link>
+            <form action={signOutAction}>
+              <button
+                type="submit"
+                className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
+        )}
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-md px-1 py-1 hover:bg-surface"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-expanded={menuOpen}
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-fg">
+            {userName.slice(0, 1).toUpperCase()}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-left text-sm text-fg">{userName}</span>
+          <span className="shrink-0 text-[10px] text-fg-muted">{menuOpen ? "▾" : "▸"}</span>
+        </button>
       </div>
     </aside>
   );
