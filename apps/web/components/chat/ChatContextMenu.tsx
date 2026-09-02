@@ -147,8 +147,10 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
             <span className="text-xs text-fg-muted">{pinKeyboard}</span>
           </button>
 
-          {/* Move to course option */}
-          <div className="relative">
+          {/* Move to course option — expands in place rather than flying out
+              sideways, since a flyout would render past the sidebar's own
+              width and get clipped by its scroll container. */}
+          <div>
             <button
               onClick={() => setSubmenu(submenu === "courses" ? null : "courses")}
               disabled={isLoading}
@@ -157,12 +159,12 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
               <span>Move to course</span>
               <span className="flex items-center gap-1">
                 <span className="text-xs text-fg-muted">{moveKeyboard}</span>
-                <span className="text-fg-muted">›</span>
+                <span className={`text-fg-muted transition-transform ${submenu === "courses" ? "rotate-90" : ""}`}>›</span>
               </span>
             </button>
 
             {submenu === "courses" && (
-              <div className="absolute left-full top-0 ml-1 w-48 rounded-lg border border-border bg-surface p-1 shadow-lg">
+              <div className="max-h-40 overflow-y-auto border-t border-border pl-2">
                 <button
                   onClick={() => handleMoveToCourse(null)}
                   disabled={isLoading}
