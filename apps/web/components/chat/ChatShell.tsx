@@ -93,6 +93,7 @@ export function ChatShell(props: {
   const [newChatBusy, setNewChatBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Reload history on mount AND whenever the chat we're pointed at changes
   // (navigating the sidebar re-renders this component with a new chatId).
@@ -160,6 +161,7 @@ export function ChatShell(props: {
 
     setBusy(true);
     setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     const userTurnId = `local-user-${Date.now()}`;
     let assistantTurnId = `local-assistant-${Date.now()}`;
@@ -333,15 +335,15 @@ export function ChatShell(props: {
       <main className="chat-main">
         <div className="chat-scroll" ref={scrollRef}>
           <div className="chat-column">
-            {loading && <div className="chat-state">Loading conversation…</div>}
+            {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
             {loadError && (
-              <div className="chat-state chat-state-error">
+              <div className="py-2 text-red-700 dark:text-red-400">
                 Couldn&apos;t load this conversation: {loadError}
               </div>
             )}
 
             {!loading && !loadError && turns.length === 0 && (
-              <p className="chat-empty">
+              <p className="text-fg-muted">
                 Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
               </p>
             )}
@@ -365,29 +367,49 @@ export function ChatShell(props: {
           </div>
         </div>
 
-        <div className="chat-composer">
+        <div className="border-t border-border bg-surface px-6 py-4">
           <div className="chat-column">
-            <div className="chat-composer-row">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void send(false);
-                  }
-                }}
-                placeholder="Ask about your course…"
-                disabled={busy}
-              />
-              <button type="button" className="chat-send" onClick={() => void send(false)} disabled={busy || !input.trim()}>
-                Send
-              </button>
-              <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
+            <div className="rounded-2xl border border-border bg-bg p-2.5">
+              <div className="flex items-end gap-2">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    e.target.style.height = "auto";
+                    e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void send(false);
+                    }
+                  }}
+                  placeholder="Ask about your course…"
+                  disabled={busy}
+                  rows={1}
+                  className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:cursor-default disabled:opacity-50"
+                  onClick={() => void send(false)}
+                  disabled={busy || !input.trim()}
+                >
+                  Send
+                </button>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3 px-1">
+                <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
+                <button
+                  type="button"
+                  className="whitespace-nowrap text-[11.5px] text-fg-muted hover:text-accent"
+                  onClick={() => (previewOpen ? previewArtifacts() : setPreviewOpen(true))}
+                >
+                  {previewOpen ? "Insert 3 fixture artifacts (dev preview)" : "Preview artifact renderers"}
+                </button>
+              </div>
             </div>
-            <button type="button" className="chat-preview-toggle" onClick={() => (previewOpen ? previewArtifacts() : setPreviewOpen(true))}>
-              {previewOpen ? "Insert 3 fixture artifacts (dev preview)" : "Preview artifact renderers"}
-            </button>
           </div>
         </div>
       </main>
