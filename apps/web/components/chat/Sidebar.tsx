@@ -81,7 +81,7 @@ export function Sidebar({
         ))}
       </div>
 
-      <div className="mt-auto flex flex-col gap-1 border-t border-border pt-3">
+      <div className="mt-auto flex flex-col gap-1">
         <button
           type="button"
           onClick={onOpenSearch}
@@ -94,7 +94,7 @@ export function Sidebar({
           Search
         </button>
 
-        <div className="relative">
+        <div className="relative border-t border-border pt-3">
           {menuOpen && (
             <div className="absolute bottom-full left-0 mb-1 w-full rounded-lg border border-border bg-surface p-1 shadow-lg">
               <Link
