@@ -8,8 +8,8 @@ import { Sidebar } from "./Sidebar";
 import { TurnView } from "./TurnView";
 import { HintControl } from "./HintControl";
 import { CompactedBanner } from "./CompactedBanner";
+import { ArtifactPreviewPanel } from "./ArtifactPreviewPanel";
 import { parseSSEChunk } from "./sse";
-import { ARTIFACT_FIXTURES } from "./fixtures";
 import type { ActivityEntry, ChatSummary, CompactionBoundary, CourseSummary, Turn } from "./types";
 
 type HistoryResponse = {
@@ -91,7 +91,7 @@ export function ChatShell(props: {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [newChatBusy, setNewChatBusy] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -296,23 +296,6 @@ export function ChatShell(props: {
     }
   }
 
-  function previewArtifacts() {
-    setPreviewOpen(false);
-    setTurns((ts) => [
-      ...ts,
-      {
-        id: `preview-${Date.now()}`,
-        role: "assistant",
-        text: "_Preview: renderers for flashcard decks, quizzes, and mind maps, built against contract 6's schema ahead of the agents that will produce them for real._",
-        activity: [],
-        artifacts: ARTIFACT_FIXTURES,
-        hintRung: null,
-        error: null,
-        streaming: false,
-      },
-    ]);
-  }
-
   const boundaryIdx = boundary ? turns.findIndex((t) => t.id === boundary.upToMessageId) : -1;
   const hiddenTurns = boundaryIdx >= 0 ? turns.slice(0, boundaryIdx + 1) : [];
   const visibleTurns = boundaryIdx >= 0 ? turns.slice(boundaryIdx + 1) : turns;
@@ -333,38 +316,59 @@ export function ChatShell(props: {
       )}
 
       <main className="chat-main">
-        <div className="chat-scroll" ref={scrollRef}>
-          <div className="chat-column">
-            {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
-            {loadError && (
-              <div className="py-2 text-red-700 dark:text-red-400">
-                Couldn&apos;t load this conversation: {loadError}
-              </div>
-            )}
+        <div className="flex items-center justify-end border-b border-border px-4 py-2">
+          <button
+            type="button"
+            className={`flex h-8 w-8 items-center justify-center rounded-md border text-sm ${
+              artifactPreviewOpen
+                ? "border-accent bg-accent text-accent-fg"
+                : "border-border bg-surface text-fg-muted hover:bg-bg"
+            }`}
+            onClick={() => setArtifactPreviewOpen((o) => !o)}
+            title="Preview artifact renderers (dev)"
+            aria-label="Preview artifact renderers"
+            aria-expanded={artifactPreviewOpen}
+          >
+            ⧉
+          </button>
+        </div>
 
-            {!loading && !loadError && turns.length === 0 && (
-              <p className="text-fg-muted">
-                Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
-              </p>
-            )}
+        <div className="flex min-h-0 flex-1">
+          <div className="chat-scroll" ref={scrollRef}>
+            <div className="chat-column">
+              {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
+              {loadError && (
+                <div className="py-2 text-red-700 dark:text-red-400">
+                  Couldn&apos;t load this conversation: {loadError}
+                </div>
+              )}
 
-            {!loading && !loadError && hiddenTurns.length > 0 && boundary && (
-              <CompactedBanner
-                boundary={boundary}
-                hiddenCount={hiddenTurns.length}
-                expanded={expandedCompacted}
-                onToggle={() => setExpandedCompacted((e) => !e)}
-              />
-            )}
+              {!loading && !loadError && turns.length === 0 && (
+                <p className="text-fg-muted">
+                  Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
+                </p>
+              )}
 
-            {!loading && !loadError && expandedCompacted && hiddenTurns.map((t) => (
-              <TurnView key={t.id} turn={t} />
-            ))}
+              {!loading && !loadError && hiddenTurns.length > 0 && boundary && (
+                <CompactedBanner
+                  boundary={boundary}
+                  hiddenCount={hiddenTurns.length}
+                  expanded={expandedCompacted}
+                  onToggle={() => setExpandedCompacted((e) => !e)}
+                />
+              )}
 
-            {!loading && !loadError && visibleTurns.map((t) => (
-              <TurnView key={t.id} turn={t} />
-            ))}
+              {!loading && !loadError && expandedCompacted && hiddenTurns.map((t) => (
+                <TurnView key={t.id} turn={t} />
+              ))}
+
+              {!loading && !loadError && visibleTurns.map((t) => (
+                <TurnView key={t.id} turn={t} />
+              ))}
+            </div>
           </div>
+
+          {artifactPreviewOpen && <ArtifactPreviewPanel onClose={() => setArtifactPreviewOpen(false)} />}
         </div>
 
         <div className="border-t border-border bg-surface px-6 py-4">
@@ -399,15 +403,8 @@ export function ChatShell(props: {
                   Send
                 </button>
               </div>
-              <div className="mt-2 flex items-center justify-between gap-3 px-1">
+              <div className="mt-2 flex items-center gap-3 px-1">
                 <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
-                <button
-                  type="button"
-                  className="whitespace-nowrap text-[11.5px] text-fg-muted hover:text-accent"
-                  onClick={() => (previewOpen ? previewArtifacts() : setPreviewOpen(true))}
-                >
-                  {previewOpen ? "Insert 3 fixture artifacts (dev preview)" : "Preview artifact renderers"}
-                </button>
               </div>
             </div>
           </div>

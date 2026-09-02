@@ -165,7 +165,7 @@ export function Sidebar({
             {userName.slice(0, 1).toUpperCase()}
           </span>
           <span className="min-w-0 flex-1 truncate text-left text-sm text-fg">{userName}</span>
-          <span className="shrink-0 text-[10px] text-fg-muted">{menuOpen ? "▾" : "▸"}</span>
+          <span className="shrink-0 text-base leading-none text-fg-muted">{menuOpen ? "▾" : "▸"}</span>
         </button>
       </div>
     </aside>
