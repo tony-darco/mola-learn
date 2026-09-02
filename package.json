@@ -12,8 +12,8 @@
     "db:generate": "pnpm --filter @mola/db generate",
     "db:migrate": "pnpm --filter @mola/db migrate",
     "db:seed": "pnpm --filter @mola/db seed",
-    "up": "docker compose -f infra/docker-compose.yml up -d",
-    "down": "docker compose -f infra/docker-compose.yml down"
+    "docker:up": "infra/docker-remote.sh up",
+    "docker:down": "infra/docker-remote.sh down"
   },
   "devDependencies": {
     "typescript": "^5.7.2",
