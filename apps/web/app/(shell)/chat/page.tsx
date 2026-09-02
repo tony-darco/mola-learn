@@ -9,9 +9,9 @@ export default async function ChatLandingPage() {
   if (!session) return null; // ShellLayout already redirected; unreachable in practice.
 
   return (
-    <main className="chat-main flex items-center justify-center">
+    <main className="chat-main flex flex-col items-center justify-center pb-40">
       <div className="w-full max-w-2xl px-6">
-        <h1 className="mb-6 text-center text-2xl font-semibold text-fg">What are we exploring today?</h1>
+        <h1 className="mb-8 text-center text-4xl font-semibold text-fg">Ready to get started</h1>
         <NewCourseChatComposer placeholder="Ask something, or pick a course from the sidebar…" />
       </div>
     </main>
