@@ -18,16 +18,16 @@ export function MindMap({ payload, title }: { payload: Payload; title: string })
 
   return (
     <div>
-      <div className="mb-2.5 text-xs text-fg-muted">{title}</div>
+      <div className="mb-2.5 text-sm text-fg-muted">{title}</div>
       {root ? (
         <MindMapNode node={root} byParent={byParent} depth={0} />
       ) : (
-        <div className="text-[13.5px] text-fg-muted">This mind map has no root node.</div>
+        <div className="text-sm text-fg-muted">This mind map has no root node.</div>
       )}
       {payload.edges.length > 0 && (
         <div className="mt-3 border-t border-border pt-2">
           {payload.edges.map((e, i) => (
-            <div key={i} className="text-[12.5px] text-fg-muted">
+            <div key={i} className="text-[13.5px] text-fg-muted">
               {labelFor(payload.nodes, e.from)} → {labelFor(payload.nodes, e.to)}
               {e.label ? ` (${e.label})` : ""}
             </div>
@@ -46,8 +46,8 @@ function MindMapNode({ node, byParent, depth }: { node: Node; byParent: Map<stri
   const children = byParent.get(node.id) ?? [];
   return (
     <div className="mb-1" style={{ marginLeft: depth * 18 }}>
-      <div className="text-sm text-fg">{node.label}</div>
-      {node.note && <div className="text-xs text-fg-muted">{node.note}</div>}
+      <div className="text-base text-fg">{node.label}</div>
+      {node.note && <div className="text-sm text-fg-muted">{node.note}</div>}
       {children.map((c) => (
         <MindMapNode key={c.id} node={c} byParent={byParent} depth={depth + 1} />
       ))}

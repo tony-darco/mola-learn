@@ -30,7 +30,7 @@ export function HintControl({
     <div className="flex items-center gap-2">
       <button
         type="button"
-        className="whitespace-nowrap rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-fg disabled:cursor-default disabled:opacity-50"
+        className="whitespace-nowrap rounded-lg border border-border bg-surface px-3.5 py-2 text-base text-fg disabled:cursor-default disabled:opacity-50"
         onClick={onPull}
         disabled={disabled || bottomedOut}
         title={bottomedOut ? "No more hints for this question" : "Get a hint"}
@@ -48,7 +48,7 @@ export function HintControl({
         </span>
       )}
       {bottomedOut && (
-        <span className="text-[11.5px] text-fg-muted">That&apos;s as far as hints go — try it yourself.</span>
+        <span className="text-xs text-fg-muted">That&apos;s as far as hints go — try it yourself.</span>
       )}
     </div>
   );

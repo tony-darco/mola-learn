@@ -280,7 +280,7 @@ export function ChatMain({ chatId }: { chatId: string }) {
     <main className="chat-main relative">
       <button
         type="button"
-        className={`absolute right-4 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border text-sm ${
+        className={`absolute right-4 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border text-base ${
           artifactPreviewOpen
             ? "border-accent bg-accent text-accent-fg"
             : "border-border bg-surface text-fg-muted hover:bg-bg"
@@ -297,15 +297,15 @@ export function ChatMain({ chatId }: { chatId: string }) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="chat-scroll" ref={scrollRef}>
             <div className="chat-column">
-              {loading && <div className="py-2 text-fg-muted">Loading conversation…</div>}
+              {loading && <div className="py-2 text-base text-fg-muted">Loading conversation…</div>}
               {loadError && (
-                <div className="py-2 text-red-700 dark:text-red-400">
+                <div className="py-2 text-base text-red-700 dark:text-red-400">
                   Couldn&apos;t load this conversation: {loadError}
                 </div>
               )}
 
               {!loading && !loadError && turns.length === 0 && (
-                <p className="text-fg-muted">
+                <p className="text-base text-fg-muted">
                   Ask something. Mola is Socratic by default — use &ldquo;Hint&rdquo; to pull the ladder.
                 </p>
               )}
@@ -352,13 +352,13 @@ export function ChatMain({ chatId }: { chatId: string }) {
                     placeholder="Ask about your course…"
                     disabled={busy}
                     rows={1}
-                    className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+                    className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
                   />
                   <div className="flex shrink-0 items-center gap-2">
                     <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
                     <button
                       type="button"
-                      className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+                      className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
                       onClick={() => void send(false)}
                       disabled={busy || !input.trim()}
                       title="Send"

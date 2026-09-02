@@ -3,7 +3,7 @@
 import { useRef, type FocusEvent, type KeyboardEvent } from "react";
 import { updateCourseInstructionsAction } from "@/lib/courses/actions";
 
-const input = "rounded-lg border border-border bg-bg px-2.5 py-2 text-[13px] text-fg placeholder:text-fg-muted";
+const input = "rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg placeholder:text-fg-muted";
 
 /**
  * Professor + instructions — no Save button; Enter saves, Shift+Enter breaks

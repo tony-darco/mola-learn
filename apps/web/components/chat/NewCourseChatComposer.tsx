@@ -49,11 +49,11 @@ export function NewCourseChatComposer({ courseId }: { courseId: string }) {
           placeholder="How can I help you today?"
           disabled={busy}
           rows={1}
-          className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+          className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
         />
         <button
           type="button"
-          className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-lg leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+          className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
           onClick={() => void start()}
           disabled={busy}
           title="Start chat"

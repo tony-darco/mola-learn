@@ -29,7 +29,7 @@ export function CourseMemoryField({ courseId, content }: { courseId: string; con
         }
       }}
       onBlur={(e) => void save(e.currentTarget.value)}
-      className="resize-y rounded-lg border border-border bg-bg px-2.5 py-2 font-sans text-[13px] text-fg placeholder:text-fg-muted"
+      className="resize-y rounded-lg border border-border bg-bg px-2.5 py-2 font-sans text-sm text-fg placeholder:text-fg-muted"
     />
   );
 }

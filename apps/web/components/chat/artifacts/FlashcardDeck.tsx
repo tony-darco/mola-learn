@@ -12,7 +12,7 @@ export function FlashcardDeck({ payload, title }: { payload: Payload; title: str
   const card = payload.cards[index];
 
   if (!card) {
-    return <div className="text-[13.5px] text-fg-muted">This deck has no cards yet.</div>;
+    return <div className="text-sm text-fg-muted">This deck has no cards yet.</div>;
   }
 
   const go = (delta: number) => {
@@ -22,7 +22,7 @@ export function FlashcardDeck({ payload, title }: { payload: Payload; title: str
 
   return (
     <div>
-      <div className="mb-2.5 flex justify-between text-xs text-fg-muted">
+      <div className="mb-2.5 flex justify-between text-sm text-fg-muted">
         <span>{title}</span>
         <span>{index + 1} / {payload.cards.length}</span>
       </div>
@@ -32,11 +32,11 @@ export function FlashcardDeck({ payload, title }: { payload: Payload; title: str
         onClick={() => setFlipped((f) => !f)}
         aria-label={flipped ? "Showing answer, click to show question" : "Showing question, click to reveal answer"}
       >
-        <div className="text-[15.5px] text-fg">{flipped ? card.back : card.front}</div>
-        <div className="text-[11px] text-fg-muted">{flipped ? "Answer — click to flip back" : "Click to reveal answer"}</div>
+        <div className="text-lg text-fg">{flipped ? card.back : card.front}</div>
+        <div className="text-xs text-fg-muted">{flipped ? "Answer — click to flip back" : "Click to reveal answer"}</div>
       </button>
       {(card.chapter || card.section) && (
-        <div className="mt-1.5 text-[11.5px] text-fg-muted">
+        <div className="mt-1.5 text-xs text-fg-muted">
           {[card.chapter, card.section].filter(Boolean).join(" · ")}
         </div>
       )}

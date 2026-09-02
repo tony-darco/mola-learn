@@ -128,7 +128,7 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
         aria-label="Chat actions"
         disabled={isLoading}
       >
-        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
           <circle cx="12" cy="5" r="2" />
           <circle cx="12" cy="12" r="2" />
           <circle cx="12" cy="19" r="2" />
@@ -141,10 +141,10 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
           <button
             onClick={handlePin}
             disabled={isLoading}
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-sm text-fg hover:bg-bg disabled:opacity-50"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-base text-fg hover:bg-bg disabled:opacity-50"
           >
             <span>{pinLabel}</span>
-            <span className="text-xs text-fg-muted">{pinKeyboard}</span>
+            <span className="text-sm text-fg-muted">{pinKeyboard}</span>
           </button>
 
           {/* Move to course option — expands in place rather than flying out
@@ -154,11 +154,11 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
             <button
               onClick={() => setSubmenu(submenu === "courses" ? null : "courses")}
               disabled={isLoading}
-              className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-sm text-fg hover:bg-bg disabled:opacity-50"
+              className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-base text-fg hover:bg-bg disabled:opacity-50"
             >
               <span>Move to course</span>
               <span className="flex items-center gap-1">
-                <span className="text-xs text-fg-muted">{moveKeyboard}</span>
+                <span className="text-sm text-fg-muted">{moveKeyboard}</span>
                 <span className={`text-fg-muted transition-transform ${submenu === "courses" ? "rotate-90" : ""}`}>›</span>
               </span>
             </button>
@@ -168,7 +168,7 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
                 <button
                   onClick={() => handleMoveToCourse(null)}
                   disabled={isLoading}
-                  className="flex w-full items-start rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg disabled:opacity-50"
+                  className="flex w-full items-start rounded-md px-2.5 py-1.5 text-left text-base text-fg hover:bg-bg disabled:opacity-50"
                 >
                   <span className="flex-1">General (no course)</span>
                   {chat.courseId === null && <span className="ml-2 text-accent">✓</span>}
@@ -178,7 +178,7 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
                     key={course.id}
                     onClick={() => handleMoveToCourse(course.id)}
                     disabled={isLoading}
-                    className="flex w-full items-start rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg disabled:opacity-50"
+                    className="flex w-full items-start rounded-md px-2.5 py-1.5 text-left text-base text-fg hover:bg-bg disabled:opacity-50"
                   >
                     <span className="flex-1 truncate">
                       {course.number ? `${course.number} ` : ""}
@@ -195,10 +195,10 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
           <button
             onClick={handleRename}
             disabled={isLoading}
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-sm text-fg hover:bg-bg disabled:opacity-50"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-base text-fg hover:bg-bg disabled:opacity-50"
           >
             <span>Rename</span>
-            <span className="text-xs text-fg-muted">{renameKeyboard}</span>
+            <span className="text-sm text-fg-muted">{renameKeyboard}</span>
           </button>
 
           {/* Divider */}
@@ -208,10 +208,10 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
           <button
             onClick={handleDelete}
             disabled={isLoading}
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-sm text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 disabled:opacity-50"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-base text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 disabled:opacity-50"
           >
             <span>Delete</span>
-            <span className="text-xs text-fg-muted">{deleteKeyboard}</span>
+            <span className="text-sm text-fg-muted">{deleteKeyboard}</span>
           </button>
         </div>
       )}

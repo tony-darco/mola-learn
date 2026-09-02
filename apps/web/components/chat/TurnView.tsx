@@ -9,7 +9,7 @@ export function TurnView({ turn }: { turn: Turn }) {
   const isUser = turn.role === "user";
   return (
     <div className={`mb-6 flex flex-col ${isUser ? "items-end" : "items-start"}`}>
-      <div className="mb-1 px-1 text-xs font-medium text-fg-muted">{isUser ? "You" : "Mola"}</div>
+      <div className="mb-1 px-1 text-sm font-medium text-fg-muted">{isUser ? "You" : "Mola"}</div>
 
       <div className={isUser ? "max-w-[85%]" : "w-full"}>
         {turn.activity.map((a) => <ActivityRow key={a.id} entry={a} />)}
@@ -24,7 +24,7 @@ export function TurnView({ turn }: { turn: Turn }) {
         {turn.artifacts.map((a) => <ArtifactBlock key={a.id} artifact={a} />)}
 
         {turn.error && (
-          <div className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-[13.5px] text-red-700 dark:text-red-400">
+          <div className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-400">
             {turn.error}
           </div>
         )}

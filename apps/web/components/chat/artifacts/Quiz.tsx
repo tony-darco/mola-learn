@@ -9,7 +9,7 @@ type Payload = z.infer<typeof quizPayloadSchema>;
 export function Quiz({ payload, title }: { payload: Payload; title: string }) {
   return (
     <div>
-      <div className="mb-2.5 flex justify-between text-xs text-fg-muted">
+      <div className="mb-2.5 flex justify-between text-sm text-fg-muted">
         <span>{title}</span>
         <span>{payload.difficulty}</span>
       </div>
@@ -57,7 +57,7 @@ function QuizQuestion({ index, question }: { index: number; question: Payload["q
       )}
 
       {revealed && question.explanation && (
-        <div className="mt-2 text-[13px] text-fg-muted">{question.explanation}</div>
+        <div className="mt-2 text-sm text-fg-muted">{question.explanation}</div>
       )}
     </div>
   );
@@ -85,7 +85,7 @@ function ShortAnswer({ expected }: { expected: string }) {
           Check against expected answer
         </button>
       ) : (
-        <div className="mt-1.5 text-[13px] text-fg-muted">Expected: {expected}</div>
+        <div className="mt-1.5 text-sm text-fg-muted">Expected: {expected}</div>
       )}
     </div>
   );

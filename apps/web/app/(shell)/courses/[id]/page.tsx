@@ -12,10 +12,10 @@ import { CourseMemoryField } from "@/components/chat/CourseMemoryField";
 export const dynamic = "force-dynamic";
 
 const card = "rounded-xl border border-border bg-surface p-4";
-const cardTitle = "mb-2 text-sm font-semibold text-fg";
-const input = "rounded-lg border border-border bg-bg px-2.5 py-2 text-[13px] text-fg placeholder:text-fg-muted";
+const cardTitle = "mb-2 text-base font-semibold text-fg";
+const input = "rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg placeholder:text-fg-muted";
 const smallButton =
-  "self-start rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg";
+  "self-start rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-fg";
 
 export default async function CourseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: courseId } = await params;
@@ -36,11 +36,11 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
   return (
     <main className="overflow-y-auto py-8 pl-4 pr-6">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-3 text-[13px]">
+        <div className="mb-3 text-sm">
           <Link href="/courses" className="text-accent no-underline">Courses</Link>
           <span className="text-fg-muted"> / {course.name}</span>
         </div>
-        <h1 className="mb-3 text-2xl font-semibold text-fg">
+        <h1 className="mb-3 text-3xl font-semibold text-fg">
           {course.number ? `${course.number} — ` : ""}{course.name}
         </h1>
 
@@ -68,9 +68,9 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
 function RecentChats({ chats }: { chats: { id: string; title: string; updatedAt: Date }[] }) {
   return (
     <div>
-      <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Recent chats</div>
+      <div className="mb-2 px-1 text-sm font-medium uppercase tracking-wide text-fg-muted">Recent chats</div>
       {chats.length === 0 ? (
-        <p className="px-1 text-[13.5px] text-fg-muted">No chats in this course yet — start one above.</p>
+        <p className="px-1 text-sm text-fg-muted">No chats in this course yet — start one above.</p>
       ) : (
         <div className="flex flex-col gap-1">
           {chats.map((c) => (
@@ -79,8 +79,8 @@ function RecentChats({ chats }: { chats: { id: string; title: string; updatedAt:
               href={`/chats/${c.id}`}
               className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-fg no-underline hover:bg-surface"
             >
-              <span className="truncate text-[13.5px]">{c.title}</span>
-              <span className="shrink-0 text-xs text-fg-muted">{c.updatedAt.toLocaleDateString()}</span>
+              <span className="truncate text-sm">{c.title}</span>
+              <span className="shrink-0 text-sm text-fg-muted">{c.updatedAt.toLocaleDateString()}</span>
             </Link>
           ))}
         </div>
@@ -108,7 +108,7 @@ function MemoryPanel({ courseId, content }: { courseId: string; content: string 
   return (
     <div className={card}>
       <div className={cardTitle}>Memory</div>
-      <p className="mt-0 text-xs text-fg-muted">Scoped to this course only.</p>
+      <p className="mt-0 text-sm text-fg-muted">Scoped to this course only.</p>
       <CourseMemoryField courseId={courseId} content={content} />
     </div>
   );
@@ -128,13 +128,13 @@ function ContextPanel({
     <div className={card}>
       <div className={cardTitle}>Context</div>
       {docs.length === 0 ? (
-        <p className="text-[13px] text-fg-muted">No documents yet.</p>
+        <p className="text-sm text-fg-muted">No documents yet.</p>
       ) : (
         <ul className="mb-3 flex list-none flex-col gap-1.5 p-0">
           {docs.map((d) => (
-            <li key={d.id} className="flex items-center justify-between gap-2 text-[13px] text-fg">
+            <li key={d.id} className="flex items-center justify-between gap-2 text-sm text-fg">
               <span className="truncate">{d.title}</span>
-              <span className={`shrink-0 text-xs ${STATUS_COLOR[d.status] ?? "text-fg-muted"}`}>{d.status}</span>
+              <span className={`shrink-0 text-sm ${STATUS_COLOR[d.status] ?? "text-fg-muted"}`}>{d.status}</span>
             </li>
           ))}
         </ul>
@@ -161,11 +161,11 @@ function SchedulePanel({ items }: { items: { id: string; title: string; dueAt: D
     <div className={card}>
       <div className={cardTitle}>Schedule</div>
       {items.length === 0 ? (
-        <p className="text-[13px] text-fg-muted">Nothing yet — the calendar integration isn&rsquo;t wired up.</p>
+        <p className="text-sm text-fg-muted">Nothing yet — the calendar integration isn&rsquo;t wired up.</p>
       ) : (
         <ul className="flex list-none flex-col gap-1.5 p-0">
           {items.map((i) => (
-            <li key={i.id} className="text-[13px] text-fg">
+            <li key={i.id} className="text-sm text-fg">
               {i.title}{i.dueAt ? ` — ${i.dueAt.toLocaleDateString()}` : ""}
             </li>
           ))}

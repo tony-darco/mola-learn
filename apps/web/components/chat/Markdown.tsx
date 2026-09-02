@@ -8,7 +8,7 @@ import type { ComponentProps } from "react";
 /** Assistant/user turn text, rendered as markdown with fenced code blocks. */
 export function Markdown({ text }: { text: string }) {
   return (
-    <div className="markdown">
+    <div className="markdown text-base">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
         {text}
       </ReactMarkdown>
@@ -30,12 +30,12 @@ function CodeBlock({ className, children, ...rest }: ComponentProps<"code">) {
 
   return (
     <div className="my-3 overflow-hidden rounded-lg border border-border">
-      <div className="flex items-center justify-between border-b border-border bg-surface px-3 py-1.5 text-xs text-fg-muted">
+      <div className="flex items-center justify-between border-b border-border bg-surface px-3 py-1.5 text-sm text-fg-muted">
         <span>{language || "text"}</span>
         <CopyButton text={String(children)} />
       </div>
       <pre className="overflow-x-auto bg-surface p-3.5">
-        <code className={`${className ?? ""} font-mono text-[13px] whitespace-pre`} {...rest}>
+        <code className={`${className ?? ""} font-mono text-sm whitespace-pre`} {...rest}>
           {children}
         </code>
       </pre>

@@ -62,7 +62,7 @@ export function ArtifactPreviewPanel({ onClose }: { onClose: () => void }) {
       />
 
       <div className="flex items-center justify-between px-3 py-2.5">
-        <span className="text-sm font-semibold text-fg">Artifact previews</span>
+        <span className="text-base font-semibold text-fg">Artifact previews</span>
         <button
           type="button"
           className="rounded-md px-1.5 py-0.5 text-fg-muted hover:bg-bg hover:text-fg"
@@ -78,7 +78,7 @@ export function ArtifactPreviewPanel({ onClose }: { onClose: () => void }) {
           <button
             key={t.key}
             type="button"
-            className={`rounded-md px-2.5 py-1 text-[13px] ${
+            className={`rounded-md px-2.5 py-1 text-sm ${
               tab === t.key ? "bg-accent text-accent-fg" : "text-fg-muted hover:bg-bg"
             }`}
             onClick={() => setTab(t.key)}

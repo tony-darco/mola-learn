@@ -21,7 +21,7 @@ export function CourseSummaryField({ courseId, summary }: { courseId: string; su
   return (
     <div className="flex flex-col items-start gap-1.5">
       {summary === null && (
-        <p className="text-[13px] text-fg-muted">
+        <p className="text-sm text-fg-muted">
           Generating… the syllabus hasn&rsquo;t been processed into a summary yet.
         </p>
       )}
@@ -39,7 +39,7 @@ export function CourseSummaryField({ courseId, summary }: { courseId: string; su
           }
         }}
         onBlur={(e) => void save(e.currentTarget.value)}
-        className="w-full resize-none rounded-md border-none bg-transparent px-0 py-0 text-[15px] text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
+        className="w-full resize-none rounded-md border-none bg-transparent px-0 py-0 text-base text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
       />
     </div>
   );

@@ -15,9 +15,9 @@ export function ArtifactBlock({ artifact }: { artifact: ArtifactRecord }) {
   return (
     <div className="mt-3 rounded-xl border border-border bg-surface p-4">
       <div className="mb-3 flex items-center gap-2 font-semibold text-fg">
-        <span className="text-base">{artifactIcon(artifact.payload.kind)}</span>
+        <span className="text-lg">{artifactIcon(artifact.payload.kind)}</span>
         <span>{artifact.title}</span>
-        <span className="ml-auto text-xs font-normal text-fg-muted">{summarizeArtifact(artifact.payload)}</span>
+        <span className="ml-auto text-sm font-normal text-fg-muted">{summarizeArtifact(artifact.payload)}</span>
       </div>
       {renderPayload(artifact)}
     </div>
