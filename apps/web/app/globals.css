@@ -59,13 +59,13 @@
 /* ── Chat layout ─────────────────────────────────────────────────────────── */
 
 .chat-layout {
-  display: grid;
-  grid-template-columns: 16rem 1fr;
+  display: flex;
   height: 100vh;
 }
 
 .chat-main {
   display: flex;
+  flex: 1;
   flex-direction: column;
   overflow: hidden;
   min-width: 0;

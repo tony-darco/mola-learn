@@ -57,10 +57,12 @@ export function ChatLink({
           active ? "bg-surface font-semibold" : ""
         } ${isMutating ? "opacity-50" : ""}`}
       >
-        {chat.isPinned > 0 && (
+        {chat.isPinned > 0 ? (
           <svg className="h-3 w-3 shrink-0 text-fg-muted" fill="currentColor" viewBox="0 0 24 24" aria-label="Pinned">
             <path d="M12 2a5 5 0 0 0-5 5c0 2.2 1.5 4.1 3.5 4.8L9 16h6l-1.5-4.2c2-.7 3.5-2.6 3.5-4.8a5 5 0 0 0-5-5zm-1 15v5h2v-5z" />
           </svg>
+        ) : (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full border border-fg-muted" aria-hidden="true" />
         )}
         <span className="truncate">{chat.title}</span>
       </Link>
