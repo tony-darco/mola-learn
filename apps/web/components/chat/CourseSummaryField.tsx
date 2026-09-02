@@ -21,15 +21,16 @@ export function CourseSummaryField({ courseId, summary }: { courseId: string; su
         rows={2}
         placeholder="What this course is about…"
         onKeyDown={(e) => {
-          console.log("DEBUG2", JSON.stringify({ key: e.key, keyCode: e.keyCode, which: e.which, shift: e.shiftKey }));
           // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
           // virtual keyboards report `key: "Unidentified"` for Enter/Return.
           if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
             e.preventDefault();
-            console.log("DEBUG2 submitting");
             formRef.current?.requestSubmit();
           }
         }}
+        // Belt-and-suspenders: also save when focus leaves the field (click
+        // away, tab to the next field), not only on Enter.
+        onBlur={() => formRef.current?.requestSubmit()}
         className="w-full resize-none rounded-md border-none bg-transparent px-0 py-0 text-[15px] text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
       />
     </form>

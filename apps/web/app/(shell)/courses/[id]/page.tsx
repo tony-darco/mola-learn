@@ -3,12 +3,11 @@ import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { courseMemory, db, documents, scheduleItems } from "@mola/db";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
-import {
-  listCourseChats, updateCourseInstructionsAction,
-  updateCourseMemoryAction, uploadCourseDocumentAction,
-} from "@/lib/courses/actions";
+import { listCourseChats, uploadCourseDocumentAction } from "@/lib/courses/actions";
 import { NewCourseChatComposer } from "@/components/chat/NewCourseChatComposer";
 import { CourseSummaryField } from "@/components/chat/CourseSummaryField";
+import { CourseInstructionsField } from "@/components/chat/CourseInstructionsField";
+import { CourseMemoryField } from "@/components/chat/CourseMemoryField";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +35,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
 
   return (
     <main className="overflow-y-auto py-8 pl-4 pr-6">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-7xl">
         <div className="mb-3 text-[13px]">
           <Link href="/courses" className="text-accent no-underline">Courses</Link>
           <span className="text-fg-muted"> / {course.name}</span>
@@ -47,7 +46,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
 
         <CourseSummaryField courseId={course.id} summary={course.summary} />
 
-        <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_340px]">
+        <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="flex flex-col gap-4">
             <NewCourseChatComposer courseId={course.id} />
             <RecentChats chats={courseChats} />
@@ -98,16 +97,7 @@ function InstructionsPanel({
   return (
     <div className={card}>
       <div className={cardTitle}>Instructions</div>
-      <form action={updateCourseInstructionsAction} className="flex flex-col gap-2">
-        <input type="hidden" name="courseId" value={courseId} />
-        <input name="professor" defaultValue={professor ?? ""} placeholder="Professor" className={input} />
-        <textarea
-          name="instructions" defaultValue={instructions ?? ""} rows={4}
-          placeholder="Tone, notation, what this professor tests on…"
-          className={`${input} resize-y font-sans`}
-        />
-        <button type="submit" className={smallButton}>Save</button>
-      </form>
+      <CourseInstructionsField courseId={courseId} professor={professor} instructions={instructions} />
     </div>
   );
 }
@@ -119,15 +109,7 @@ function MemoryPanel({ courseId, content }: { courseId: string; content: string 
     <div className={card}>
       <div className={cardTitle}>Memory</div>
       <p className="mt-0 text-xs text-fg-muted">Scoped to this course only.</p>
-      <form action={updateCourseMemoryAction} className="flex flex-col gap-2">
-        <input type="hidden" name="courseId" value={courseId} />
-        <textarea
-          name="content" defaultValue={content} rows={4}
-          placeholder="Nothing recorded yet."
-          className={`${input} resize-y font-sans`}
-        />
-        <button type="submit" className={smallButton}>Save</button>
-      </form>
+      <CourseMemoryField courseId={courseId} content={content} />
     </div>
   );
 }
