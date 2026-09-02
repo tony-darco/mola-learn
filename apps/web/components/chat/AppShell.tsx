@@ -73,18 +73,18 @@ export function AppShell({
   }
 
   return (
-    <div className="chat-layout">
-      <Sidebar
-        userName={userName}
-        activeChatId={activeChatId}
-        chats={chats}
-        courses={courses}
-        onNewChat={handleNewChat}
-        newChatBusy={newChatBusy}
-      />
-      <RefreshSidebarContext.Provider value={refreshSidebar}>
+    <RefreshSidebarContext.Provider value={refreshSidebar}>
+      <div className="chat-layout">
+        <Sidebar
+          userName={userName}
+          activeChatId={activeChatId}
+          chats={chats}
+          courses={courses}
+          onNewChat={handleNewChat}
+          newChatBusy={newChatBusy}
+        />
         {children}
-      </RefreshSidebarContext.Provider>
-    </div>
+      </div>
+    </RefreshSidebarContext.Provider>
   );
 }

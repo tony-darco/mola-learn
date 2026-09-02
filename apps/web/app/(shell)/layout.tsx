@@ -19,7 +19,7 @@ export default async function ShellLayout({ children }: { children: ReactNode })
 
   const [userChats, userCourses] = await Promise.all([
     db.select({
-      id: chats.id, title: chats.title, courseId: chats.courseId, updatedAt: chats.updatedAt,
+      id: chats.id, title: chats.title, courseId: chats.courseId, updatedAt: chats.updatedAt, isPinned: chats.isPinned,
     }).from(chats).where(eq(chats.userId, session.userId)).orderBy(desc(chats.updatedAt)),
     db.select({
       id: courses.id, name: courses.name, number: courses.number,

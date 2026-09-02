@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { signOutAction } from "@/lib/auth/actions";
+import { ChatLink } from "./ChatLink";
 import type { ChatSummary, CourseSummary } from "./types";
 
 /**
@@ -31,10 +32,12 @@ export function Sidebar({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const q = query.trim().toLowerCase();
-  const filteredChats = useMemo(
-    () => chats.filter((c) => !q || c.title.toLowerCase().includes(q)),
-    [chats, q],
-  );
+  const filteredChats = useMemo(() => {
+    const filtered = chats.filter((c) => !q || c.title.toLowerCase().includes(q));
+    // Stable sort: pinned chats float to the top, most-recent-first within
+    // each group, since `chats` already arrives sorted by updatedAt.
+    return [...filtered].sort((a, b) => b.isPinned - a.isPinned);
+  }, [chats, q]);
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-sidebar px-3 py-4">
@@ -79,7 +82,7 @@ export function Sidebar({
           <div className="px-1 py-1 text-xs text-fg-muted">{q ? "No matches" : "No chats yet"}</div>
         )}
         {filteredChats.map((chat) => (
-          <ChatLink key={chat.id} chat={chat} active={chat.id === activeChatId} />
+          <ChatLink key={chat.id} chat={chat} active={chat.id === activeChatId} courses={courses} />
         ))}
       </div>
 
@@ -131,18 +134,5 @@ export function Sidebar({
         </button>
       </div>
     </aside>
-  );
-}
-
-function ChatLink({ chat, active }: { chat: ChatSummary; active: boolean }) {
-  return (
-    <Link
-      href={`/chats/${chat.id}`}
-      className={`block truncate rounded-md px-2 py-1.5 text-[13.5px] text-fg no-underline hover:bg-surface ${
-        active ? "bg-surface font-semibold" : ""
-      }`}
-    >
-      {chat.title}
-    </Link>
   );
 }
