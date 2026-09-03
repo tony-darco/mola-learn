@@ -25,18 +25,21 @@ test("a course-fact lookup renders as a collapsed, expand-on-demand activity row
       "(CONTRACTS.md records 3/3 clean tool-calling on qwen3.5:27b for this exact demo tool)",
   );
 
-  const turn = page.locator(".turn-assistant").filter({ has: page.locator(".activity-row-tool") }).last();
-  const row = turn.locator(".activity-row-tool").first();
+  const turn = page
+    .locator('[data-testid="turn-assistant"]')
+    .filter({ has: page.locator('[data-testid="activity-row-tool"]') })
+    .last();
+  const row = turn.locator('[data-testid="activity-row-tool"]').first();
   await expect(row).toBeVisible();
 
   // Collapsed by default: the tool's raw result is not on the page at all
   // until the row is expanded.
-  await expect(turn.locator(".activity-detail")).toHaveCount(0);
+  await expect(turn.locator('[data-testid="activity-detail"]')).toHaveCount(0);
 
   // It IS a distinct element from the message bubble, not spliced into the
   // rendered chat text — the activity row never lives inside `.markdown`.
-  await expect(turn.locator(".markdown .activity-row")).toHaveCount(0);
+  await expect(turn.locator('.markdown [data-testid^="activity-row"]')).toHaveCount(0);
 
-  await row.locator(".activity-row-header").click();
-  await expect(turn.locator(".activity-detail").first()).toBeVisible();
+  await row.locator('[data-testid="activity-row-header"]').click();
+  await expect(turn.locator('[data-testid="activity-detail"]').first()).toBeVisible();
 });

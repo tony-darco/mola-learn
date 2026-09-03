@@ -22,12 +22,25 @@ test.describe("sign-up / sign-out / sign-in", () => {
 
     await page.waitForURL((u) => u.pathname === "/", { timeout: 15_000 });
     await expect(page.locator("body")).toContainText(email);
-    await expect(page.locator("body")).toContainText("no chats yet");
+    // Sidebar.tsx: "No chats yet" (capitalized) — was lowercase pre-redesign.
+    await expect(page.locator("body")).toContainText("No chats yet");
 
-    // Sign out lives in the (app) chrome (Courses/Profile/Settings), not on
-    // the bare chat root — navigate there to reach it.
-    await page.goto("/courses");
-    await page.getByRole("button", { name: "Sign out" }).click();
+    // Sign out no longer lives behind a full-page route (/courses, /profile,
+    // /settings are all gone) — it's a "Sign out" item in the sidebar's
+    // profile dropdown, opened by clicking the "{email} ▾" row.
+    //
+    // Reproduced live (both here and manually in a browser): clicking "Sign
+    // out" in the same tick the dropdown opens silently no-ops — the click
+    // lands (the item visibly highlights) but the form never submits — while
+    // the identical click after the dropdown has painted works every time.
+    // A real, minor timing bug in the redesigned dropdown, not a selector
+    // issue; asserting the menu item is actually visible first (rather than
+    // relying on click()'s own actionability wait, which isn't enough here)
+    // reliably avoids it.
+    await page.getByRole("button", { name: new RegExp(email) }).click();
+    const signOutButton = page.getByRole("button", { name: "Sign out" });
+    await expect(signOutButton).toBeVisible();
+    await signOutButton.click();
     await page.waitForURL((u) => u.pathname === "/sign-in", { timeout: 15_000 });
 
     await page.getByLabel("Email").fill(email);
@@ -50,7 +63,15 @@ test.describe("cross-user ownership (§9)", () => {
       chats: { id: string; title: string }[];
       courses: { id: string; name: string }[];
     };
-    const aliceChat = chats[0];
+    // Not chats[0]: repeated e2e runs against this long-lived shared DB pile
+    // up plenty of generically-titled "New chat" rows for every seeded user
+    // (Bob included, via his own test runs), and a title this test then
+    // asserts is invisible on BOB's page would spuriously fail on a shared
+    // title, not a real ownership leak. `packages/db/src/seed.ts` always
+    // gives Alice exactly one distinctively-titled chat ("Scheduling
+    // questions") — pick that one specifically so the "not visible on Bob's
+    // page" check actually means something.
+    const aliceChat = chats.find((c) => c.title === "Scheduling questions") ?? chats[0];
     const aliceCourse = courses[0];
     expect(aliceChat, "seed must give Alice at least one chat").toBeTruthy();
     expect(aliceCourse, "seed must give Alice at least one course").toBeTruthy();
@@ -82,28 +103,38 @@ test.describe("cross-user ownership (§9)", () => {
 test.describe("signed-out access to protected routes", () => {
   test.use({ storageState: SIGNED_OUT_STORAGE });
 
-  test("an unauthenticated visitor to an (app) route is redirected to sign-in server-side, never shown protected content first", async ({
+  test("an unauthenticated visitor to a shell route is redirected to sign-in server-side, never shown protected content first", async ({
     page,
   }) => {
-    // (app)/layout.tsx calls redirect("/sign-in") before rendering anything
-    // for courses/profile/settings — this is a real HTTP redirect Next issues
-    // server-side, so the response Playwright ultimately lands on IS the
-    // sign-in page; there is no client-side flash of protected chrome first.
-    await page.goto("/courses");
+    // The old bare `/courses` route (and /profile, /settings) is gone —
+    // settings/courses/profile all live inside a modal now, under
+    // `(shell)/courses/[id]`. Any real id works here: `(shell)/layout.tsx`
+    // calls redirect("/sign-in") for every route in the group before any
+    // page-level code (ownership checks included) ever runs, so this
+    // redirect fires the same way regardless of which id follows
+    // `/courses/`. This is a real HTTP redirect Next issues server-side, so
+    // the response Playwright ultimately lands on IS the sign-in page;
+    // there is no client-side flash of protected chrome first.
+    await page.goto("/courses/00000000-0000-4000-8000-000000000000");
     expect(new URL(page.url()).pathname).toBe("/sign-in");
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
-    await expect(page.locator("body")).not.toContainText("New course");
+    await expect(page.locator("body")).not.toContainText("Instructions");
   });
 
-  test("an unauthenticated visitor to the chat root sees no protected content", async ({ page }) => {
-    // NOTE, worth flagging in the report: `/` and `/chats/[id]` do NOT use
-    // redirect() when signed out (unlike the (app) route group above) — they
-    // render an inline "Not signed in" message with a 200 status instead.
-    // That still satisfies "never a flash of protected content", just via a
-    // different mechanism than the rest of the app. See report for detail.
+  test("an unauthenticated visitor to the chat root is redirected to sign-in, never shown protected content", async ({
+    page,
+  }) => {
+    // This used to be a real gap the original version of this test
+    // documented: `/` and `/chats/[id]` rendered an inline "Not signed in"
+    // message with a 200 status instead of a real redirect, unlike the rest
+    // of the app. The persistent-shell rewrite's `(shell)/layout.tsx` now
+    // gates every route in the group the same way, root included — verified
+    // live: a signed-out `/` visit 302s straight to `/sign-in`. Asserting
+    // the corrected behavior here, not the old bug.
     const resp = await page.goto("/");
-    expect(resp?.status()).toBe(200);
-    await expect(page.locator("body")).toContainText("Not signed in");
+    expect(resp?.status()).toBe(200); // final response, after following the redirect, is the sign-in page's own 200
+    expect(new URL(page.url()).pathname).toBe("/sign-in");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
     await expect(page.locator("body")).not.toContainText("Scheduling questions");
   });
 });
