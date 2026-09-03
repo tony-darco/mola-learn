@@ -12,7 +12,10 @@ export function TurnView({ turn }: { turn: Turn }) {
       <div className="mb-1 px-1 text-sm font-medium text-fg-muted">{isUser ? "You" : "Mola"}</div>
 
       <div className={isUser ? "max-w-[85%]" : "w-full"}>
-        {turn.activity.map((a) => <ActivityRow key={a.id} entry={a} />)}
+        {/* Index folded into the key: turns persisted before crypto.randomUUID()
+            landed in ollama.ts can still contain literal duplicate tool-call
+            ids, which would otherwise collide as React keys. */}
+        {turn.activity.map((a, i) => <ActivityRow key={`${a.id}-${i}`} entry={a} />)}
 
         {turn.text && (
           <div className={isUser ? "rounded-2xl border border-border bg-surface px-4 py-2.5" : ""}>
