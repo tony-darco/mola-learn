@@ -5,7 +5,7 @@ export const metadata = { title: "Mola", description: "AI study companion" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* Applies the saved app-wide font scale (General settings, dev tool)
             before paint — Tailwind's text-* utilities are all rem-based, so
