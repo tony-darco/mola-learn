@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             this one root font-size rescales every one of them at once. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var s=localStorage.getItem("mola-font-scale");if(s)document.documentElement.style.fontSize=s+"%"}catch(e){}`,
+            __html: `try{var s=localStorage.getItem("mola-font-scale")||"87.5";document.documentElement.style.fontSize=s+"%"}catch(e){}`,
           }}
         />
       </head>

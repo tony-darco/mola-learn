@@ -26,10 +26,9 @@ const SECTIONS = [
 // Dev tool: Tailwind's text-* utilities are all rem-based, so rescaling the
 // root font-size rescales every one of them at once, app-wide.
 const FONT_SCALES = [
-  { value: "87.5", label: "Small" },
-  { value: "100", label: "Default" },
-  { value: "112.5", label: "Large" },
-  { value: "125", label: "Extra large" },
+  { value: "75", label: "Small" },
+  { value: "87.5", label: "Default" },
+  { value: "100", label: "Large" },
 ] as const;
 const FONT_SCALE_STORAGE_KEY = "mola-font-scale";
 
@@ -43,7 +42,7 @@ export function SettingsModal({
   const [section, setSection] = useState<SettingsSection>(initialSection);
 
   // ── General ─────────────────────────────────────────────────────────────
-  const [fontScale, setFontScale] = useState("100");
+  const [fontScale, setFontScale] = useState("87.5");
 
   // ── API keys ────────────────────────────────────────────────────────────
   const [apiKey, setApiKey] = useState<PublicApiKey | null>(null);
@@ -79,7 +78,7 @@ export function SettingsModal({
 
   useEffect(() => {
     if (!open) return;
-    setFontScale(localStorage.getItem(FONT_SCALE_STORAGE_KEY) ?? "100");
+    setFontScale(localStorage.getItem(FONT_SCALE_STORAGE_KEY) ?? "87.5");
   }, [open]);
 
   useEffect(() => {
