@@ -83,6 +83,7 @@ export const chats = pgTable("chats", {
   /** Null = a general chat, not scoped to a course (§8). */
   courseId: uuid("course_id").references(() => courses.id, { onDelete: "set null" }),
   title: text("title").notNull().default("New chat"),
+  isPinned: integer("is_pinned").notNull().default(0),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("chats_user_idx").on(t.userId), index("chats_course_idx").on(t.courseId)]);

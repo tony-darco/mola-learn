@@ -200,6 +200,75 @@ async function persistArtifact(result: unknown, ctx: ToolContext): Promise<Strea
   return { type: "artifact", artifact: artifactRecordSchema.parse(row) };
 }
 
+/** PATCH: Update chat metadata (title, courseId, isPinned) */
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ chatId: string }> },
+) {
+  try {
+    const { chatId } = await params;
+    const session = await requireSession();
+
+    // §9 — ownership check
+    const chat = await requireOwned("chat", chatId, session);
+
+    const body = (await req.json().catch(() => ({}))) as {
+      title?: string;
+      courseId?: string | null;
+      isPinned?: boolean;
+    };
+
+    // Validate course ownership if provided
+    if (body.courseId) {
+      const [course] = await db.select().from(courses)
+        .where(eq(courses.id, body.courseId)).limit(1);
+      if (!course || course.userId !== session.userId) {
+        return Response.json({ error: "course not found" }, { status: 404 });
+      }
+    }
+
+    const updateData: Partial<typeof chat> = {};
+    if (body.title !== undefined) updateData.title = body.title.trim() || "Untitled";
+    if (body.courseId !== undefined) updateData.courseId = body.courseId;
+    if (body.isPinned !== undefined) updateData.isPinned = body.isPinned ? 1 : 0;
+
+    const [updated] = await db.update(chats)
+      .set(updateData)
+      .where(eq(chats.id, chatId))
+      .returning();
+
+    return Response.json({
+      id: updated!.id,
+      title: updated!.title,
+      courseId: updated!.courseId,
+      isPinned: updated!.isPinned,
+    });
+  } catch (err) {
+    return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });
+  }
+}
+
+/** DELETE: Delete a chat */
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ chatId: string }> },
+) {
+  try {
+    const { chatId } = await params;
+    const session = await requireSession();
+
+    // §9 — ownership check
+    await requireOwned("chat", chatId, session);
+
+    // Delete will cascade to messages and other related records
+    await db.delete(chats).where(eq(chats.id, chatId));
+
+    return Response.json({ success: true });
+  } catch (err) {
+    return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });
+  }
+}
+
 /** GET is here so the §9 cross-user denial test has a plain endpoint to hit. */
 export async function GET(
   _req: Request,

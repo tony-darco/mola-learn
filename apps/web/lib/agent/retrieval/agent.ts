@@ -31,7 +31,8 @@ Rules:
 - Ground every claim in a retrieved chunk. If you cannot find something, say so plainly.
 - If any relevant document could not be fully searched (not yet indexed), tell the
   student that explicitly in your final answer — do not silently omit it.
-- Keep the final answer concise and cite the source document by title.`;
+- Keep the final answer concise and cite the source document by title.
+- Never use emoji, in any output, for any reason.`;
 
 export function buildRetrievalBriefing(question: string): string {
   return `Student question: ${question}\n\nSearch the available course documents and answer using only what the tools return.`;

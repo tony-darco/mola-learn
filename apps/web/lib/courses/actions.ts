@@ -18,6 +18,9 @@ async function requireOwnTerm(userId: string, termId: string) {
   return term;
 }
 
+// Called directly from the settings modal's Courses section (POST
+// /api/courses), not via <form action> — the modal stays open and shows the
+// new course in its list rather than navigating away.
 export async function createCourseAction(formData: FormData) {
   const session = await requireSession();
 
@@ -46,9 +49,16 @@ export async function createCourseAction(formData: FormData) {
     });
   }
 
-  redirect(`/courses/${course!.id}`);
+  return course!;
 }
 
+// These three actions back "no Save button" fields (CourseSummaryField,
+// CourseInstructionsField, CourseMemoryField) that submit on Enter/blur while
+// the student is still on the page — deliberately no redirect() here. A
+// redirect back to the same URL triggers a full RSC refresh of the page,
+// which is exactly the visible "reload" flash those fields are meant to
+// avoid; the write lands quietly and the already-rendered form just keeps
+// its current value.
 export async function updateCourseSummaryAction(formData: FormData) {
   const session = await requireSession();
   const courseId = String(formData.get("courseId") ?? "");
@@ -56,7 +66,6 @@ export async function updateCourseSummaryAction(formData: FormData) {
 
   await requireOwned("course", courseId, session);
   await db.update(courses).set({ summary: summary || null }).where(eq(courses.id, courseId));
-  redirect(`/courses/${courseId}`);
 }
 
 export async function updateCourseInstructionsAction(formData: FormData) {
@@ -67,7 +76,6 @@ export async function updateCourseInstructionsAction(formData: FormData) {
 
   await requireOwned("course", courseId, session);
   await db.update(courses).set({ professor, instructions }).where(eq(courses.id, courseId));
-  redirect(`/courses/${courseId}`);
 }
 
 /** Panel 2 — per-course memory (§8). One row per course; upsert on the unique index. */
@@ -84,7 +92,6 @@ export async function updateCourseMemoryAction(formData: FormData) {
   } else if (content) {
     await db.insert(courseMemory).values({ userId: session.userId, courseId, content });
   }
-  redirect(`/courses/${courseId}`);
 }
 
 /** Panel 3 — Context. Same three-step handoff as course creation (§12). */
@@ -99,20 +106,6 @@ export async function uploadCourseDocumentAction(formData: FormData) {
 
   await uploadDocumentAndEnqueue({ userId: session.userId, courseId, kind, file });
   redirect(`/courses/${courseId}`);
-}
-
-/** Reuses the Phase 0 chat thin slice — a chat scoped to this course (§8). */
-export async function createCourseChatAction(formData: FormData) {
-  const session = await requireSession();
-  const courseId = String(formData.get("courseId") ?? "");
-  await requireOwned("course", courseId, session);
-
-  const [chat] = await db
-    .insert(chats)
-    .values({ userId: session.userId, courseId, title: "New chat" })
-    .returning();
-
-  redirect(`/courses/${courseId}?chat=${chat!.id}`);
 }
 
 export async function listCourseChats(userId: string, courseId: string) {

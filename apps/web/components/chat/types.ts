@@ -23,6 +23,7 @@ export type ChatSummary = {
   title: string;
   courseId: string | null;
   updatedAt: string;
+  isPinned: number;
 };
 
 export type CourseSummary = {

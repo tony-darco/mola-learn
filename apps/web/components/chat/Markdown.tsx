@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ComponentProps } from "react";
@@ -7,7 +8,7 @@ import type { ComponentProps } from "react";
 /** Assistant/user turn text, rendered as markdown with fenced code blocks. */
 export function Markdown({ text }: { text: string }) {
   return (
-    <div className="markdown">
+    <div className="markdown text-base">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
         {text}
       </ReactMarkdown>
@@ -18,11 +19,44 @@ export function Markdown({ text }: { text: string }) {
 function CodeBlock({ className, children, ...rest }: ComponentProps<"code">) {
   const isBlock = /language-/.test(className ?? "");
   if (!isBlock) {
-    return <code className="inline-code" {...rest}>{children}</code>;
+    return (
+      <code className="rounded border border-border bg-bg px-1.5 py-px font-mono text-[0.9em]" {...rest}>
+        {children}
+      </code>
+    );
   }
+
+  const language = /language-(\w+)/.exec(className ?? "")?.[1] ?? "";
+
   return (
-    <pre className="code-block">
-      <code className={className} {...rest}>{children}</code>
-    </pre>
+    <div className="my-3 overflow-hidden rounded-lg border border-border">
+      <div className="flex items-center justify-between border-b border-border bg-surface px-3 py-1.5 text-sm text-fg-muted">
+        <span>{language || "text"}</span>
+        <CopyButton text={String(children)} />
+      </div>
+      <pre className="overflow-x-auto bg-surface p-3.5">
+        <code className={`${className ?? ""} font-mono text-sm whitespace-pre`} {...rest}>
+          {children}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="text-fg-muted hover:text-accent"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
   );
 }
