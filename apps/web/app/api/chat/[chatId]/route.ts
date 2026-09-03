@@ -61,6 +61,14 @@ export async function POST(
       content: userText || "(asked for a hint)",
     }).returning();
 
+    // A turn's own activity must bump the parent chat's updatedAt — the
+    // sidebar sorts by desc(chats.updatedAt) (app/api/chat/route.ts), and
+    // without this a chat you're actively talking in never rises above one
+    // merely created earlier and never opened again.
+    await db.update(chats)
+      .set({ updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+
     const registry = buildRegistry();
     const context = await assembleContext({
       userId: session.userId,

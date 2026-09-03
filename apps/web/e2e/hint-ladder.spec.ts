@@ -8,7 +8,11 @@ import { lastAssistantReply, newGeneralChat, pullHint, sendMessage } from "./hel
  * checks, so this file gets a generous overall budget.
  */
 test.use({ storageState: ALICE_STORAGE });
-test.setTimeout(3 * 60_000); // diagnostic run per coordinator — was 10 min, hiding a hung request
+// Measured directly (isolated runs, no contending Ollama clients): 5 real round
+// trips in this file took 70s-233s *each*, totaling 627s-889s end to end — a
+// "thinking" model's reasoning-token budget varies a lot run to run. 20 min
+// gives real headroom above the worst observed total without being unbounded.
+test.setTimeout(20 * 60_000);
 
 test("hint rungs escalate pointing -> teaching -> bottom_out only on explicit pulls, are never named to the student, and lock after bottom-out", async ({
   page,

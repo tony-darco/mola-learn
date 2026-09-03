@@ -4,10 +4,12 @@ import { expect } from "@playwright/test";
 /**
  * A real Ollama round trip on the target model (qwen3.6:27b, a "thinking"
  * model — see CONTRACTS.md's resolved-issues section) can run well past
- * Playwright's ~5s default. 120s is generous but bounded; actual observed
- * timings are reported alongside each spec's results.
+ * Playwright's ~5s default. Measured directly, isolated (no contending
+ * Ollama clients): individual round trips ranged 70s-233s. 120s was too
+ * tight and produced client-side timeouts on otherwise-healthy, still-
+ * streaming completions — 300s gives real headroom above the observed max.
  */
-export const LLM_TIMEOUT_MS = 120_000;
+export const LLM_TIMEOUT_MS = 300_000;
 
 /**
  * Sends whatever `action` does (a Send-button click or a Hint-button click),

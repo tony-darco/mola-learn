@@ -329,3 +329,81 @@ intentionally rather than guessed at further:
   navigation.spec.ts live-turn checks** — all real-`qwen3.6:27b`-backed,
   single-run failures. Not yet distinguished from flakiness/latency — rerun
   each in isolation before assuming they're real bugs.
+
+## Update — all 6 resolved or reclassified this session
+
+Each of the 6 above was rerun in isolation (some by dedicated subagents, in
+parallel — see the `E2E_PORT`/`distDir` infra note below) before touching any
+code, per this doc's own standing advice.
+
+- **Sign-out** — fixed. `signOutAction` (`lib/auth/actions.ts`) now calls
+  `signOut({ redirect: false })` instead of `signOut({ redirectTo })`, and
+  `Sidebar.tsx`'s click handler explicitly `await`s it then calls
+  `router.push("/sign-in")`. The bare `void signOutAction()` was dropping
+  `signOut`'s internal `NEXT_REDIRECT` throw as an unhandled rejection —
+  that only reliably becomes a client navigation through a `<form action>`
+  or `startTransition`, not a plain `onClick` call. Verified 4/4 clean against
+  a production build; `next dev` runs of this spec can still occasionally
+  flash the old symptom, traced to Fast Refresh racing the click on a cold
+  dev server — a dev-mode testing artifact, not a regression (see below).
+- **flash-flicker.spec.ts** — fixed, for real this time. `ChatMain.tsx` now
+  keeps a `useRef<Map<chatId, HistoryResponse>>` cache (PROPOSALS.md §1's
+  "per-chat cache" fix) — a chatId already fetched this session hydrates
+  instantly with no loading flash, then silently revalidates in the
+  background. Verified via a production build + manual browser drive
+  (A→B→A, `get_page_text` confirmed no "Loading conversation" text ever
+  appeared). Same dev-mode Fast Refresh caveat as sign-out above.
+- **navigation.spec.ts › "sidebar list re-sorts..."** — fixed. Root cause was
+  already fully diagnosed in the test's own comment (`chats.updatedAt` never
+  bumped on send). Fix: `app/api/chat/[chatId]/route.ts` now does
+  `db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId))`
+  right when the user's message is persisted. 2/2 clean isolated passes.
+- **navigation.spec.ts › "reloading mid-conversation..."** — reclassified as
+  latency, not a bug in this test's own logic, but genuinely still red. A
+  real turn aborted server-side at `POST ... 200 in 120630ms` — almost
+  exactly `ollama.ts`'s `STALL_TIMEOUT_MS` (also 120s default). Left
+  unfixed deliberately: that abort was observed while 2-3 other specs were
+  concurrently hammering the same shared Ollama host, so it's plausibly a
+  testing-contention artifact rather than proof the production stall timeout
+  is miscalibrated — raising a *production* timeout on contention-tainted
+  evidence would be guessing. Separately noted: this test has no
+  `turn-error` fallback (unlike `helpers.ts`'s `lastAssistantReply()`), so an
+  errored turn makes it hang for its full 5-minute budget instead of failing
+  fast with a clear message — worth a small follow-up independent of the
+  timeout question.
+- **hint-ladder.spec.ts** — fixed via calibration, not a code bug.
+  `ChatMain.tsx`'s composer-disable logic already unconditionally clears
+  `busy` in a `finally` — no stuck-disabled path exists. Measured 5 real
+  isolated round trips at 70s-233s each; `e2e/helpers.ts`'s `LLM_TIMEOUT_MS`
+  raised 120s → 300s with that measurement in the comment, and this spec's
+  own `test.setTimeout` raised 3min → 20min to match.
+- **tool-calls.spec.ts** — no code bug found; two entangled artifacts, both
+  specific to this session's concurrent-subagent setup rather than the app.
+  (a) Real contention latency, same family as the above (one run logged
+  `POST ... 200 in 234645ms`). (b) A second, separate dev-mode artifact:
+  isolating `distDir` per port (below) stops build-*output* collisions but
+  NOT Fast Refresh, since every concurrent `next dev` in this one worktree
+  still watches the same shared *source* tree — any agent's file edit
+  triggers HMR in every other agent's dev server too, and was caught
+  resetting `ChatMain`'s local state mid-stream (DOM briefly showing zero
+  `turn-assistant` elements despite a healthy in-flight response). Confirmed
+  via an isolated production build: activity rows render, persist through
+  100s+ of real latency, and correctly show a `turn-error` banner on a real
+  abort — the tool-calling feature itself is correct.
+
+**Infra note for running multiple agents/specs concurrently against this
+checkout**: `playwright.config.ts` now reads `E2E_PORT` (default 3020) for
+both `baseURL` and the `next dev` port, and `next.config.ts` derives
+`distDir` from the same var (`.next-e2e-<port>/`) so concurrent runs don't
+corrupt each other's compiled build output. This is necessary but **not**
+sufficient for full isolation — see tool-calls.spec.ts above; concurrent
+`next dev` instances in one worktree still share a source tree and will
+Fast-Refresh each other on any file edit. True isolation would need separate
+worktrees (and separate ports), not just separate ports.
+
+**Also fixed, unrelated to the E2E suite**: `pnpm test` (vitest, not
+Playwright) never auto-loaded `.env.local` the way `next dev`/`next build`
+do, so `DATABASE_URL` etc. came back empty unless typed by hand on every
+invocation. Added `apps/web/vitest.setup.ts` (same `process.loadEnvFile()`
+approach `e2e/global-setup.ts` already used) and wired it into
+`vitest.config.ts`'s `test.setupFiles`.

@@ -85,13 +85,37 @@ export function ChatMain({ chatId }: { chatId: string }) {
   const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Keyed by chatId, kept for the life of this mounted ChatMain (it's never
+  // remounted between chats — see the comment below). Lets a revisit within
+  // the same session hydrate instantly instead of flashing a blank loading
+  // state (PROPOSALS.md §1 / e2e/flash-flicker.spec.ts).
+  const historyCache = useRef<Map<string, HistoryResponse>>(new Map());
+
+  function hydrate(data: HistoryResponse) {
+    const hydrated = turnsFromHistory(data);
+    setTurns(hydrated);
+    setBoundary(data.compactionBoundary);
+    setExpandedCompacted(false);
+    const r = lastRung(hydrated);
+    setRung(r);
+    setCanEscalate(computeCanEscalate(r));
+  }
 
   // Reload history on mount AND whenever the chat we're pointed at changes
   // (navigating the sidebar re-renders this component with a new chatId).
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setLoadError(null);
+
+    const cached = historyCache.current.get(chatId);
+    if (cached) {
+      // Stale-while-revalidate: paint the cached turns immediately (no
+      // spinner), then silently refresh from the network below.
+      hydrate(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
 
     fetch(`/api/chat/${chatId}`)
       .then(async (res) => {
@@ -100,16 +124,11 @@ export function ChatMain({ chatId }: { chatId: string }) {
       })
       .then((data) => {
         if (cancelled) return;
-        const hydrated = turnsFromHistory(data);
-        setTurns(hydrated);
-        setBoundary(data.compactionBoundary);
-        setExpandedCompacted(false);
-        const r = lastRung(hydrated);
-        setRung(r);
-        setCanEscalate(computeCanEscalate(r));
+        historyCache.current.set(chatId, data);
+        hydrate(data);
       })
       .catch((err: Error) => {
-        if (!cancelled) setLoadError(err.message);
+        if (!cancelled && !cached) setLoadError(err.message);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { signOutAction } from "@/lib/auth/actions";
 import { ChatLink } from "./ChatLink";
 import type { SettingsSection } from "./SettingsModal";
@@ -41,6 +42,7 @@ export function Sidebar({
   onOpenSettings: (section?: SettingsSection) => void;
   onOpenSearch: () => void;
 }) {
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [collapsed, setCollapsed] = useState(false);
@@ -192,9 +194,10 @@ export function Sidebar({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     setMenuOpen(false);
-                    void signOutAction();
+                    await signOutAction();
+                    router.push("/sign-in");
                   }}
                   className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
                 >

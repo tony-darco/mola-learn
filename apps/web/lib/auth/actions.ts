@@ -37,5 +37,8 @@ export async function signInAction(formData: FormData) {
 }
 
 export async function signOutAction() {
-  await signOut({ redirectTo: "/sign-in" });
+  // redirect: false — a bare client onClick call (not a <form action>) doesn't
+  // reliably propagate signOut()'s internal NEXT_REDIRECT throw as a client
+  // navigation. The caller does the navigation itself after this resolves.
+  await signOut({ redirect: false });
 }
