@@ -4,23 +4,33 @@ import { newCourseChat, newGeneralChat, sendMessage } from "./helpers";
 
 test.use({ storageState: ALICE_STORAGE });
 
-test("a new general chat lands in the general Chats section, a new course chat lands under its course", async ({
+/**
+ * The redesign removed per-course sidebar grouping entirely: there is one
+ * flat "Chats" list regardless of a chat's course, and a course is now just
+ * a navigational link to its own hub page (`Sidebar.tsx` — no more
+ * `.sidebar-section`/`.sidebar-section-header` per course). So "lands under
+ * its course" can no longer mean "appears in a course-labeled sidebar
+ * section" — that concept is gone. What still means something, and is what
+ * this now checks: both a general and a course-scoped chat show up in the
+ * sidebar's one Chats list, and the course-scoped one is actually persisted
+ * with the course's id (via the API, since the sidebar itself no longer
+ * surfaces that association visually at all).
+ */
+test("a new general chat and a new course chat both land in the sidebar's Chats list, and the course chat is scoped to its course", async ({
   page,
 }) => {
   await page.goto("/");
 
   const generalChatId = await newGeneralChat(page);
-  const generalSection = page
-    .locator(".sidebar-section")
-    .filter({ has: page.locator(".sidebar-section-header", { hasText: "Chats" }) });
-  await expect(generalSection.locator(`a[href="/chats/${generalChatId}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="sidebar-chat-link"][href="/chats/${generalChatId}"]`)).toBeVisible();
 
   const courseChatId = await newCourseChat(page);
-  const courseSection = page
-    .locator(".sidebar-section")
-    .filter({ has: page.locator(".sidebar-section-header", { hasText: "CMSC 421" }) });
-  await expect(courseSection.locator(`a[href="/chats/${courseChatId}"]`)).toBeVisible();
-  await expect(generalSection.locator(`a[href="/chats/${courseChatId}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-testid="sidebar-chat-link"][href="/chats/${courseChatId}"]`)).toBeVisible();
+
+  const res = await page.request.get(`/api/chat/${courseChatId}`);
+  expect(res.ok()).toBe(true);
+  const { chat } = (await res.json()) as { chat: { courseId: string | null } };
+  expect(chat.courseId, "a chat started from a course's own page should be scoped to that course").not.toBeNull();
 });
 
 test.describe("live-turn dependent navigation checks", () => {
@@ -33,7 +43,7 @@ test.describe("live-turn dependent navigation checks", () => {
     const messageText = "Just acknowledge this message in one short sentence.";
     await sendMessage(page, messageText);
 
-    const assistantBefore = await page.locator(".turn-assistant .markdown").last().innerText();
+    const assistantBefore = await page.locator('[data-testid="turn-assistant"] .markdown').last().innerText();
     expect(assistantBefore.length).toBeGreaterThan(0);
 
     await page.reload();
@@ -43,8 +53,8 @@ test.describe("live-turn dependent navigation checks", () => {
     // disagree on the whitespace between the "You" role label and the
     // message paragraph, which is a comparison-method mismatch, not a
     // real content difference.
-    await expect(page.locator(".turn-user").last()).toContainText(messageText, { timeout: 15_000 });
-    await expect(page.locator(".turn-assistant .markdown").last()).not.toBeEmpty({ timeout: 15_000 });
+    await expect(page.locator('[data-testid="turn-user"]').last()).toContainText(messageText, { timeout: 15_000 });
+    await expect(page.locator('[data-testid="turn-assistant"] .markdown').last()).not.toBeEmpty({ timeout: 15_000 });
   });
 
   test("sidebar list re-sorts to reflect a chat's own new activity", async ({ page }) => {
@@ -55,7 +65,9 @@ test.describe("live-turn dependent navigation checks", () => {
     await page.goto(`/chats/${chatXId}`);
     await sendMessage(page, "hello");
 
-    const hrefs = await page.locator(".sidebar-chat-link").evaluateAll((els) => els.map((el) => el.getAttribute("href")));
+    const hrefs = await page
+      .locator('[data-testid="sidebar-chat-link"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute("href")));
     const xIndex = hrefs.indexOf(`/chats/${chatXId}`);
     const yIndex = hrefs.indexOf(`/chats/${chatYId}`);
     expect(xIndex, "chat X must appear in the sidebar").toBeGreaterThanOrEqual(0);
