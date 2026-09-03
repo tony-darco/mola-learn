@@ -23,6 +23,16 @@ const SECTIONS = [
   { key: "apiKeys", label: "API Keys" },
 ] as const;
 
+// Dev tool: Tailwind's text-* utilities are all rem-based, so rescaling the
+// root font-size rescales every one of them at once, app-wide.
+const FONT_SCALES = [
+  { value: "87.5", label: "Small" },
+  { value: "100", label: "Default" },
+  { value: "112.5", label: "Large" },
+  { value: "125", label: "Extra large" },
+] as const;
+const FONT_SCALE_STORAGE_KEY = "mola-font-scale";
+
 export type SettingsSection = (typeof SECTIONS)[number]["key"];
 
 export function SettingsModal({
@@ -31,6 +41,9 @@ export function SettingsModal({
   const router = useRouter();
   const refreshSidebar = useRefreshSidebar();
   const [section, setSection] = useState<SettingsSection>(initialSection);
+
+  // ── General ─────────────────────────────────────────────────────────────
+  const [fontScale, setFontScale] = useState("100");
 
   // ── API keys ────────────────────────────────────────────────────────────
   const [apiKey, setApiKey] = useState<PublicApiKey | null>(null);
@@ -62,6 +75,11 @@ export function SettingsModal({
     // Only meant to seed the section when the modal opens, not to fight the
     // user's own clicks in the sidebar afterward.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setFontScale(localStorage.getItem(FONT_SCALE_STORAGE_KEY) ?? "100");
   }, [open]);
 
   useEffect(() => {
@@ -119,6 +137,12 @@ export function SettingsModal({
   }, [open, section]);
 
   if (!open) return null;
+
+  function handleSetFontScale(value: string) {
+    document.documentElement.style.fontSize = `${value}%`;
+    localStorage.setItem(FONT_SCALE_STORAGE_KEY, value);
+    setFontScale(value);
+  }
 
   async function handleSaveKey() {
     setKeyBusy(true);
@@ -265,7 +289,28 @@ export function SettingsModal({
           {section === "general" && (
             <div className="max-w-md">
               <h2 className="mb-1 text-sm font-semibold text-fg">General</h2>
-              <p className="text-xs text-fg-muted">Appearance and font settings — coming soon.</p>
+              <p className="mb-4 text-xs text-fg-muted">Appearance settings — coming soon.</p>
+
+              <div className="border-t border-border pt-4">
+                <div className="mb-1 text-xs font-medium text-fg">App-wide font size</div>
+                <p className="mb-3 text-xs text-fg-muted">Dev tool — rescales all text in the app, saved on this device only.</p>
+                <div className="flex gap-2">
+                  {FONT_SCALES.map((s) => (
+                    <button
+                      key={s.value}
+                      type="button"
+                      onClick={() => handleSetFontScale(s.value)}
+                      className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                        fontScale === s.value
+                          ? "border-accent bg-accent text-accent-fg"
+                          : "border-border text-fg-muted hover:bg-bg hover:text-fg"
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
