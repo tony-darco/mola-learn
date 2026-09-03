@@ -52,16 +52,21 @@ export async function pullHint(page: Page): Promise<string | null> {
  * Reads the last assistant turn's rendered reply text, failing fast with a
  * clear diagnostic if the turn errored instead of producing text.
  *
- * `.turn-assistant .markdown` only exists when `turn.text` is non-empty
- * (TurnView gates `<Markdown>` on `turn.text &&`) — if the underlying LLM
- * call failed, that element never renders at all, and a bare
+ * `[data-testid="turn-assistant"] .markdown` only exists when `turn.text` is
+ * non-empty (TurnView gates `<Markdown>` on `turn.text &&`) — if the
+ * underlying LLM call failed, that element never renders at all, and a bare
  * `.last().innerText()` would silently hang for the full default action
  * timeout waiting for an element that will never appear, rather than
  * reporting the actual error banner that IS on the page.
+ *
+ * `turn-assistant`/`turn-user`/`turn-error` are `data-testid`s added to
+ * `TurnView.tsx` — the Tailwind redesign left no distinguishing CSS class on
+ * a turn (role is conveyed only by flex alignment), so there was nothing
+ * stable to select on without them.
  */
 export async function lastAssistantReply(page: Page): Promise<string> {
-  const lastTurn = page.locator(".turn-assistant").last();
-  const errorBox = lastTurn.locator(".turn-error");
+  const lastTurn = page.locator('[data-testid="turn-assistant"]').last();
+  const errorBox = lastTurn.locator('[data-testid="turn-error"]');
   if (await errorBox.count()) {
     throw new Error(`assistant turn errored instead of replying: ${await errorBox.innerText()}`);
   }
@@ -102,14 +107,18 @@ export async function newGeneralChat(page: Page): Promise<string> {
 }
 
 /**
- * Creates a new chat scoped to (the first/only seeded) course, via the
- * sidebar "+" next to the course section header.
+ * Creates a new chat scoped to (the first/only seeded) course.
  *
- * Note: that button's accessible name is its visible text, "+" — its
- * `title="New chat in {course.name}"` attribute is only a tooltip, not part
- * of the accname computation when the element already has text content — so
- * this locates it by class rather than by an (incorrect) accessible name.
+ * The redesign removed the old sidebar "+ next to the course" affordance
+ * entirely — course-scoped chats now start from a composer
+ * (`NewCourseChatComposer`) on the course's own detail page. This navigates
+ * there via the sidebar's course link (not by hardcoding the seeded course's
+ * name/id, so it still works if the seed data changes) and drives that
+ * composer's "Start chat" button, which POSTs to `/api/chat` with the same
+ * `{ id }` response shape `clickAndGetNewChatId` already expects.
  */
 export async function newCourseChat(page: Page): Promise<string> {
-  return clickAndGetNewChatId(page, () => page.locator(".sidebar-section-add").first().click());
+  await page.locator('a[href^="/courses/"]').first().click();
+  await page.waitForURL(/\/courses\/[^/]+$/);
+  return clickAndGetNewChatId(page, () => page.getByRole("button", { name: "Start chat" }).click());
 }

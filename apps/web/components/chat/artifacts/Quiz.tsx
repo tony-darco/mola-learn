@@ -46,6 +46,7 @@ function QuizQuestion({ index, question }: { index: number; question: Payload["q
                 }`}
                 onClick={() => { setSelected(i); setRevealed(true); }}
                 disabled={revealed}
+                aria-label={isCorrect ? `${opt} (correct answer)` : isWrongPick ? `${opt} (incorrect)` : undefined}
               >
                 {opt}
               </button>

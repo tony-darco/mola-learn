@@ -97,7 +97,7 @@ export function Sidebar({
   return (
     <aside className="relative flex h-full shrink-0 flex-col border-r border-border bg-sidebar" style={{ width }}>
       <div className="flex h-full flex-col gap-1 overflow-y-auto px-4 py-4">
-        <div className="flex min-h-[25vh] flex-col">
+        <div className="flex min-h-[25vh] shrink-0 flex-col">
           <Link href="/chat" className="px-1 text-xl font-semibold text-fg no-underline">Mola</Link>
 
           <button

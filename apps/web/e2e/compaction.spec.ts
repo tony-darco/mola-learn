@@ -22,7 +22,7 @@ test("older turns collapse behind a summary by default, and the raw transcript e
   await page.goto("/");
   await page.getByRole("link", { name: COMPACTION_CHAT }).click();
 
-  const banner = page.locator(".compacted-banner");
+  const banner = page.locator('[data-testid="compacted-banner"]');
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("12 earlier messages summarized");
   // The chat scrolls to the bottom on load (it's a long seeded transcript),

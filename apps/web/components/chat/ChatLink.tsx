@@ -53,6 +53,7 @@ export function ChatLink({
     <div className="group flex items-center gap-0 rounded-md hover:bg-surface">
       <Link
         href={`/chats/${chat.id}`}
+        data-testid="sidebar-chat-link"
         className={`flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md px-2 py-1.5 text-sm text-fg no-underline ${
           active ? "bg-surface font-semibold" : ""
         } ${isMutating ? "opacity-50" : ""}`}
