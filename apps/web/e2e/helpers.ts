@@ -4,12 +4,16 @@ import { expect } from "@playwright/test";
 /**
  * A real Ollama round trip on the target model (qwen3.6:27b, a "thinking"
  * model — see CONTRACTS.md's resolved-issues section) can run well past
- * Playwright's ~5s default. Measured directly, isolated (no contending
- * Ollama clients): individual round trips ranged 70s-233s. 120s was too
- * tight and produced client-side timeouts on otherwise-healthy, still-
- * streaming completions — 300s gives real headroom above the observed max.
+ * Playwright's ~5s default. Measured directly across several isolated runs
+ * (no contending Ollama clients): individual round trips ranged 70s-274s,
+ * and a separate isolated run had one call exceed 300s outright — this is
+ * inherent tail latency for a 27B thinking model's hint responses, not a
+ * hung request (ChatMain.tsx's send() unconditionally clears `busy` in a
+ * `finally`, so a stuck-disabled composer isn't the failure mode here).
+ * 450s gives real headroom above the demonstrated 300s shortfall; some
+ * residual flakiness on this one real-LLM spec is expected regardless.
  */
-export const LLM_TIMEOUT_MS = 300_000;
+export const LLM_TIMEOUT_MS = 450_000;
 
 /**
  * Sends whatever `action` does (a Send-button click or a Hint-button click),

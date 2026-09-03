@@ -371,12 +371,20 @@ code, per this doc's own standing advice.
   errored turn makes it hang for its full 5-minute budget instead of failing
   fast with a clear message — worth a small follow-up independent of the
   timeout question.
-- **hint-ladder.spec.ts** — fixed via calibration, not a code bug.
-  `ChatMain.tsx`'s composer-disable logic already unconditionally clears
-  `busy` in a `finally` — no stuck-disabled path exists. Measured 5 real
-  isolated round trips at 70s-233s each; `e2e/helpers.ts`'s `LLM_TIMEOUT_MS`
-  raised 120s → 300s with that measurement in the comment, and this spec's
-  own `test.setTimeout` raised 3min → 20min to match.
+- **hint-ladder.spec.ts** — improved via calibration, not a code bug, but
+  not made fully airtight (and that's expected). `ChatMain.tsx`'s
+  composer-disable logic already unconditionally clears `busy` in a
+  `finally` — no stuck-disabled path exists. Measured across several
+  isolated calibration runs (no contending Ollama clients): individual
+  `pullHint`/`sendMessage` round trips ranged 70s-274s, and one isolated
+  run had a call exceed 300s outright — real tail latency for a 27B
+  thinking model, not a hang. `e2e/helpers.ts`'s `LLM_TIMEOUT_MS` raised
+  120s → 300s → **450s** (final value, headroom above the demonstrated
+  300s shortfall) with that history in the comment; this spec's own
+  `test.setTimeout` raised 3min → 20min to match. At 300s, two genuinely
+  comparable confirmation runs went 1 pass / 1 fail — expect occasional
+  flakiness on this one real-LLM spec even at 450s; that's inherent
+  backend variance, not something fixable client-side.
 - **tool-calls.spec.ts** — no code bug found; two entangled artifacts, both
   specific to this session's concurrent-subagent setup rather than the app.
   (a) Real contention latency, same family as the above (one run logged
