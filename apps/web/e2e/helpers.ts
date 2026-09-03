@@ -2,7 +2,7 @@ import type { Page, Response } from "@playwright/test";
 import { expect } from "@playwright/test";
 
 /**
- * A real Ollama round trip on the target model (qwen3.5:27b, a "thinking"
+ * A real Ollama round trip on the target model (qwen3.6:27b, a "thinking"
  * model — see CONTRACTS.md's resolved-issues section) can run well past
  * Playwright's ~5s default. 120s is generous but bounded; actual observed
  * timings are reported alongside each spec's results.
