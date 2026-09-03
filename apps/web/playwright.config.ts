@@ -10,6 +10,10 @@ import { defineConfig, devices } from "@playwright/test";
  * ladder, tool calls) — those set their own generous per-assertion timeouts
  * rather than relying on this file's default.
  */
+// Overridable so multiple agents/worktrees can run the suite concurrently
+// against the same checkout without fighting over port 3020.
+const PORT = process.env.E2E_PORT ?? "3020";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -20,7 +24,7 @@ export default defineConfig({
   reporter: [["list"]],
   globalSetup: "./e2e/global-setup.ts",
   use: {
-    baseURL: "http://localhost:3020",
+    baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -34,8 +38,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "next dev -p 3020",
-    url: "http://localhost:3020",
+    command: `next dev -p ${PORT}`,
+    url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     stdout: "pipe",
