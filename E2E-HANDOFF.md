@@ -310,3 +310,22 @@ don't need to change:
    renderers themselves (`.flashcard`, `.quiz-*`, `.mind-map-*`) are all
    gone too and need role/text-based replacements, same pattern as
    everywhere else.
+
+## Update — post-fix-pass status (6 remaining failures, documented not fixed)
+
+Went from 3/14 passing to 8/14 after a fixing pass (selectors, routes, flows
+rewritten for the Tailwind redesign — see git log). Remaining 6, left red
+intentionally rather than guessed at further:
+
+- **Sign-out doesn't navigate to `/sign-in`** (`auth-and-ownership.spec.ts`) —
+  real bug, not flaky. Removed the `<form action>` implicit-refresh gotcha
+  (per UI-TAILWIND-HANDOFF.md's documented fix, which had missed this one
+  spot) but the redirect still doesn't happen — user stays signed in on the
+  normal app shell. Likely how `next-auth` v5's `signOut({redirectTo})`
+  propagates when invoked as a plain client-called action vs. a form submit.
+  Needs: try an explicit client-side `router.push("/sign-in")` after the
+  awaited action instead of relying on the action's internal redirect.
+- **hint-ladder.spec.ts, tool-calls.spec.ts, flash-flicker.spec.ts, two
+  navigation.spec.ts live-turn checks** — all real-`qwen3.6:27b`-backed,
+  single-run failures. Not yet distinguished from flakiness/latency — rerun
+  each in isolation before assuming they're real bugs.
