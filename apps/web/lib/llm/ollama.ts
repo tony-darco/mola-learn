@@ -65,7 +65,6 @@ export class OllamaProvider implements LLMProvider {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let toolCallSeq = 0;
 
     try {
     while (true) {
@@ -89,8 +88,17 @@ export class OllamaProvider implements LLMProvider {
 
         for (const call of chunk.message?.tool_calls ?? []) {
           yield {
+            // A per-stream() counter collides across react-loop iterations:
+            // getChatProvider's LazyProvider resolves a *new* OllamaProvider
+            // on every call() (lib/llm/index.ts), so a locally-scoped
+            // "call_1", "call_2", ... counter restarted at 1 each iteration
+            // and produced duplicate ids within a single turn (React "two
+            // children with the same key" on the activity-row list, and a
+            // second tool call's `tool_call_end` patching the first one's
+            // row instead of its own). A process-wide unique id sidesteps
+            // it regardless of how many provider instances get constructed.
             type: "tool_call",
-            id: `call_${++toolCallSeq}`,
+            id: crypto.randomUUID(),
             name: call.function.name,
             input: call.function.arguments,
           };
