@@ -87,6 +87,19 @@ Even the 873M qwen reports `thinking=true`, so picking a structurally
 non-thinking model sidesteps hidden reasoning cost rather than depending on a
 `think:false` flag this codebase never sets.
 
+> ⚠ **Updated after the Ollama fleet trim.** `llama3.2` and `gemma3:4b` — the two
+> non-thinking candidates this recommendation originally rested on — have both
+> been removed from the shared host. Re-checked against the current fleet
+> (`qwen3.6:27b` thinking, `mistral:latest`, `mxbai-embed-large`,
+> `nomic-embed-text`, `qwen3-embedding:0.6b`):
+>
+> **`mistral:latest` (7.2B) reports `thinking=false` via `/api/show`, and a real
+> title-generation call measured 8.3s** — "Thrashing Reduction by Working Set
+> Size" from the same test exchange used for the original `llama3.2` measurement
+> (7.0s). Close enough that the design's timing argument still holds.
+> **Recommendation updated: `mistral:latest` replaces `llama3.2` as
+> `MOLA_TITLE_MODEL`.** Still env-overridable if the fleet changes again.
+
 **Measured end-to-end by the orchestrator:** `llama3.2:latest` produced
 "Reducing Page Frame Replacement" from a real exchange in **7.0 seconds**.
 Compare ~80s+ on a thinking model for a trivial prompt.

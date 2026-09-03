@@ -5,9 +5,9 @@
  * so there is no live tool that produces an `artifact` stream event. These fixtures
  * are built directly against the frozen zod schema (`artifactRecordSchema.parse`
  * below guarantees that) so the inline renderers can be built and verified in a
- * real browser ahead of those agents landing. Wired to a dev-only "preview
- * renderers" affordance in the composer — never sent to the server, never
- * persisted.
+ * real browser ahead of those agents landing. Wired to a dev-only preview panel
+ * (ArtifactPreviewPanel) — never sent to the server, never persisted, never
+ * inserted into the conversation itself.
  */
 import { artifactRecordSchema, type ArtifactRecord } from "@mola/shared";
 

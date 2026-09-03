@@ -27,10 +27,10 @@ export function HintControl({
   const bottomedOut = rung !== null && !canEscalate;
 
   return (
-    <div className="hint-control">
+    <div className="flex items-center gap-2">
       <button
         type="button"
-        className="hint-button"
+        className="whitespace-nowrap rounded-lg border border-border bg-surface px-3.5 py-2 text-base text-fg disabled:cursor-default disabled:opacity-50"
         onClick={onPull}
         disabled={disabled || bottomedOut}
         title={bottomedOut ? "No more hints for this question" : "Get a hint"}
@@ -38,13 +38,18 @@ export function HintControl({
         {rung ? "Another hint" : "Hint"}
       </button>
       {rung && (
-        <span className="hint-dots" aria-label={`Hint ${rungIndex + 1} of ${HINT_RUNGS.length}`}>
+        <span className="inline-flex gap-1" aria-label={`Hint ${rungIndex + 1} of ${HINT_RUNGS.length}`}>
           {HINT_RUNGS.map((_, i) => (
-            <span key={i} className={`hint-dot${i <= rungIndex ? " hint-dot-filled" : ""}`} />
+            <span
+              key={i}
+              className={`inline-block h-1.5 w-1.5 rounded-full ${i <= rungIndex ? "bg-accent" : "bg-border"}`}
+            />
           ))}
         </span>
       )}
-      {bottomedOut && <span className="hint-bottomed-out">That&apos;s as far as hints go — try it yourself.</span>}
+      {bottomedOut && (
+        <span className="text-xs text-fg-muted">That&apos;s as far as hints go — try it yourself.</span>
+      )}
     </div>
   );
 }

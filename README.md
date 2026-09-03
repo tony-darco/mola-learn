@@ -46,14 +46,16 @@ peek — see "Verifying the security boundary" below.
 
 ## Running it
 
-Four things: Docker, Node 20+, pnpm, and an Ollama host.
+Three things: Node 20+, pnpm, and an Ollama host. Postgres and LocalStack run
+as Docker containers on a remote host (192.168.1.17) — no local Docker
+install needed, just SSH access (see `infra/docker-remote.sh`).
 
 ```bash
 pnpm install
-pnpm up                 # Postgres + pgvector, LocalStack S3
+pnpm docker:up           # Postgres + pgvector, LocalStack S3 (remote)
 pnpm db:migrate
 pnpm db:seed
-pnpm dev                # http://localhost:3000
+pnpm dev                 # http://localhost:3000
 ```
 
 Then open **http://localhost:3000** → **Sign up** → create a course.
@@ -76,7 +78,7 @@ MOLA_RAW_BUCKET=mola-raw
 
 ```
 OLLAMA_HOST=http://192.168.1.17:11434
-MOLA_CHAT_MODEL=qwen3.5:27b
+MOLA_CHAT_MODEL=qwen3.6:27b
 ```
 
 That machine must be reachable and running Ollama. To use a different one, change
@@ -91,14 +93,14 @@ Embeddings are separate and **not** user-selectable — `qwen3-embedding:0.6b` a
 
 | Symptom | Cause |
 |---|---|
-| `ECONNREFUSED ... 5433` | `pnpm up` not run, or Postgres still starting |
+| `ECONNREFUSED ... 5433` | `pnpm docker:up` not run, or Postgres still starting |
 | Chat hangs, then errors | `OLLAMA_HOST` unreachable — `curl $OLLAMA_HOST/api/tags` |
 | `model not found` | `MOLA_CHAT_MODEL` isn't pulled on that host |
 | Empty page after sign-in | New account, no courses yet — expected. Add a course |
 | `MOLA_ENCRYPTION_KEY is not set` | Add it to `.env.local` before saving a BYOK key in Settings |
-| Course upload fails | `pnpm up` not run — LocalStack (`mola-raw` bucket) isn't up |
+| Course upload fails | `pnpm docker:up` not run — LocalStack (`mola-raw` bucket) isn't up |
 
-`docker compose -f infra/docker-compose.yml logs -f` for the containers.
+`infra/docker-remote.sh logs -f` for the containers.
 
 ---
 
@@ -138,14 +140,14 @@ apps/ingest     Python worker — empty, Agent B
 packages/db     Drizzle schema + migrations (single source of truth)
 packages/shared Embedding config, artifact schema, SSE taxonomy
 evals/golden    20-question retrieval golden set + baseline results
-infra           docker-compose; terraform/ is empty until Phase 3
+infra           docker-compose (runs on 192.168.1.17, see docker-remote.sh); terraform/ is empty until Phase 3
 ```
 
 ## Commands
 
 ```bash
-pnpm dev              # dev server
-pnpm up / pnpm down   # local Postgres + LocalStack
+pnpm dev                        # dev server
+pnpm docker:up / docker:down    # Postgres + LocalStack (remote, on 192.168.1.17)
 pnpm db:generate      # new migration from schema changes
 pnpm db:migrate       # apply migrations
 pnpm db:seed          # idempotent — safe to re-run

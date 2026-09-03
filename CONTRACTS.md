@@ -164,10 +164,14 @@ syllabus corpus, so re-measure on a textbook before treating it as settled.
 **Resolved — tool calls leaking as text.** Seen once with `llama3.2` on a compound
 question: the model emitted `{"name": "read_course_fact", ...}` as message content
 instead of a structured `tool_calls` field, and it streamed to the user as visible
-JSON. Re-tested on the target model `qwen3.5:27b`: 3/3 clean, two correctly
+JSON. Re-tested on the target model at the time, `qwen3.5:27b`: 3/3 clean, two correctly
 structured calls each. Small-model artifact, not a loop defect. No fix was written.
 
-**Resolved — the model announced the hint rung.** `qwen3.5:27b` opened replies with
+**Resolved — the model announced the hint rung.** `qwen3.5:27b` (the target model at
+the time; the project has since moved to `qwen3.6:27b` after `qwen3.5:27b` was
+retired from the shared Ollama host — the fix is a prompt rule, not model-specific,
+but the specific finding below has not been re-verified against the current
+default) opened replies with
 "Let me help with a **teaching hint**" and "**Bottom-Out Hint:**", which tells the
 student they are being walked up a ladder. `SOCRATIC_BASE` in
 `lib/context/hint-ladder.ts` now forbids naming the scaffolding; re-tested 3/3 clean

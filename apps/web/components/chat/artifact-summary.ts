@@ -20,14 +20,15 @@ export function summarizeArtifact(payload: ArtifactPayload): string {
   }
 }
 
+/** Monochrome glyphs, not emoji — matches the rest of the app's icon language (◐ ◆ ✓ ✕ …). */
 export function artifactIcon(kind: ArtifactPayload["kind"]): string {
   switch (kind) {
     case "flashcard_deck":
-      return "🗂";
+      return "▤";
     case "quiz":
-      return "📝";
+      return "?";
     case "mind_map":
-      return "🧠";
+      return "◈";
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;

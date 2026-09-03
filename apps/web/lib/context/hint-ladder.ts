@@ -53,7 +53,9 @@ The ladder is our internal structure, not something the student is made to watch
 
 Ground every claim about course material in retrieved sources. If you do not have the
 source, say what you do not have. Never invent a definition, a formula, or a page
-number.`;
+number.
+
+Never use emoji, in any reply, for any reason.`;
 
 /** Layer 4 text for the current rung. Rung is supplied by the caller, never inferred. */
 export function buildLayer4(rung: HintRung | null, courseInstructions: string | null): string {
