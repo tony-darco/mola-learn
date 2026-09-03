@@ -13,7 +13,10 @@ export function ActivityRow({ entry }: { entry: ActivityEntry }) {
 
   if (entry.kind === "subagent") {
     return (
-      <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-md border border-dashed border-border bg-surface px-2.5 py-1 text-sm text-fg-muted">
+      <div
+        data-testid="activity-row-subagent"
+        className="mb-1.5 inline-flex items-center gap-1.5 rounded-md border border-dashed border-border bg-surface px-2.5 py-1 text-sm text-fg-muted"
+      >
         <span className="text-xs">{entry.status === "running" ? "◐" : "◆"}</span>
         <span>{entry.label}</span>
         {entry.status === "running" && (
@@ -25,9 +28,10 @@ export function ActivityRow({ entry }: { entry: ActivityEntry }) {
 
   const canExpand = Boolean(entry.summary);
   return (
-    <div className="mb-1.5 text-sm text-fg-muted">
+    <div data-testid="activity-row-tool" className="mb-1.5 text-sm text-fg-muted">
       <button
         type="button"
+        data-testid="activity-row-header"
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-fg-muted disabled:cursor-default"
         onClick={() => canExpand && setOpen((o) => !o)}
         aria-expanded={open}
@@ -39,7 +43,7 @@ export function ActivityRow({ entry }: { entry: ActivityEntry }) {
         {canExpand && <span className="text-[11px]">{open ? "▾" : "▸"}</span>}
       </button>
       {open && entry.summary && (
-        <div className="ml-1 mt-1 max-w-[480px] rounded-md bg-bg px-2.5 py-2 text-[13.5px]">{entry.summary}</div>
+        <div data-testid="activity-detail" className="ml-1 mt-1 max-w-[480px] rounded-md bg-bg px-2.5 py-2 text-[13.5px]">{entry.summary}</div>
       )}
     </div>
   );

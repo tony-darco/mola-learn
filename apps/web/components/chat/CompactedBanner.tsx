@@ -23,7 +23,7 @@ export function CompactedBanner({
   const [showSummary, setShowSummary] = useState(false);
 
   return (
-    <div className="mb-4 rounded-lg border border-border bg-surface px-3.5 py-2.5">
+    <div data-testid="compacted-banner" className="mb-4 rounded-lg border border-border bg-surface px-3.5 py-2.5">
       <div className="flex items-center gap-3 text-sm text-fg-muted">
         <span>
           {hiddenCount} earlier message{hiddenCount === 1 ? "" : "s"} summarized

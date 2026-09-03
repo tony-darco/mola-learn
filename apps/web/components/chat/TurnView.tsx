@@ -8,7 +8,10 @@ import type { Turn } from "./types";
 export function TurnView({ turn }: { turn: Turn }) {
   const isUser = turn.role === "user";
   return (
-    <div className={`mb-6 flex flex-col ${isUser ? "items-end" : "items-start"}`}>
+    <div
+      data-testid={isUser ? "turn-user" : "turn-assistant"}
+      className={`mb-6 flex flex-col ${isUser ? "items-end" : "items-start"}`}
+    >
       <div className="mb-1 px-1 text-sm font-medium text-fg-muted">{isUser ? "You" : "Mola"}</div>
 
       <div className={isUser ? "max-w-[85%]" : "w-full"}>
@@ -27,7 +30,10 @@ export function TurnView({ turn }: { turn: Turn }) {
         {turn.artifacts.map((a) => <ArtifactBlock key={a.id} artifact={a} />)}
 
         {turn.error && (
-          <div className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+          <div
+            data-testid="turn-error"
+            className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-400"
+          >
             {turn.error}
           </div>
         )}

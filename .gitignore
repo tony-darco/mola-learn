@@ -24,3 +24,12 @@ pgdata/
 .terraform/
 *.tfstate
 *.tfstate.*
+
+# Playwright (apps/web/e2e)
+apps/web/e2e/.auth/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/blob-report/
+
+# local-only dev-server launch config for the Browser preview tool
+.claude/
