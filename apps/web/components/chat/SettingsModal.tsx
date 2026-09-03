@@ -17,8 +17,10 @@ const YEAR_LABEL: Record<string, string> = {
 
 const SECTIONS = [
   { key: "general", label: "General" },
+  { key: "account", label: "Account" },
   { key: "courses", label: "Courses" },
-  { key: "profile", label: "Profile" },
+  { key: "memory", label: "Memory" },
+  { key: "apiKeys", label: "API Keys" },
 ] as const;
 
 export type SettingsSection = (typeof SECTIONS)[number]["key"];
@@ -30,10 +32,11 @@ export function SettingsModal({
   const refreshSidebar = useRefreshSidebar();
   const [section, setSection] = useState<SettingsSection>(initialSection);
 
-  // ── General (BYOK) ──────────────────────────────────────────────────────
+  // ── API keys ────────────────────────────────────────────────────────────
   const [apiKey, setApiKey] = useState<PublicApiKey | null>(null);
   const [loadingKey, setLoadingKey] = useState(true);
   const [keyBusy, setKeyBusy] = useState(false);
+  const [ownKey, setOwnKey] = useState(false);
   const [provider, setProvider] = useState<string>("openai");
   const [key, setKey] = useState("");
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -46,7 +49,7 @@ export function SettingsModal({
   const [courseError, setCourseError] = useState<string | null>(null);
   const courseFormRef = useRef<HTMLFormElement>(null);
 
-  // ── Profile ──────────────────────────────────────────────────────────────
+  // ── Account ──────────────────────────────────────────────────────────────
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileTerms, setProfileTerms] = useState<Term[]>([]);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -71,13 +74,16 @@ export function SettingsModal({
   }, [open, onClose]);
 
   useEffect(() => {
-    if (!open || section !== "general") return;
+    if (!open || section !== "apiKeys") return;
     setLoadingKey(true);
     setKeyError(null);
     fetch("/api/settings")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { apiKey: PublicApiKey | null } | null) => {
-        if (data) setApiKey(data.apiKey);
+        if (data) {
+          setApiKey(data.apiKey);
+          setOwnKey(data.apiKey !== null);
+        }
       })
       .finally(() => setLoadingKey(false));
   }, [open, section]);
@@ -98,7 +104,7 @@ export function SettingsModal({
   }, [open, section]);
 
   useEffect(() => {
-    if (!open || section !== "profile") return;
+    if (!open || section !== "account") return;
     setLoadingProfile(true);
     setProfileError(null);
     fetch("/api/profile")
@@ -134,13 +140,18 @@ export function SettingsModal({
     }
   }
 
-  async function handleRemoveKey() {
+  async function handleUseLocalModel() {
+    if (!apiKey) {
+      setOwnKey(false);
+      return;
+    }
     setKeyBusy(true);
     setKeyError(null);
     try {
       const res = await fetch("/api/settings", { method: "DELETE" });
       if (!res.ok) throw new Error("failed to remove key");
       setApiKey(null);
+      setOwnKey(false);
     } catch (err) {
       setKeyError(err instanceof Error ? err.message : "failed to remove key");
     } finally {
@@ -222,17 +233,17 @@ export function SettingsModal({
       onClick={onClose}
     >
       <div
-        className="flex h-[70vh] w-full max-w-3xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
+        className="flex h-[min(640px,58vh)] w-full max-w-4xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <aside className="flex w-48 shrink-0 flex-col border-r border-border bg-sidebar p-3">
+        <aside className="flex w-64 shrink-0 flex-col gap-1.5 border-r border-border bg-sidebar p-5">
           <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Settings</div>
           {SECTIONS.map((s) => (
             <button
               key={s.key}
               type="button"
               onClick={() => setSection(s.key)}
-              className={`rounded-md px-2.5 py-1.5 text-left text-sm ${
+              className={`rounded-md px-3.5 py-2.5 text-left text-base ${
                 section === s.key ? "bg-bg font-medium text-fg" : "text-fg-muted hover:bg-bg hover:text-fg"
               }`}
             >
@@ -253,155 +264,14 @@ export function SettingsModal({
 
           {section === "general" && (
             <div className="max-w-md">
-              <h2 className="mb-1 text-lg font-semibold text-fg">Model and provider</h2>
-              <p className="mb-4 text-sm text-fg-muted">Chat provider</p>
-
-              {loadingKey ? (
-                <p className="text-sm text-fg-muted">Loading…</p>
-              ) : apiKey ? (
-                <div>
-                  <p className="mb-3 text-sm text-fg">
-                    {PROVIDER_LABEL[apiKey.provider] ?? apiKey.provider} — key ending in{" "}
-                    <code className="rounded bg-bg px-1 py-0.5 font-mono text-[13px]">{apiKey.lastFour}</code>
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void handleRemoveKey()}
-                    disabled={keyBusy}
-                    className="text-sm text-accent disabled:opacity-50"
-                  >
-                    Remove key (revert to Ollama)
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <p className="text-sm text-fg-muted">
-                    Using the platform default (Ollama, self-hosted). Add your own key to switch providers.
-                  </p>
-                  <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
-                    Provider
-                    <select
-                      value={provider}
-                      onChange={(e) => setProvider(e.target.value)}
-                      className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg"
-                    >
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
-                    API key
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      value={key}
-                      onChange={(e) => setKey(e.target.value)}
-                      className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveKey()}
-                    disabled={keyBusy || !key.trim()}
-                    className="self-start rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg disabled:opacity-50"
-                  >
-                    Save
-                  </button>
-                </div>
-              )}
-
-              {keyError && <p className="mt-3 text-[13px] text-red-600 dark:text-red-400">{keyError}</p>}
-
-              <p className="mt-6 text-xs text-fg-muted">
-                Keys are encrypted at rest and never shown again after saving — only the last four
-                characters are kept for display. BYOK covers chat completions only; embeddings always
-                run on the platform&rsquo;s self-hosted model, never your key.
-              </p>
+              <h2 className="mb-1 text-lg font-semibold text-fg">General</h2>
+              <p className="text-sm text-fg-muted">Appearance and font settings — coming soon.</p>
             </div>
           )}
 
-          {section === "courses" && (
+          {section === "account" && (
             <div className="max-w-lg">
-              <h2 className="mb-1 text-lg font-semibold text-fg">Courses</h2>
-              <p className="mb-4 text-sm text-fg-muted">Add a course, or jump to one you already have.</p>
-
-              {loadingCourses ? (
-                <p className="text-sm text-fg-muted">Loading…</p>
-              ) : (
-                <>
-                  {courseTerms.length === 0 ? (
-                    <p className="mb-4 text-sm text-fg-muted">
-                      You need a term first — add one under{" "}
-                      <button type="button" onClick={() => setSection("profile")} className="text-accent underline">
-                        Profile
-                      </button>
-                      .
-                    </p>
-                  ) : (
-                    <form ref={courseFormRef} onSubmit={(e) => void handleCreateCourse(e)} encType="multipart/form-data" className="mb-6 flex flex-col gap-3">
-                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
-                        Course name
-                        <input name="name" type="text" required placeholder="Operating Systems" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
-                        Course number
-                        <input name="number" type="text" placeholder="CMSC 421" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
-                        Professor
-                        <input name="professor" type="text" placeholder="Dr. Antero" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
-                        Term
-                        <select name="termId" required className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg">
-                          {courseTerms.map((t) => (
-                            <option key={t.id} value={t.id}>{t.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
-                        Syllabus
-                        <input name="syllabus" type="file" accept=".pdf,.doc,.docx,.txt" className="text-sm text-fg" />
-                        <span className="text-xs text-fg-muted">Optional here, but without it there&rsquo;s nothing to generate a summary from.</span>
-                      </label>
-                      <button
-                        type="submit"
-                        disabled={courseBusy}
-                        className="self-start rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg disabled:opacity-50"
-                      >
-                        Create course
-                      </button>
-                      {courseError && <p className="text-[13px] text-red-600 dark:text-red-400">{courseError}</p>}
-                    </form>
-                  )}
-
-                  <div className="border-t border-border pt-4">
-                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">Your courses</div>
-                    {courseList.length === 0 ? (
-                      <p className="text-sm text-fg-muted">No courses yet.</p>
-                    ) : (
-                      <div className="flex flex-col gap-1">
-                        {courseList.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => goToCourse(c.id)}
-                            className="rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
-                          >
-                            {c.number ? `${c.number} — ` : ""}{c.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {section === "profile" && (
-            <div className="max-w-lg">
-              <h2 className="mb-1 text-lg font-semibold text-fg">Profile</h2>
+              <h2 className="mb-1 text-lg font-semibold text-fg">Account</h2>
               <p className="mb-4 text-sm text-fg-muted">Your info, and the terms your courses belong to.</p>
 
               {loadingProfile || !profile ? (
@@ -467,6 +337,187 @@ export function SettingsModal({
                   {profileError && <p className="mt-3 text-[13px] text-red-600 dark:text-red-400">{profileError}</p>}
                 </>
               )}
+            </div>
+          )}
+
+          {section === "courses" && (
+            <div className="max-w-lg">
+              <h2 className="mb-1 text-lg font-semibold text-fg">Courses</h2>
+              <p className="mb-4 text-sm text-fg-muted">Add a course, or jump to one you already have.</p>
+
+              {loadingCourses ? (
+                <p className="text-sm text-fg-muted">Loading…</p>
+              ) : (
+                <>
+                  {courseTerms.length === 0 ? (
+                    <p className="mb-4 text-sm text-fg-muted">
+                      You need a term first — add one under{" "}
+                      <button type="button" onClick={() => setSection("account")} className="text-accent underline">
+                        Account
+                      </button>
+                      .
+                    </p>
+                  ) : (
+                    <form ref={courseFormRef} onSubmit={(e) => void handleCreateCourse(e)} encType="multipart/form-data" className="mb-6 flex flex-col gap-3">
+                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
+                        Course name
+                        <input name="name" type="text" required placeholder="Operating Systems" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
+                        Course number
+                        <input name="number" type="text" placeholder="CMSC 421" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
+                        Professor
+                        <input name="professor" type="text" placeholder="Dr. Antero" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
+                        Term
+                        <select name="termId" required className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg">
+                          {courseTerms.map((t) => (
+                            <option key={t.id} value={t.id}>{t.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
+                        Syllabus
+                        <input name="syllabus" type="file" accept=".pdf,.doc,.docx,.txt" className="text-sm text-fg" />
+                        <span className="text-xs text-fg-muted">Optional here, but without it there&rsquo;s nothing to generate a summary from.</span>
+                      </label>
+                      <button
+                        type="submit"
+                        disabled={courseBusy}
+                        className="self-start rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg disabled:opacity-50"
+                      >
+                        Create course
+                      </button>
+                      {courseError && <p className="text-[13px] text-red-600 dark:text-red-400">{courseError}</p>}
+                    </form>
+                  )}
+
+                  <div className="border-t border-border pt-4">
+                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">Your courses</div>
+                    {courseList.length === 0 ? (
+                      <p className="text-sm text-fg-muted">No courses yet.</p>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        {courseList.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => goToCourse(c.id)}
+                            className="rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
+                          >
+                            {c.number ? `${c.number} — ` : ""}{c.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {section === "memory" && (
+            <div className="max-w-md">
+              <h2 className="mb-1 text-lg font-semibold text-fg">Memory</h2>
+              <p className="text-sm text-fg-muted">Nothing here yet.</p>
+            </div>
+          )}
+
+          {section === "apiKeys" && (
+            <div className="max-w-md">
+              <h2 className="mb-1 text-lg font-semibold text-fg">API keys</h2>
+              <p className="mb-4 text-sm text-fg-muted">Choose the model this chat runs on.</p>
+
+              {loadingKey ? (
+                <p className="text-sm text-fg-muted">Loading…</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <label className="flex items-center gap-2 text-sm text-fg">
+                    <input
+                      type="radio"
+                      name="modelSource"
+                      checked={!ownKey}
+                      onChange={() => void handleUseLocalModel()}
+                      disabled={keyBusy}
+                    />
+                    Local model (default) — Ollama, self-hosted
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-fg">
+                    <input
+                      type="radio"
+                      name="modelSource"
+                      checked={ownKey}
+                      onChange={() => setOwnKey(true)}
+                      disabled={keyBusy}
+                    />
+                    My own API key
+                  </label>
+
+                  {ownKey && (
+                    <div className="ml-6 flex flex-col gap-3 border-l border-border pl-4">
+                      {apiKey ? (
+                        <div>
+                          <p className="mb-2 text-sm text-fg">
+                            {PROVIDER_LABEL[apiKey.provider] ?? apiKey.provider} — key ending in{" "}
+                            <code className="rounded bg-bg px-1 py-0.5 font-mono text-[13px]">{apiKey.lastFour}</code>
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => void handleUseLocalModel()}
+                            disabled={keyBusy}
+                            className="text-sm text-accent disabled:opacity-50"
+                          >
+                            Remove key
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
+                            Provider
+                            <select
+                              value={provider}
+                              onChange={(e) => setProvider(e.target.value)}
+                              className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg"
+                            >
+                              <option value="openai">OpenAI</option>
+                              <option value="anthropic">Anthropic</option>
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
+                            API key
+                            <input
+                              type="password"
+                              autoComplete="off"
+                              value={key}
+                              onChange={(e) => setKey(e.target.value)}
+                              className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => void handleSaveKey()}
+                            disabled={keyBusy || !key.trim()}
+                            className="self-start rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg disabled:opacity-50"
+                          >
+                            Save
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {keyError && <p className="mt-3 text-[13px] text-red-600 dark:text-red-400">{keyError}</p>}
+
+              <p className="mt-6 text-xs text-fg-muted">
+                Keys are encrypted at rest and never shown again after saving — only the last four
+                characters are kept for display. BYOK covers chat completions only; embeddings always
+                run on the platform&rsquo;s self-hosted model, never your key.
+              </p>
             </div>
           )}
         </div>

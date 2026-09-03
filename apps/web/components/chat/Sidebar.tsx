@@ -174,11 +174,11 @@ export function Sidebar({
                   type="button"
                   onClick={() => {
                     setMenuOpen(false);
-                    onOpenSettings("profile");
+                    onOpenSettings("account");
                   }}
                   className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
                 >
-                  Profile
+                  Account
                 </button>
                 <button
                   type="button"
