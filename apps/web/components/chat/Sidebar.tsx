@@ -190,14 +190,16 @@ export function Sidebar({
                 >
                   Settings
                 </button>
-                <form action={signOutAction}>
-                  <button
-                    type="submit"
-                    className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
-                  >
-                    Sign out
-                  </button>
-                </form>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void signOutAction();
+                  }}
+                  className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
+                >
+                  Sign out
+                </button>
               </div>
             )}
             <button
