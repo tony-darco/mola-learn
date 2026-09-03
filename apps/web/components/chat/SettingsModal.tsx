@@ -243,7 +243,7 @@ export function SettingsModal({
               key={s.key}
               type="button"
               onClick={() => setSection(s.key)}
-              className={`rounded-md px-3.5 py-2.5 text-left text-base ${
+              className={`rounded-md px-3.5 py-2.5 text-left text-xs ${
                 section === s.key ? "bg-bg font-medium text-fg" : "text-fg-muted hover:bg-bg hover:text-fg"
               }`}
             >
@@ -264,32 +264,32 @@ export function SettingsModal({
 
           {section === "general" && (
             <div className="max-w-md">
-              <h2 className="mb-1 text-lg font-semibold text-fg">General</h2>
-              <p className="text-sm text-fg-muted">Appearance and font settings — coming soon.</p>
+              <h2 className="mb-1 text-sm font-semibold text-fg">General</h2>
+              <p className="text-xs text-fg-muted">Appearance and font settings — coming soon.</p>
             </div>
           )}
 
           {section === "account" && (
             <div className="max-w-lg">
-              <h2 className="mb-1 text-lg font-semibold text-fg">Account</h2>
-              <p className="mb-4 text-sm text-fg-muted">Your info, and the terms your courses belong to.</p>
+              <h2 className="mb-1 text-sm font-semibold text-fg">Account</h2>
+              <p className="mb-4 text-xs text-fg-muted">Your info, and the terms your courses belong to.</p>
 
               {loadingProfile || !profile ? (
-                <p className="text-sm text-fg-muted">Loading…</p>
+                <p className="text-xs text-fg-muted">Loading…</p>
               ) : (
                 <>
                   <form onSubmit={(e) => void handleSaveProfile(e)} className="mb-6 flex flex-col gap-3">
                     <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                       Name
-                      <input name="name" defaultValue={profile.name ?? ""} required className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                      <input name="name" defaultValue={profile.name ?? ""} required className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg" />
                     </label>
                     <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                       University
-                      <input name="university" defaultValue={profile.university ?? ""} className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                      <input name="university" defaultValue={profile.university ?? ""} className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg" />
                     </label>
                     <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                       Year
-                      <select name="year" defaultValue={profile.year ?? ""} className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg">
+                      <select name="year" defaultValue={profile.year ?? ""} className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg">
                         <option value="">—</option>
                         {Object.entries(YEAR_LABEL).map(([value, text]) => (
                           <option key={value} value={value}>{text}</option>
@@ -312,7 +312,7 @@ export function SettingsModal({
                         value={newTermLabel}
                         onChange={(e) => setNewTermLabel(e.target.value)}
                         placeholder="Fall 2026"
-                        className="flex-1 rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg"
+                        className="flex-1 rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg"
                       />
                       <button
                         type="button"
@@ -324,9 +324,9 @@ export function SettingsModal({
                       </button>
                     </div>
                     {profileTerms.length === 0 ? (
-                      <p className="text-sm text-fg-muted">No terms yet.</p>
+                      <p className="text-xs text-fg-muted">No terms yet.</p>
                     ) : (
-                      <ul className="flex flex-col gap-1 text-sm text-fg">
+                      <ul className="flex flex-col gap-1 text-xs text-fg">
                         {profileTerms.map((t) => (
                           <li key={t.id}>{t.label}</li>
                         ))}
@@ -342,15 +342,15 @@ export function SettingsModal({
 
           {section === "courses" && (
             <div className="max-w-lg">
-              <h2 className="mb-1 text-lg font-semibold text-fg">Courses</h2>
-              <p className="mb-4 text-sm text-fg-muted">Add a course, or jump to one you already have.</p>
+              <h2 className="mb-1 text-sm font-semibold text-fg">Courses</h2>
+              <p className="mb-4 text-xs text-fg-muted">Add a course, or jump to one you already have.</p>
 
               {loadingCourses ? (
-                <p className="text-sm text-fg-muted">Loading…</p>
+                <p className="text-xs text-fg-muted">Loading…</p>
               ) : (
                 <>
                   {courseTerms.length === 0 ? (
-                    <p className="mb-4 text-sm text-fg-muted">
+                    <p className="mb-4 text-xs text-fg-muted">
                       You need a term first — add one under{" "}
                       <button type="button" onClick={() => setSection("account")} className="text-accent underline">
                         Account
@@ -361,19 +361,19 @@ export function SettingsModal({
                     <form ref={courseFormRef} onSubmit={(e) => void handleCreateCourse(e)} encType="multipart/form-data" className="mb-6 flex flex-col gap-3">
                       <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                         Course name
-                        <input name="name" type="text" required placeholder="Operating Systems" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                        <input name="name" type="text" required placeholder="Operating Systems" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg" />
                       </label>
                       <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                         Course number
-                        <input name="number" type="text" placeholder="CMSC 421" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                        <input name="number" type="text" placeholder="CMSC 421" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg" />
                       </label>
                       <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                         Professor
-                        <input name="professor" type="text" placeholder="Dr. Antero" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg" />
+                        <input name="professor" type="text" placeholder="Dr. Antero" className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg" />
                       </label>
                       <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                         Term
-                        <select name="termId" required className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg">
+                        <select name="termId" required className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg">
                           {courseTerms.map((t) => (
                             <option key={t.id} value={t.id}>{t.label}</option>
                           ))}
@@ -381,7 +381,7 @@ export function SettingsModal({
                       </label>
                       <label className="flex flex-col gap-1.5 text-[13px] text-fg-muted">
                         Syllabus
-                        <input name="syllabus" type="file" accept=".pdf,.doc,.docx,.txt" className="text-sm text-fg" />
+                        <input name="syllabus" type="file" accept=".pdf,.doc,.docx,.txt" className="text-xs text-fg" />
                         <span className="text-xs text-fg-muted">Optional here, but without it there&rsquo;s nothing to generate a summary from.</span>
                       </label>
                       <button
@@ -398,7 +398,7 @@ export function SettingsModal({
                   <div className="border-t border-border pt-4">
                     <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">Your courses</div>
                     {courseList.length === 0 ? (
-                      <p className="text-sm text-fg-muted">No courses yet.</p>
+                      <p className="text-xs text-fg-muted">No courses yet.</p>
                     ) : (
                       <div className="flex flex-col gap-1">
                         {courseList.map((c) => (
@@ -406,7 +406,7 @@ export function SettingsModal({
                             key={c.id}
                             type="button"
                             onClick={() => goToCourse(c.id)}
-                            className="rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
+                            className="rounded-md px-2.5 py-1.5 text-left text-xs text-fg hover:bg-bg"
                           >
                             {c.number ? `${c.number} — ` : ""}{c.name}
                           </button>
@@ -421,21 +421,21 @@ export function SettingsModal({
 
           {section === "memory" && (
             <div className="max-w-md">
-              <h2 className="mb-1 text-lg font-semibold text-fg">Memory</h2>
-              <p className="text-sm text-fg-muted">Nothing here yet.</p>
+              <h2 className="mb-1 text-sm font-semibold text-fg">Memory</h2>
+              <p className="text-xs text-fg-muted">Nothing here yet.</p>
             </div>
           )}
 
           {section === "apiKeys" && (
             <div className="max-w-md">
-              <h2 className="mb-1 text-lg font-semibold text-fg">API keys</h2>
-              <p className="mb-4 text-sm text-fg-muted">Choose the model this chat runs on.</p>
+              <h2 className="mb-1 text-sm font-semibold text-fg">API keys</h2>
+              <p className="mb-4 text-xs text-fg-muted">Choose the model this chat runs on.</p>
 
               {loadingKey ? (
-                <p className="text-sm text-fg-muted">Loading…</p>
+                <p className="text-xs text-fg-muted">Loading…</p>
               ) : (
                 <div className="flex flex-col gap-3">
-                  <label className="flex items-center gap-2 text-sm text-fg">
+                  <label className="flex items-center gap-2 text-xs text-fg">
                     <input
                       type="radio"
                       name="modelSource"
@@ -445,7 +445,7 @@ export function SettingsModal({
                     />
                     Local model (default) — Ollama, self-hosted
                   </label>
-                  <label className="flex items-center gap-2 text-sm text-fg">
+                  <label className="flex items-center gap-2 text-xs text-fg">
                     <input
                       type="radio"
                       name="modelSource"
@@ -460,7 +460,7 @@ export function SettingsModal({
                     <div className="ml-6 flex flex-col gap-3 border-l border-border pl-4">
                       {apiKey ? (
                         <div>
-                          <p className="mb-2 text-sm text-fg">
+                          <p className="mb-2 text-xs text-fg">
                             {PROVIDER_LABEL[apiKey.provider] ?? apiKey.provider} — key ending in{" "}
                             <code className="rounded bg-bg px-1 py-0.5 font-mono text-[13px]">{apiKey.lastFour}</code>
                           </p>
@@ -468,7 +468,7 @@ export function SettingsModal({
                             type="button"
                             onClick={() => void handleUseLocalModel()}
                             disabled={keyBusy}
-                            className="text-sm text-accent disabled:opacity-50"
+                            className="text-xs text-accent disabled:opacity-50"
                           >
                             Remove key
                           </button>
@@ -480,7 +480,7 @@ export function SettingsModal({
                             <select
                               value={provider}
                               onChange={(e) => setProvider(e.target.value)}
-                              className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg"
+                              className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg"
                             >
                               <option value="openai">OpenAI</option>
                               <option value="anthropic">Anthropic</option>
@@ -493,7 +493,7 @@ export function SettingsModal({
                               autoComplete="off"
                               value={key}
                               onChange={(e) => setKey(e.target.value)}
-                              className="rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg"
+                              className="rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg"
                             />
                           </label>
                           <button
