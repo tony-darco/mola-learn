@@ -8,12 +8,13 @@ import { TurnView } from "./TurnView";
 import { HintControl } from "./HintControl";
 import { CompactedBanner } from "./CompactedBanner";
 import { ArtifactPreviewPanel } from "./ArtifactPreviewPanel";
+import { ModelPicker } from "./ModelPicker";
 import { parseSSEChunk } from "./sse";
 import { useRefreshSidebar } from "./shell-context";
 import type { ActivityEntry, CompactionBoundary, Turn } from "./types";
 
 type HistoryResponse = {
-  chat: { id: string; title: string; courseId: string | null };
+  chat: { id: string; title: string; courseId: string | null; model: string; thinkingEnabled: number };
   course: { id: string; name: string; number: string | null } | null;
   messages: {
     id: string; role: string; content: string;
@@ -83,6 +84,8 @@ export function ChatMain({ chatId }: { chatId: string }) {
   const [expandedCompacted, setExpandedCompacted] = useState(false);
   const [input, setInput] = useState("");
   const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
+  const [model, setModel] = useState("qwen3.6:27b");
+  const [thinkingEnabled, setThinkingEnabled] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Keyed by chatId, kept for the life of this mounted ChatMain (it's never
@@ -96,9 +99,25 @@ export function ChatMain({ chatId }: { chatId: string }) {
     setTurns(hydrated);
     setBoundary(data.compactionBoundary);
     setExpandedCompacted(false);
+    setModel(data.chat.model);
+    setThinkingEnabled(data.chat.thinkingEnabled === 1);
     const r = lastRung(hydrated);
     setRung(r);
     setCanEscalate(computeCanEscalate(r));
+  }
+
+  async function changeModel(next: { model: string; thinkingEnabled: boolean }) {
+    setModel(next.model);
+    setThinkingEnabled(next.thinkingEnabled);
+    try {
+      await fetch(`/api/chat/${chatId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+    } catch {
+      // Best-effort — the next turn just uses whatever the server still has on record.
+    }
   }
 
   // Reload history on mount AND whenever the chat we're pointed at changes
@@ -374,6 +393,7 @@ export function ChatMain({ chatId }: { chatId: string }) {
                     className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
                   />
                   <div className="flex shrink-0 items-center gap-2">
+                    <ModelPicker model={model} thinkingEnabled={thinkingEnabled} onChange={(next) => void changeModel(next)} disabled={busy} />
                     <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
                     <button
                       type="button"

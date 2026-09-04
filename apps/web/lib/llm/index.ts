@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { apiKeys, db } from "@mola/db";
 import { decryptSecret } from "@/lib/auth/crypto";
-import { OllamaProvider } from "./ollama";
+import { DEFAULT_CHAT_MODEL, OllamaProvider } from "./ollama";
+import { modelSupportsThinking } from "./models";
 import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
 import type { CompletionRequest, LLMProvider } from "./types";
@@ -9,11 +10,27 @@ import type { ProviderStreamEvent } from "@mola/shared";
 
 export * from "./types";
 export { OllamaProvider, DEFAULT_CHAT_MODEL } from "./ollama";
+export { CHAT_MODELS, modelSupportsThinking } from "./models";
 export { SelfHostedEmbeddingProvider } from "./embedding";
 
-async function resolveProvider(userId: string): Promise<LLMProvider> {
+/**
+ * Model + thinking choice, threaded through provider construction rather than
+ * CompletionRequest (contract 3, frozen — deliberately left untouched; see
+ * MODEL-THINKING-PLAN.md). Only the Ollama branch below honors either field;
+ * BYOK providers ignore both, since model selection is Ollama-only for now.
+ */
+export type ChatProviderOptions = { model?: string; think?: boolean };
+
+/** Clamps `think` to false for any model that doesn't declare thinking support — Ollama hard-errors otherwise. */
+function ollamaProviderFor(opts?: ChatProviderOptions): OllamaProvider {
+  const model = opts?.model ?? DEFAULT_CHAT_MODEL;
+  const think = (opts?.think ?? true) && modelSupportsThinking(model);
+  return new OllamaProvider(model, think);
+}
+
+async function resolveProvider(userId: string, opts?: ChatProviderOptions): Promise<LLMProvider> {
   const [key] = await db.select().from(apiKeys).where(eq(apiKeys.userId, userId)).limit(1);
-  if (!key) return new OllamaProvider();
+  if (!key) return ollamaProviderFor(opts);
 
   const plaintext = decryptSecret({ ciphertext: key.ciphertext, iv: key.iv, authTag: key.authTag });
   switch (key.provider) {
@@ -22,7 +39,7 @@ async function resolveProvider(userId: string): Promise<LLMProvider> {
     case "anthropic":
       return new AnthropicProvider(plaintext);
     default:
-      return new OllamaProvider();
+      return ollamaProviderFor(opts);
   }
 }
 
@@ -38,16 +55,19 @@ async function resolveProvider(userId: string): Promise<LLMProvider> {
  * resolution to inside `stream()`, the one place it's already iterated with
  * `for await`. Callers never construct a provider directly either way.
  */
-export function getChatProvider(userId: string): LLMProvider {
-  return new LazyProvider(userId);
+export function getChatProvider(userId: string, opts?: ChatProviderOptions): LLMProvider {
+  return new LazyProvider(userId, opts);
 }
 
 class LazyProvider implements LLMProvider {
   readonly id = "byok-or-ollama";
-  constructor(private readonly userId: string) {}
+  constructor(
+    private readonly userId: string,
+    private readonly opts?: ChatProviderOptions,
+  ) {}
 
   async *stream(req: CompletionRequest): AsyncIterable<ProviderStreamEvent> {
-    const provider = await resolveProvider(this.userId);
+    const provider = await resolveProvider(this.userId, this.opts);
     yield* provider.stream(req);
   }
 }

@@ -14,7 +14,7 @@
  */
 import { asc, desc, eq } from "drizzle-orm";
 import { compactionBoundaries, db, messages } from "@mola/db";
-import { getChatProvider } from "../llm";
+import { getChatProvider, type ChatProviderOptions } from "../llm";
 import type { Message } from "../llm/types";
 
 /** Compact once more than this many raw turns have piled up since the last boundary. */
@@ -27,28 +27,38 @@ export type Summarizer = (
   priorSummary: string | null,
 ) => Promise<string>;
 
-/** Default summarizer: one plain LLM call over the folded turns, no tools. */
-export const llmSummarizer: Summarizer = async (turns, priorSummary) => {
-  const provider = getChatProvider("system");
-  const transcript = turns.map((t) => `${t.role}: ${t.content}`).join("\n");
-  const req: Message[] = [
-    {
-      role: "user",
-      content:
-        (priorSummary ? `Earlier summary so far:\n${priorSummary}\n\n` : "") +
-        "Fold the conversation segment below into an updated summary for continuity: " +
-        "the student's goals, decisions made, and key facts established. Concise plain " +
-        "prose, no preamble, no meta-commentary.\n\n" + transcript,
-    },
-  ];
+/**
+ * Builds a summarizer bound to a specific chat's model/thinking choice —
+ * pass the result as maybeCompact's `summarize` override so a chat's
+ * compaction runs on the same model the user picked for it, instead of the
+ * platform default.
+ */
+export function makeLlmSummarizer(userId: string, opts?: ChatProviderOptions): Summarizer {
+  return async (turns, priorSummary) => {
+    const provider = getChatProvider(userId, opts);
+    const transcript = turns.map((t) => `${t.role}: ${t.content}`).join("\n");
+    const req: Message[] = [
+      {
+        role: "user",
+        content:
+          (priorSummary ? `Earlier summary so far:\n${priorSummary}\n\n` : "") +
+          "Fold the conversation segment below into an updated summary for continuity: " +
+          "the student's goals, decisions made, and key facts established. Concise plain " +
+          "prose, no preamble, no meta-commentary.\n\n" + transcript,
+      },
+    ];
 
-  let text = "";
-  for await (const ev of provider.stream({ system: "You write terse conversation summaries.", messages: req })) {
-    if (ev.type === "text_delta") text += ev.text;
-    if (ev.type === "error") throw new Error(ev.message);
-  }
-  return text.trim();
-};
+    let text = "";
+    for await (const ev of provider.stream({ system: "You write terse conversation summaries.", messages: req })) {
+      if (ev.type === "text_delta") text += ev.text;
+      if (ev.type === "error") throw new Error(ev.message);
+    }
+    return text.trim();
+  };
+}
+
+/** Default summarizer: one plain LLM call over the folded turns, no tools, platform default model. */
+export const llmSummarizer: Summarizer = makeLlmSummarizer("system");
 
 export type CompactResult = { throughMessageId: string; summary: string };
 

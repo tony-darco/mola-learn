@@ -14,6 +14,9 @@ export type ToolContext = {
   chatId: string;
   courseId: string | null;
   signal?: AbortSignal;
+  /** The chat's model/thinking choice — a sub-agent inherits its parent chat's, not the platform default. */
+  model?: string;
+  think?: boolean;
 };
 
 export type Tool<I = unknown> = {

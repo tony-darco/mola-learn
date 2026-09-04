@@ -32,6 +32,9 @@ export const users = pgTable("users", {
    * response; only compared server-side in the Auth.js authorize() callback.
    */
   passwordHash: text("password_hash"),
+  /** What a newly created chat starts with. Updated whenever the user changes either on any chat. */
+  defaultModel: text("default_model").notNull().default("qwen3.6:27b"),
+  defaultThinkingEnabled: integer("default_thinking_enabled").notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -84,6 +87,9 @@ export const chats = pgTable("chats", {
   courseId: uuid("course_id").references(() => courses.id, { onDelete: "set null" }),
   title: text("title").notNull().default("New chat"),
   isPinned: integer("is_pinned").notNull().default(0),
+  /** Snapshotted from the user's default at creation; overridable per chat (§ model switcher). */
+  model: text("model").notNull().default("qwen3.6:27b"),
+  thinkingEnabled: integer("thinking_enabled").notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("chats_user_idx").on(t.userId), index("chats_course_idx").on(t.courseId)]);

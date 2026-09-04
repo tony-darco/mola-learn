@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ModelPicker } from "./ModelPicker";
 
 /**
  * Starts a chat, optionally scoped to a course. Creates the chat, then hands
@@ -9,10 +10,20 @@ import { useRouter } from "next/navigation";
  * than sending it itself — the student still presses Send there, so a slow
  * network doesn't silently drop their first message.
  */
-export function NewCourseChatComposer({ courseId, placeholder }: { courseId?: string; placeholder?: string }) {
+export function NewCourseChatComposer({
+  courseId, placeholder, defaultModel = "qwen3.6:27b", defaultThinkingEnabled = true,
+}: {
+  courseId?: string;
+  placeholder?: string;
+  /** The signed-in user's current default (server-fetched by the page) — what a fresh composer starts on. */
+  defaultModel?: string;
+  defaultThinkingEnabled?: boolean;
+}) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [model, setModel] = useState(defaultModel);
+  const [thinkingEnabled, setThinkingEnabled] = useState(defaultThinkingEnabled);
 
   async function start() {
     if (busy) return;
@@ -21,7 +32,7 @@ export function NewCourseChatComposer({ courseId, placeholder }: { courseId?: st
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(courseId ? { courseId } : {}),
+        body: JSON.stringify({ ...(courseId ? { courseId } : {}), model, thinkingEnabled }),
       });
       if (!res.ok) throw new Error(`failed to create chat (${res.status})`);
       const { id } = (await res.json()) as { id: string };
@@ -51,16 +62,24 @@ export function NewCourseChatComposer({ courseId, placeholder }: { courseId?: st
           rows={1}
           className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
         />
-        <button
-          type="button"
-          className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
-          onClick={() => void start()}
-          disabled={busy}
-          title="Start chat"
-          aria-label="Start chat"
-        >
-          ⏎
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <ModelPicker
+            model={model}
+            thinkingEnabled={thinkingEnabled}
+            onChange={(next) => { setModel(next.model); setThinkingEnabled(next.thinkingEnabled); }}
+            disabled={busy}
+          />
+          <button
+            type="button"
+            className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+            onClick={() => void start()}
+            disabled={busy}
+            title="Start chat"
+            aria-label="Start chat"
+          >
+            ⏎
+          </button>
+        </div>
       </div>
     </div>
   );

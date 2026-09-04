@@ -5,8 +5,9 @@
  * resource BY id; listing/creating your own rows needs only requireSession).
  */
 import { desc, eq } from "drizzle-orm";
-import { chats, courses, db } from "@mola/db";
+import { chats, courses, db, users } from "@mola/db";
 import { authzResponse, requireSession } from "@/lib/auth/ownership";
+import { CHAT_MODELS } from "@/lib/llm";
 
 export async function GET() {
   try {
@@ -30,7 +31,12 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
-    const body = (await req.json().catch(() => ({}))) as { courseId?: string | null; title?: string };
+    const body = (await req.json().catch(() => ({}))) as {
+      courseId?: string | null;
+      title?: string;
+      model?: string;
+      thinkingEnabled?: boolean;
+    };
 
     // A course-scoped chat must actually belong to the caller — otherwise this
     // would be a write-side ownership hole (§9 applies to writes too).
@@ -42,13 +48,36 @@ export async function POST(req: Request) {
       }
     }
 
+    if (body.model !== undefined && !CHAT_MODELS.some((m) => m.id === body.model)) {
+      return Response.json({ error: "unknown model" }, { status: 400 });
+    }
+
+    const [user] = await db.select({
+      defaultModel: users.defaultModel, defaultThinkingEnabled: users.defaultThinkingEnabled,
+    }).from(users).where(eq(users.id, session.userId)).limit(1);
+
+    // An explicit pick on the "new chat" composer becomes the default too —
+    // same rule as changing it on an existing chat (§ model switcher). Stored
+    // raw, not clamped against the model — see the PATCH handler's comment
+    // for why (the runtime layer in lib/llm/index.ts is the actual guard).
+    const model = body.model ?? user!.defaultModel;
+    const thinkingEnabled = body.thinkingEnabled ?? user!.defaultThinkingEnabled === 1;
+
+    if (body.model !== undefined || body.thinkingEnabled !== undefined) {
+      await db.update(users).set({
+        defaultModel: model, defaultThinkingEnabled: thinkingEnabled ? 1 : 0,
+      }).where(eq(users.id, session.userId));
+    }
+
     const [chat] = await db.insert(chats).values({
       userId: session.userId,
       courseId: body.courseId ?? null,
       title: body.title?.trim() || "New chat",
+      model,
+      thinkingEnabled: thinkingEnabled ? 1 : 0,
     }).returning();
 
-    return Response.json({ id: chat!.id });
+    return Response.json({ id: chat!.id, model: chat!.model, thinkingEnabled: chat!.thinkingEnabled === 1 });
   } catch (err) {
     return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });
   }

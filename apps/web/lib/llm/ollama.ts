@@ -27,7 +27,11 @@ type OllamaChunk = {
 /** Chat only — deliberately no `embed` here (contract 3). */
 export class OllamaProvider implements LLMProvider {
   readonly id = "ollama";
-  constructor(private readonly model: string = DEFAULT_CHAT_MODEL) {}
+  constructor(
+    private readonly model: string = DEFAULT_CHAT_MODEL,
+    /** Suppress-only: when false, message.thinking (if any) is simply never read below. */
+    private readonly think: boolean = true,
+  ) {}
 
   async *stream(req: CompletionRequest): AsyncIterable<ProviderStreamEvent> {
     const messages: Message[] = [{ role: "system", content: req.system }, ...req.messages];
@@ -47,6 +51,7 @@ export class OllamaProvider implements LLMProvider {
         model: this.model,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         stream: true,
+        think: this.think,
         options: { temperature: req.temperature ?? 0.7, num_predict: req.maxTokens ?? 2048 },
         ...(req.tools?.length
           ? {

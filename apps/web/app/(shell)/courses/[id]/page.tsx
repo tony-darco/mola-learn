@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { courseMemory, db, documents, scheduleItems } from "@mola/db";
+import { courseMemory, db, documents, scheduleItems, users } from "@mola/db";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
 import { listCourseChats, uploadCourseDocumentAction } from "@/lib/courses/actions";
 import { NewCourseChatComposer } from "@/components/chat/NewCourseChatComposer";
@@ -27,11 +27,14 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
     throw err;
   });
 
-  const [docs, memory, schedule, courseChats] = await Promise.all([
+  const [docs, memory, schedule, courseChats, [user]] = await Promise.all([
     db.select().from(documents).where(eq(documents.courseId, courseId)).orderBy(desc(documents.createdAt)),
     db.select().from(courseMemory).where(eq(courseMemory.courseId, courseId)).limit(1),
     db.select().from(scheduleItems).where(eq(scheduleItems.courseId, courseId)).orderBy(desc(scheduleItems.dueAt)),
     listCourseChats(session.userId, courseId),
+    db.select({
+      defaultModel: users.defaultModel, defaultThinkingEnabled: users.defaultThinkingEnabled,
+    }).from(users).where(eq(users.id, session.userId)).limit(1),
   ]);
 
   return (
@@ -46,7 +49,11 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
 
         <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="flex flex-col gap-4">
-            <NewCourseChatComposer courseId={course.id} />
+            <NewCourseChatComposer
+              courseId={course.id}
+              defaultModel={user?.defaultModel}
+              defaultThinkingEnabled={user ? user.defaultThinkingEnabled === 1 : undefined}
+            />
             <RecentChats chats={courseChats} />
           </div>
           <div className="flex flex-col gap-4">

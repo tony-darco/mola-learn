@@ -15,14 +15,14 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import {
   artifactRecordSchema, encodeSSE, isArtifactToolResult, type StreamEvent,
 } from "@mola/shared";
-import { artifacts, chats, compactionBoundaries, courses, db, messages } from "@mola/db";
+import { artifacts, chats, compactionBoundaries, courses, db, messages, users } from "@mola/db";
 import { authzResponse, requireOwned, requireSession } from "@/lib/auth/ownership";
 import { assembleContext } from "@/lib/context/assemble";
 import { canEscalate, escalate } from "@/lib/context/hint-ladder";
 import { buildRegistry } from "@/lib/agent/tools";
 import { runAgentLoop, type ToolContext } from "@/lib/agent";
-import { maybeCompact } from "@/lib/agent/compaction";
-import { getChatProvider } from "@/lib/llm";
+import { maybeCompact, makeLlmSummarizer } from "@/lib/agent/compaction";
+import { getChatProvider, CHAT_MODELS } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,14 +93,18 @@ export async function POST(
         let text = "";
         const activity: ActivityEntry[] = [];
         const toolCallMeta = new Map<string, { name: string; label: string }>();
-        const ctx: ToolContext = { session, chatId, courseId: chat.courseId, signal: req.signal };
+        const think = chat.thinkingEnabled === 1;
+        const ctx: ToolContext = {
+          session, chatId, courseId: chat.courseId, signal: req.signal,
+          model: chat.model, think,
+        };
 
         try {
           send({ type: "message_start", messageId: assistantRow!.id });
           if (rung) send({ type: "hint_state", rung, canEscalate: canEscalate(rung) });
 
           for await (const ev of runAgentLoop({
-            provider: getChatProvider(session.userId),
+            provider: getChatProvider(session.userId, { model: chat.model, think }),
             system: context.system,
             messages: [...context.messages, { role: "user", content: userText }],
             tools: registry,
@@ -133,7 +137,9 @@ export async function POST(
 
           send({ type: "message_end", messageId: assistantRow!.id, stopReason: "end_turn" });
 
-          const compacted = await maybeCompact(chatId, session.userId);
+          const compacted = await maybeCompact(
+            chatId, session.userId, makeLlmSummarizer(session.userId, { model: chat.model, think }),
+          );
           if (compacted) send({ type: "compacted", throughMessageId: compacted.throughMessageId });
         } catch (err) {
           console.error(`chat ${chatId} stream failed mid-turn:`, err);
@@ -224,6 +230,8 @@ export async function PATCH(
       title?: string;
       courseId?: string | null;
       isPinned?: boolean;
+      model?: string;
+      thinkingEnabled?: boolean;
     };
 
     // Validate course ownership if provided
@@ -240,6 +248,30 @@ export async function PATCH(
     if (body.courseId !== undefined) updateData.courseId = body.courseId;
     if (body.isPinned !== undefined) updateData.isPinned = body.isPinned ? 1 : 0;
 
+    // Switching model/thinking on this chat also becomes the default the
+    // *next* new chat starts with — other existing chats are untouched.
+    //
+    // Stored thinkingEnabled is the user's raw preference, NOT clamped against
+    // the model here — switching to rnj-1 and back to a thinking-capable model
+    // must not leave it stuck off. modelSupportsThinking() is what actually
+    // keeps Ollama from erroring (ollamaProviderFor, lib/llm/index.ts); this
+    // just persists what was asked for.
+    if (body.model !== undefined || body.thinkingEnabled !== undefined) {
+      const targetModel = body.model ?? chat.model;
+      if (body.model !== undefined && !CHAT_MODELS.some((m) => m.id === targetModel)) {
+        return Response.json({ error: "unknown model" }, { status: 400 });
+      }
+      const thinkingEnabled = body.thinkingEnabled ?? chat.thinkingEnabled === 1;
+
+      updateData.model = targetModel;
+      updateData.thinkingEnabled = thinkingEnabled ? 1 : 0;
+
+      await db.update(users).set({
+        defaultModel: targetModel,
+        defaultThinkingEnabled: thinkingEnabled ? 1 : 0,
+      }).where(eq(users.id, session.userId));
+    }
+
     const [updated] = await db.update(chats)
       .set(updateData)
       .where(eq(chats.id, chatId))
@@ -250,6 +282,8 @@ export async function PATCH(
       title: updated!.title,
       courseId: updated!.courseId,
       isPinned: updated!.isPinned,
+      model: updated!.model,
+      thinkingEnabled: updated!.thinkingEnabled === 1,
     });
   } catch (err) {
     return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });

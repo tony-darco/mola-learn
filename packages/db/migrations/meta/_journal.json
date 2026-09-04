@@ -29,6 +29,13 @@
       "when": 1788384605579,
       "tag": "0003_fair_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788494577050,
+      "tag": "0004_abnormal_the_fallen",
+      "breakpoints": true
     }
   ]
 }

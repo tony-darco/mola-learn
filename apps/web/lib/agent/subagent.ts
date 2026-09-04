@@ -44,7 +44,7 @@ export async function runSubagent(
   let iterations = 0;
 
   for await (const ev of runAgentLoop({
-    provider: getChatProvider(ctx.session.userId),
+    provider: getChatProvider(ctx.session.userId, { model: ctx.model, think: ctx.think }),
     system: spec.systemPrompt,
     messages,
     tools,

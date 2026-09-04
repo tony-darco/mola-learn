@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CHAT_MODELS } from "@/lib/llm/models";
 import { useRefreshSidebar } from "./shell-context";
 
 type PublicApiKey = { provider: string; lastFour: string };
@@ -489,6 +490,23 @@ export function SettingsModal({
                     />
                     Local model (default) — Ollama, self-hosted
                   </label>
+
+                  {!ownKey && (
+                    <div className="ml-6 flex flex-col gap-1.5 border-l border-border pl-4">
+                      <p className="text-xs text-fg-muted">
+                        Pick the specific model per chat from the composer — this is just what&rsquo;s available.
+                      </p>
+                      {CHAT_MODELS.map((m) => (
+                        <div key={m.id} className="flex items-baseline justify-between gap-2 text-xs">
+                          <span className="text-fg">{m.label}</span>
+                          <span className="text-fg-muted">
+                            {m.description}{!m.supportsThinking && " · no thinking mode"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <label className="flex items-center gap-2 text-xs text-fg">
                     <input
                       type="radio"
