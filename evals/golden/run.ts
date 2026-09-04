@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { EMBEDDING, EMBEDDING_TASK } from "@mola/shared";
 
-const HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
+const HOST = process.env.OLLAMA_HOST ?? "http://192.168.1.17:11434";
 const TOP_K = [1, 3, 5, 10] as const;
 
 type Question = { q: string; expect: string };

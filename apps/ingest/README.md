@@ -11,7 +11,7 @@ with backoff via `attempts` / `run_after` / `last_error`.
 
 ## Setup
 
-From the repo root, the shared infra must already be up (`pnpm up`,
+From the repo root, the shared infra must already be up (`pnpm docker:up`,
 `pnpm db:migrate`, `pnpm db:seed` against `mola_b` — see the top-level
 README). Then, in this directory:
 

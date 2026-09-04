@@ -28,10 +28,10 @@ def _list(name: str, default: str) -> list[str]:
 @dataclass(frozen=True)
 class Config:
     database_url: str = field(default_factory=lambda: os.environ.get(
-        "DATABASE_URL", "postgres://mola:mola@localhost:5433/mola_b"))
+        "DATABASE_URL", "postgres://mola:REDACTED@192.168.1.17:5433/mola_b"))
 
     s3_endpoint: str = field(default_factory=lambda: os.environ.get(
-        "S3_ENDPOINT", "http://localhost:4566"))
+        "S3_ENDPOINT", "http://192.168.1.17:4566"))
     s3_region: str = field(default_factory=lambda: os.environ.get("S3_REGION", "us-east-1"))
     s3_access_key_id: str = field(default_factory=lambda: os.environ.get("S3_ACCESS_KEY_ID", "test"))
     s3_secret_access_key: str = field(default_factory=lambda: os.environ.get("S3_SECRET_ACCESS_KEY", "test"))

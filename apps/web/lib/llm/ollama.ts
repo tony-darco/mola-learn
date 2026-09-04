@@ -3,7 +3,7 @@ import type { CompletionRequest, LLMProvider, Message } from "./types";
 
 // OLLAMA_HOST is often set as a bare `host:port` (the `ollama` CLI's own
 // convention), which fetch()/URL reject outright — default it to http://.
-const rawHost = process.env.OLLAMA_HOST ?? "127.0.0.1:11434";
+const rawHost = process.env.OLLAMA_HOST ?? "192.168.1.17:11434";
 const HOST = /^https?:\/\//.test(rawHost) ? rawHost : `http://${rawHost}`;
 export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "qwen3.6:27b";
 

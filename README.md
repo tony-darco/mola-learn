@@ -65,7 +65,7 @@ Then open **http://localhost:3000** → **Sign up** → create a course.
 ```
 AUTH_SECRET=<openssl rand -base64 32>
 MOLA_ENCRYPTION_KEY=<openssl rand -base64 32>   # AES-256 key for BYOK keys at rest
-AWS_ENDPOINT_URL=http://localhost:4566          # LocalStack, started by `pnpm up`
+AWS_ENDPOINT_URL=http://192.168.1.17:4566       # LocalStack, started by `pnpm docker:up`
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
 AWS_REGION=us-east-1

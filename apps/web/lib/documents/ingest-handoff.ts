@@ -29,7 +29,7 @@ export type DocumentKind = "syllabus" | "textbook" | "lecture_transcript" | "stu
 
 function s3Client(): S3Client {
   return new S3Client({
-    endpoint: process.env.AWS_ENDPOINT_URL ?? "http://localhost:4566",
+    endpoint: process.env.AWS_ENDPOINT_URL ?? "http://192.168.1.17:4566",
     region: process.env.AWS_REGION ?? "us-east-1",
     forcePathStyle: true,
     // The SDK's default ("WHEN_SUPPORTED") bakes an x-amz-checksum-* header

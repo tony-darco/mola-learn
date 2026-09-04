@@ -7,7 +7,7 @@
 import { EMBEDDING, formatForEmbedding, type EmbeddingKind } from "@mola/shared";
 import type { EmbeddingProvider } from "./types";
 
-const HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
+const HOST = process.env.OLLAMA_HOST ?? "http://192.168.1.17:11434";
 
 /**
  * Total timeout. Unlike chat this is a single non-streaming request over a

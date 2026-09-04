@@ -5,6 +5,6 @@ export default defineConfig({
   out: "./migrations",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "postgres://mola:mola@localhost:5433/mola",
+    url: process.env.DATABASE_URL ?? "postgres://mola:REDACTED@192.168.1.17:5433/mola",
   },
 });

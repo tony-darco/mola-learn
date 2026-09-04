@@ -4,7 +4,7 @@ import * as schema from "./schema";
 import * as authSchema from "./auth-schema";
 
 export const DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://mola:mola@localhost:5433/mola";
+  process.env.DATABASE_URL ?? "postgres://mola:REDACTED@192.168.1.17:5433/mola";
 
 // Next.js dev-mode hot reload re-evaluates this module on every file change,
 // which would otherwise open a fresh batch of Postgres connections each time
