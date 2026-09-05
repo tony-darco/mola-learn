@@ -159,7 +159,13 @@ syllabus corpus, so re-measure on a textbook before treating it as settled.
 
 ## Known issues
 
-*(none open)*
+**OPEN — Agent B (ingestion) marked incomplete.** The pipeline itself
+(`apps/ingest/`) is real and verified working end to end — scan, sniff, policy
+checks, extract, chunk, sha256 dedupe, embed, pointer generation, status walk,
+18/18 non-ClamAV tests passing. What's incomplete is the UI side: the Context
+panel's document list (`apps/web/app/(shell)/courses/[id]/page.tsx`) is
+server-rendered only, so a student watching a status walk `scanning → ready`
+has to manually reload the page — no polling, no SSE. Being worked on next.
 
 **Resolved — tool calls leaking as text.** Seen once with `llama3.2` on a compound
 question: the model emitted `{"name": "read_course_fact", ...}` as message content

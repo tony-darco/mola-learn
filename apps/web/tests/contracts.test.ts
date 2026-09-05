@@ -6,7 +6,7 @@
  * Requires the local stack: `pnpm up && pnpm db:migrate && pnpm db:seed`.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import {
   EMBEDDING, EMBEDDING_TASK, artifactToolResultSchema, decodeSSE, encodeSSE,
   formatForEmbedding, isArtifactToolResult,
@@ -23,7 +23,12 @@ beforeAll(async () => {
   const [a] = await db.select().from(users).where(eq(users.email, "alice@umbc.edu"));
   const [b] = await db.select().from(users).where(eq(users.email, "bob@umbc.edu"));
   if (!a || !b) throw new Error("run `pnpm db:seed` first");
-  const [c] = await db.select().from(chats).where(eq(chats.userId, a.id));
+  // No ORDER BY previously — with only the freshly-seeded chat this always
+  // picked the right (only) row, but a dev DB that's since accumulated more
+  // of alice's chats through manual testing can return any of them. The
+  // seeded chat is always the oldest, so pin to that rather than "whichever
+  // row Postgres happens to return first."
+  const [c] = await db.select().from(chats).where(eq(chats.userId, a.id)).orderBy(asc(chats.createdAt)).limit(1);
   if (!c) throw new Error("run `pnpm db:seed` first");
   alice = a; bob = b; chat = c;
 });
@@ -72,7 +77,7 @@ describe("contract 5 — five-layer context assembly (§5)", () => {
   });
 
   it("layer 1 reads the course summary from the courses row — one source of truth (§8)", async () => {
-    const [course] = await db.select().from(courses).where(eq(courses.userId, alice.id));
+    const [course] = await db.select().from(courses).where(eq(courses.id, chat.courseId!));
     expect(course?.summary).toBeTruthy();
     const ctx = await assembleContext({
       userId: alice.id, chatId: chat.id, courseId: course!.id,

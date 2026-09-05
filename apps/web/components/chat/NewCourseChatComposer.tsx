@@ -1,14 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ModelPicker } from "./ModelPicker";
+import { MathInputBar } from "./MathInputBar";
+import { CalculatorButton } from "./CalculatorButton";
+import { MathFieldSurface } from "./MathFieldSurface";
+import { MATH_CATEGORIES, wrapMathForInsertion } from "./math-symbols";
 
 /**
  * Starts a chat, optionally scoped to a course. Creates the chat, then hands
- * the typed text to the chat page as a prefilled draft (`?draft=`) rather
- * than sending it itself — the student still presses Send there, so a slow
- * network doesn't silently drop their first message.
+ * the typed text to the chat page via `?draft=`, which sends it immediately
+ * once that page's own history load settles (ChatMain) — so pressing Enter
+ * here starts the conversation in one step rather than requiring a second
+ * Enter on the chat page.
  */
 export function NewCourseChatComposer({
   courseId, placeholder, defaultModel = "qwen3.6:27b", defaultThinkingEnabled = true, hasOwnKey = false,
@@ -22,10 +27,13 @@ export function NewCourseChatComposer({
   hasOwnKey?: boolean;
 }) {
   const router = useRouter();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [model, setModel] = useState(defaultModel);
   const [thinkingEnabled, setThinkingEnabled] = useState(defaultThinkingEnabled);
+  const [mathCategory, setMathCategory] = useState<string | null>(null);
+  const mathInsertPoint = useRef({ start: 0, end: 0 });
 
   async function start() {
     if (busy) return;
@@ -46,44 +54,85 @@ export function NewCourseChatComposer({
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-surface p-2.5">
-      <div className="flex items-end gap-2">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
-            // virtual keyboards report `key: "Unidentified"` for Enter/Return.
-            if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
-              e.preventDefault();
-              void start();
-            }
-          }}
-          placeholder={placeholder ?? "How can I help you today?"}
-          disabled={busy}
-          rows={1}
-          className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
-        />
-        <div className="flex shrink-0 items-center gap-2">
-          {!hasOwnKey && (
-            <ModelPicker
-              model={model}
-              thinkingEnabled={thinkingEnabled}
-              onChange={(next) => { setModel(next.model); setThinkingEnabled(next.thinkingEnabled); }}
-              disabled={busy}
-            />
-          )}
-          <button
-            type="button"
-            className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
-            onClick={() => void start()}
+    <div>
+      {/* Sits above the composer, outside its border, right-aligned — see ChatMain. */}
+      {!hasOwnKey && (
+        <div className="mb-1.5 flex items-center justify-end px-1">
+          <ModelPicker
+            model={model}
+            thinkingEnabled={thinkingEnabled}
+            onChange={(next) => { setModel(next.model); setThinkingEnabled(next.thinkingEnabled); }}
             disabled={busy}
-            title="Start chat"
-            aria-label="Start chat"
-          >
-            ⏎
-          </button>
+          />
         </div>
+      )}
+      <div className="relative rounded-2xl border border-border bg-surface p-2.5">
+        {mathCategory ? (
+          <MathFieldSurface
+            category={MATH_CATEGORIES.find((c) => c.id === mathCategory)!}
+            onCancel={() => setMathCategory(null)}
+            onDone={(latex) => {
+              const { start, end } = mathInsertPoint.current;
+              const { value: next, cursor } = wrapMathForInsertion(text, start, end, latex);
+              setText(next);
+              setMathCategory(null);
+              requestAnimationFrame(() => {
+                textareaRef.current?.focus();
+                textareaRef.current?.setSelectionRange(cursor, cursor);
+              });
+            }}
+          />
+        ) : (
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
+                // virtual keyboards report `key: "Unidentified"` for Enter/Return.
+                if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
+                  e.preventDefault();
+                  void start();
+                }
+              }}
+              placeholder={placeholder ?? "How can I help you today?"}
+              disabled={busy}
+              rows={1}
+              className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+              onClick={() => void start()}
+              disabled={busy}
+              title="Start chat"
+              aria-label="Start chat"
+            >
+              ⏎
+            </button>
+          </div>
+        )}
+      </div>
+      {/* Sits below the composer, outside its border. */}
+      <div className="mt-1.5 flex items-center gap-1 px-1">
+        <MathInputBar
+          activeCategory={mathCategory}
+          onSelectCategory={(id) => {
+            if (id) {
+              mathInsertPoint.current = {
+                start: textareaRef.current?.selectionStart ?? text.length,
+                end: textareaRef.current?.selectionEnd ?? text.length,
+              };
+            }
+            setMathCategory(id);
+          }}
+          disabled={busy}
+        />
+        <CalculatorButton />
+        <span className="ml-auto text-xs text-fg-muted">
+          LLM can make mistakes. Please double-check responses.
+        </span>
       </div>
     </div>
   );

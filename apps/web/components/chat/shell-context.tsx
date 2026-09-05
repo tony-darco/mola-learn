@@ -20,3 +20,43 @@ export const useRefreshSidebar = () => useContext(RefreshSidebarContext);
 export const OpenSettingsContext = createContext<(section?: SettingsSection) => void>(() => {});
 
 export const useOpenSettings = () => useContext(OpenSettingsContext);
+
+/**
+ * Custom replacement for `window.confirm` (native browser dialogs can't be
+ * styled or positioned, and block on the main thread) — resolves true/false
+ * once the student picks an icon on the confirm card ConfirmProvider renders.
+ * Anything under AppShell needing a confirmation calls this the same way.
+ */
+export const ConfirmContext = createContext<(message: string) => Promise<boolean>>(async () => {
+  console.error("useConfirm() called outside a ConfirmProvider");
+  return false;
+});
+
+export const useConfirm = () => useContext(ConfirmContext);
+
+/**
+ * Custom replacement for `window.prompt` (native browser dialogs can't be
+ * styled or positioned, and block on the main thread) — resolves the typed
+ * value once the student submits the prompt card PromptProvider renders, or
+ * null if they cancel. Anything under AppShell needing typed input calls
+ * this the same way.
+ */
+export const PromptContext = createContext<(message: string, defaultValue: string) => Promise<string | null>>(async () => {
+  console.error("usePrompt() called outside a PromptProvider");
+  return null;
+});
+
+export const usePrompt = () => useContext(PromptContext);
+
+/**
+ * The floating calculator's open/closed state (§ calculator feature) — a
+ * global toggle rather than composer-local state, since the widget is a
+ * draggable window that floats above the whole app, not scoped to whichever
+ * composer's "Calculator" button opened it. Mounted once in AppShell.
+ */
+export const CalculatorContext = createContext<{ open: boolean; toggle: () => void }>({
+  open: false,
+  toggle: () => console.error("useCalculator() called outside a CalculatorProvider"),
+});
+
+export const useCalculator = () => useContext(CalculatorContext);

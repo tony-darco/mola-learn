@@ -16,6 +16,7 @@ export type Turn = {
   error: string | null;
   /** False once the assistant has finished responding to this turn. */
   streaming: boolean;
+  createdAt: string;
 };
 
 export type ChatSummary = {

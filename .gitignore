@@ -22,6 +22,9 @@ venv/
 .localstack/
 pgdata/
 
+# testing-only chat input/output log (lib/debug/chat-log.ts) — never for prod
+debug-logs/
+
 .terraform/
 *.tfstate
 *.tfstate.*

@@ -24,6 +24,8 @@ import { buildRegistry } from "@/lib/agent/tools";
 import { runAgentLoop, type ToolContext } from "@/lib/agent";
 import { maybeCompact, makeLlmSummarizer } from "@/lib/agent/compaction";
 import { getChatProvider, CHAT_MODELS } from "@/lib/llm";
+import { generateChatTitle } from "@/lib/llm/title";
+import { logChatTurn } from "@/lib/debug/chat-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +64,11 @@ export async function POST(
       content: userText || "(asked for a hint)",
     }).returning();
 
+    void logChatTurn({
+      direction: "input", chatId, userId: session.userId, userEmail: session.email,
+      model: chat.model, pullHint: body.pullHint, text: userText || "(asked for a hint)",
+    });
+
     // A turn's own activity must bump the parent chat's updatedAt — the
     // sidebar sorts by desc(chats.updatedAt) (app/api/chat/route.ts), and
     // without this a chat you're actively talking in never rises above one
@@ -92,6 +99,7 @@ export async function POST(
         const enc = new TextEncoder();
         const send = (ev: StreamEvent) => controller.enqueue(enc.encode(encodeSSE(ev)));
         let text = "";
+        let errorMessage: string | null = null;
         const activity: ActivityEntry[] = [];
         const toolCallMeta = new Map<string, { name: string; label: string }>();
         const think = chat.thinkingEnabled === 1;
@@ -104,6 +112,8 @@ export async function POST(
           send({ type: "message_start", messageId: assistantRow!.id });
           if (rung) send({ type: "hint_state", rung, canEscalate: canEscalate(rung) });
 
+          let loopErrored = false;
+
           for await (const ev of runAgentLoop({
             provider: getChatProvider(session.userId, { model: chat.model, think }),
             system: context.system,
@@ -114,6 +124,7 @@ export async function POST(
           })) {
             if (ev.type === "text_delta") text += ev.text;
             if (ev.type === "message_end") continue;
+            if (ev.type === "error") { loopErrored = true; errorMessage = ev.message; }
 
             if (ev.type === "tool_call_start") toolCallMeta.set(ev.toolCallId, { name: ev.name, label: ev.label });
             if (ev.type === "tool_call_end") {
@@ -136,12 +147,33 @@ export async function POST(
             .set({ content: text, toolCalls: activity })
             .where(eq(messages.id, assistantRow!.id));
 
-          send({ type: "message_end", messageId: assistantRow!.id, stopReason: "end_turn" });
+          // An "error" event already ended the turn client-side (case "error"
+          // in ChatMain sets streaming: false) — a trailing success message_end
+          // plus a compaction pass over a chat that just failed would be
+          // spurious work layered on top of an already-reported failure.
+          if (!loopErrored) {
+            send({ type: "message_end", messageId: assistantRow!.id, stopReason: "end_turn" });
 
-          const compacted = await maybeCompact(
-            chatId, session.userId, makeLlmSummarizer(session.userId, { model: chat.model, think }),
-          );
-          if (compacted) send({ type: "compacted", throughMessageId: compacted.throughMessageId });
+            // Auto-titles once, right after the first exchange — "New chat"
+            // is the creation default and nothing else ever sets it back to
+            // that literal string, so it doubles as "not yet titled" without
+            // needing a new schema column. Always the small fast model
+            // (never whatever the student picked for the chat itself) and
+            // awaited here — by the time the client's post-stream
+            // refreshSidebar() call fires, the new title is already in the
+            // DB for it to pick up, not applied later in the background.
+            if (chat.title === "New chat" && text.trim()) {
+              const generatedTitle = await generateChatTitle(userText, text);
+              if (generatedTitle) {
+                await db.update(chats).set({ title: generatedTitle }).where(eq(chats.id, chatId));
+              }
+            }
+
+            const compacted = await maybeCompact(
+              chatId, session.userId, makeLlmSummarizer(session.userId, { model: chat.model, think }),
+            );
+            if (compacted) send({ type: "compacted", throughMessageId: compacted.throughMessageId });
+          }
         } catch (err) {
           console.error(`chat ${chatId} stream failed mid-turn:`, err);
           // A mid-stream failure (e.g. the LAN Ollama host dropping a long-lived
@@ -156,8 +188,13 @@ export async function POST(
           } catch {
             // Nothing more we can do; the error event below still reaches the client.
           }
-          send({ type: "error", message: err instanceof Error ? err.message : String(err) });
+          errorMessage = err instanceof Error ? err.message : String(err);
+          send({ type: "error", message: errorMessage });
         } finally {
+          void logChatTurn({
+            direction: "output", chatId, userId: session.userId, userEmail: session.email,
+            model: chat.model, text, error: errorMessage,
+          });
           controller.close();
         }
       },

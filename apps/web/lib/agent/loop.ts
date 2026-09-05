@@ -59,6 +59,18 @@ export async function* runAgentLoop(opts: LoopOptions): AsyncGenerator<StreamEve
     }
 
     if (pendingCalls.length === 0) {
+      // A thinking-capable model can spend its entire output budget on hidden
+      // reasoning and stop with `max_tokens` before emitting any visible
+      // content — confirmed live against gemma4:12b. Treating that the same
+      // as a normal empty turn silently persists a blank assistant message
+      // with no error shown anywhere; surface it instead.
+      if (assistantText === "" && stopReason === "max_tokens") {
+        yield {
+          type: "error",
+          message: "The model ran out of output budget before producing a visible answer (likely spent it on internal reasoning). Try again.",
+        };
+        return;
+      }
       yield { type: "message_end", messageId: ctx.chatId, stopReason };
       return;
     }

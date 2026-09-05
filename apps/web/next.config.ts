@@ -10,7 +10,11 @@ const distDir = process.env.E2E_PORT ? `.next-e2e-${process.env.E2E_PORT}` : ".n
 
 const config: NextConfig = {
   transpilePackages: ["@mola/db", "@mola/shared"],
-  experimental: { esmExternals: true },
+  // Server Actions default to a 1MB body cap — far under the ingest policy's
+  // own 50MB-per-file limit (apps/ingest/ingest/config.py's INGEST_MAX_BYTES),
+  // so a real textbook upload was rejected by Next.js before ever reaching
+  // that check. Matches the policy cap plus slack for multipart overhead.
+  experimental: { esmExternals: true, serverActions: { bodySizeLimit: "55mb" } },
   distDir,
 };
 

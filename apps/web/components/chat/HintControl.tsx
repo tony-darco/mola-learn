@@ -28,15 +28,6 @@ export function HintControl({
 
   return (
     <div className="flex items-center gap-2">
-      <button
-        type="button"
-        className="whitespace-nowrap rounded-lg border border-border bg-surface px-3.5 py-2 text-base text-fg disabled:cursor-default disabled:opacity-50"
-        onClick={onPull}
-        disabled={disabled || bottomedOut}
-        title={bottomedOut ? "No more hints for this question" : "Get a hint"}
-      >
-        {rung ? "Another hint" : "Hint"}
-      </button>
       {rung && (
         <span className="inline-flex gap-1" aria-label={`Hint ${rungIndex + 1} of ${HINT_RUNGS.length}`}>
           {HINT_RUNGS.map((_, i) => (
@@ -47,8 +38,20 @@ export function HintControl({
           ))}
         </span>
       )}
-      {bottomedOut && (
-        <span className="text-xs text-fg-muted">That&apos;s as far as hints go — try it yourself.</span>
+      {bottomedOut ? (
+        <span className="whitespace-nowrap text-sm text-fg-muted">
+          That&apos;s as far as hints go — try it yourself.
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="whitespace-nowrap bg-transparent p-0 text-sm text-fg-muted hover:text-fg hover:underline disabled:cursor-default disabled:opacity-50 disabled:no-underline"
+          onClick={onPull}
+          disabled={disabled}
+          title="Get a hint"
+        >
+          {rung ? "Want another hint?" : "Want a hint?"}
+        </button>
       )}
     </div>
   );

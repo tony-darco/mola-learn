@@ -9,8 +9,12 @@ import { HintControl } from "./HintControl";
 import { CompactedBanner } from "./CompactedBanner";
 import { ArtifactPreviewPanel } from "./ArtifactPreviewPanel";
 import { ModelPicker } from "./ModelPicker";
+import { MathInputBar } from "./MathInputBar";
+import { CalculatorButton } from "./CalculatorButton";
+import { MathFieldSurface } from "./MathFieldSurface";
+import { MATH_CATEGORIES, wrapMathForInsertion } from "./math-symbols";
 import { parseSSEChunk } from "./sse";
-import { useRefreshSidebar } from "./shell-context";
+import { useConfirm, useRefreshSidebar } from "./shell-context";
 import type { ActivityEntry, CompactionBoundary, Turn } from "./types";
 
 type HistoryResponse = {
@@ -55,8 +59,14 @@ function turnsFromHistory(data: HistoryResponse): Turn[] {
     hintRung: m.hintRung,
     error: null,
     streaming: false,
+    createdAt: m.createdAt,
   }));
 }
+
+/** The literal placeholder both client and server store for a hint pull with
+ * no typed text (send()'s body, and the POST route's own fallback) — used to
+ * tell retryFrom() whether to replay a turn as pullHint rather than as text. */
+const HINT_PLACEHOLDER = "(asked for a hint)";
 
 function lastRung(turns: Turn[]): HintRung | null {
   for (let i = turns.length - 1; i >= 0; i--) {
@@ -75,6 +85,7 @@ export function ChatMain({ chatId }: { chatId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const refreshSidebar = useRefreshSidebar();
+  const confirm = useConfirm();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -90,11 +101,15 @@ export function ChatMain({ chatId }: { chatId: string }) {
   const [hasOwnKey, setHasOwnKey] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   // Keyed by chatId, kept for the life of this mounted ChatMain (it's never
   // remounted between chats — see the comment below). Lets a revisit within
   // the same session hydrate instantly instead of flashing a blank loading
   // state (PROPOSALS.md §1 / e2e/flash-flicker.spec.ts).
   const historyCache = useRef<Map<string, HistoryResponse>>(new Map());
+  const pendingDraftRef = useRef<string | null>(null);
+  const [mathCategory, setMathCategory] = useState<string | null>(null);
+  const mathInsertPoint = useRef({ start: 0, end: 0 });
 
   function hydrate(data: HistoryResponse) {
     const hydrated = turnsFromHistory(data);
@@ -181,16 +196,30 @@ export function ChatMain({ chatId }: { chatId: string }) {
   }, [turns]);
 
   // A chat started from a course page's composer (NewCourseChatComposer)
-  // carries the student's typed text over as a prefilled draft rather than
-  // sending it itself — this just fills the box; the student still presses
-  // Send.
+  // carries the student's typed text over via `?draft=` — queued here rather
+  // than sent immediately, because a brand-new chat's history GET is still
+  // in flight at this point and resolves to an empty message list; firing
+  // send() before that lands would have hydrate()'s setTurns(hydrated) wipe
+  // out the turns send() just optimistically appended.
   useEffect(() => {
     const draft = searchParams.get("draft");
     if (!draft) return;
-    setInput(draft);
+    pendingDraftRef.current = draft;
     router.replace(`/chats/${chatId}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
+
+  // Fires the queued draft once the initial history load has settled (see
+  // above) — this is what makes hitting Enter in the course composer start
+  // the chat immediately instead of requiring a second Enter here.
+  useEffect(() => {
+    if (loading) return;
+    const draft = pendingDraftRef.current;
+    if (!draft) return;
+    pendingDraftRef.current = null;
+    void send(false, draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   function patchTurn(id: string, fn: (t: Turn) => Turn) {
     setTurns((ts) => ts.map((t) => (t.id === id ? fn(t) : t)));
@@ -204,9 +233,9 @@ export function ChatMain({ chatId }: { chatId: string }) {
     setBoundary(data.compactionBoundary);
   }
 
-  async function send(pullHint: boolean) {
+  async function send(pullHint: boolean, overrideText?: string) {
     if (busy) return;
-    const text = input.trim();
+    const text = (overrideText ?? input).trim();
     if (!text && !pullHint) return;
 
     setBusy(true);
@@ -215,24 +244,29 @@ export function ChatMain({ chatId }: { chatId: string }) {
 
     const userTurnId = `local-user-${Date.now()}`;
     let assistantTurnId = `local-assistant-${Date.now()}`;
+    const now = new Date().toISOString();
 
     setTurns((ts) => [
       ...ts,
       {
-        id: userTurnId, role: "user", text: text || "(asked for a hint)",
-        activity: [], artifacts: [], hintRung: null, error: null, streaming: false,
+        id: userTurnId, role: "user", text: text || HINT_PLACEHOLDER,
+        activity: [], artifacts: [], hintRung: null, error: null, streaming: false, createdAt: now,
       },
       {
         id: assistantTurnId, role: "assistant", text: "",
-        activity: [], artifacts: [], hintRung: null, error: null, streaming: true,
+        activity: [], artifacts: [], hintRung: null, error: null, streaming: true, createdAt: now,
       },
     ]);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const res = await fetch(`/api/chat/${chatId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: text, pullHint }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -323,10 +357,53 @@ export function ChatMain({ chatId }: { chatId: string }) {
       // real (or moved position by recency) — let the sidebar know.
       refreshSidebar();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      patchTurn(assistantTurnId, (t) => ({ ...t, error: message, streaming: false }));
+      // A deliberate Stop click aborts the fetch — that's not a failure, so
+      // it shouldn't show an error banner over whatever text already
+      // streamed in; just end the turn where it stands.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        patchTurn(assistantTurnId, (t) => ({ ...t, streaming: false }));
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        patchTurn(assistantTurnId, (t) => ({ ...t, error: message, streaming: false }));
+      }
     } finally {
+      abortControllerRef.current = null;
       setBusy(false);
+    }
+  }
+
+  function stop() {
+    abortControllerRef.current?.abort();
+  }
+
+  /**
+   * Retry (testing-support feature — ships properly later): always discards
+   * whatever came after the retried point and resends the ORIGINAL input
+   * text fresh, never reusing the old output. Retrying an assistant turn
+   * resends the user turn right before it; retrying a user turn resends
+   * itself. Either way this truncates the chat back to just before that
+   * user turn on the server, so anything after it — including later
+   * turns — is genuinely gone, not just hidden.
+   */
+  async function retryFrom(turn: Turn) {
+    if (busy) return;
+    const userTurn = turn.role === "user"
+      ? turn
+      : turns.slice(0, turns.indexOf(turn)).reverse().find((t) => t.role === "user");
+    if (!userTurn) return;
+
+    if (!(await confirm("Retry this message? Everything after it will be discarded."))) return;
+
+    const res = await fetch(`/api/chat/${chatId}/messages/${userTurn.id}`, { method: "DELETE" });
+    if (!res.ok) return;
+
+    const idx = turns.indexOf(userTurn);
+    setTurns((ts) => ts.slice(0, idx));
+
+    if (userTurn.text === HINT_PLACEHOLDER) {
+      await send(true);
+    } else {
+      await send(false, userTurn.text);
     }
   }
 
@@ -381,63 +458,128 @@ export function ChatMain({ chatId }: { chatId: string }) {
                 <TurnView key={t.id} turn={t} />
               ))}
 
-              {!loading && !loadError && visibleTurns.map((t) => (
-                <TurnView key={t.id} turn={t} />
-              ))}
+              {!loading && !loadError && visibleTurns.map((t, i) => {
+                const paired = visibleTurns[i + 1];
+                const canRetry = t.role === "assistant"
+                  ? !t.streaming
+                  : paired?.role === "assistant" && !paired.streaming;
+                return (
+                  <TurnView
+                    key={t.id}
+                    turn={t}
+                    canRetry={canRetry}
+                    disabled={busy}
+                    onRetry={() => void retryFrom(t)}
+                  />
+                );
+              })}
             </div>
           </div>
 
           <div className="px-6 py-4">
             <div className="chat-column">
-              <div className="rounded-2xl border border-border bg-surface p-2.5">
-                <div className="flex items-end gap-2">
-                  <textarea
-                    ref={textareaRef}
-                    value={input}
-                    onChange={(e) => {
-                      setInput(e.target.value);
-                      e.target.style.height = "auto";
-                      e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-                    }}
-                    onKeyDown={(e) => {
-                      // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
-                      // virtual keyboards report `key: "Unidentified"` for Enter/Return.
-                      if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
-                        e.preventDefault();
-                        void send(false);
-                      }
-                    }}
-                    placeholder="Ask about your course…"
-                    disabled={busy}
-                    rows={1}
-                    className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+              {/* Sits above the composer, outside its border — hint to the
+                  left, model picker to the right. */}
+              <div className="mb-1.5 flex items-center justify-between px-1">
+                <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
+                {!hasOwnKey && (
+                  <ModelPicker
+                    model={model}
+                    thinkingEnabled={thinkingEnabled}
+                    onChange={(next) => void changeModel(next)}
+                    // Also disabled while `loading`: the history fetch for a
+                    // just-switched-to chat hasn't hydrated model/thinkingEnabled
+                    // yet, so a click here would PATCH this chatId using the
+                    // PREVIOUS chat's (or first-mount default) stale values.
+                    disabled={busy || loading}
                   />
-                  <div className="flex shrink-0 items-center gap-2">
-                    {!hasOwnKey && (
-                      <ModelPicker
-                        model={model}
-                        thinkingEnabled={thinkingEnabled}
-                        onChange={(next) => void changeModel(next)}
-                        // Also disabled while `loading`: the history fetch for a
-                        // just-switched-to chat hasn't hydrated model/thinkingEnabled
-                        // yet, so a click here would PATCH this chatId using the
-                        // PREVIOUS chat's (or first-mount default) stale values.
-                        disabled={busy || loading}
-                      />
-                    )}
-                    <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
-                      onClick={() => void send(false)}
-                      disabled={busy || !input.trim()}
-                      title="Send"
-                      aria-label="Send"
-                    >
-                      ⏎
-                    </button>
+                )}
+              </div>
+              <div className="relative rounded-2xl border border-border bg-surface p-2.5">
+                {mathCategory ? (
+                  <MathFieldSurface
+                    category={MATH_CATEGORIES.find((c) => c.id === mathCategory)!}
+                    onCancel={() => setMathCategory(null)}
+                    onDone={(latex) => {
+                      const { start, end } = mathInsertPoint.current;
+                      const { value: next, cursor } = wrapMathForInsertion(input, start, end, latex);
+                      setInput(next);
+                      setMathCategory(null);
+                      requestAnimationFrame(() => {
+                        textareaRef.current?.focus();
+                        textareaRef.current?.setSelectionRange(cursor, cursor);
+                      });
+                    }}
+                  />
+                ) : (
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      ref={textareaRef}
+                      value={input}
+                      onChange={(e) => {
+                        setInput(e.target.value);
+                        e.target.style.height = "auto";
+                        e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        // `e.keyCode` is deprecated but kept as a fallback: some IMEs and
+                        // virtual keyboards report `key: "Unidentified"` for Enter/Return.
+                        if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
+                          e.preventDefault();
+                          void send(false);
+                        }
+                      }}
+                      placeholder="Ask about your course…"
+                      disabled={busy}
+                      rows={1}
+                      className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
+                    />
+                    <div className="flex shrink-0 items-center gap-2">
+                      {busy ? (
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-bg hover:opacity-80"
+                          onClick={stop}
+                          title="Stop generating"
+                          aria-label="Stop generating"
+                        >
+                          <span className="h-2.5 w-2.5 rounded-[2px] bg-bg" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"
+                          onClick={() => void send(false)}
+                          disabled={!input.trim()}
+                          title="Send"
+                          aria-label="Send"
+                        >
+                          ⏎
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
+              </div>
+              {/* Sits below the composer, outside its border. */}
+              <div className="mt-1.5 flex items-center gap-1 px-1">
+                <MathInputBar
+                  activeCategory={mathCategory}
+                  onSelectCategory={(id) => {
+                    if (id) {
+                      mathInsertPoint.current = {
+                        start: textareaRef.current?.selectionStart ?? input.length,
+                        end: textareaRef.current?.selectionEnd ?? input.length,
+                      };
+                    }
+                    setMathCategory(id);
+                  }}
+                  disabled={busy}
+                />
+                <CalculatorButton />
+                <span className="ml-auto text-xs text-fg-muted">
+                  LLM can make mistakes. Please double-check responses.
+                </span>
               </div>
             </div>
           </div>

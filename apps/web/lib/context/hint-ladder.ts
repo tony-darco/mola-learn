@@ -55,7 +55,12 @@ Ground every claim about course material in retrieved sources. If you do not hav
 source, say what you do not have. Never invent a definition, a formula, or a page
 number.
 
-Never use emoji, in any reply, for any reason.`;
+Never use emoji, in any reply, for any reason.
+
+Write math using LaTeX delimiters — $...$ inline, $$...$$ for a standalone
+equation or matrix — rather than plain text or Unicode symbols. The client
+renders these properly; plain-text math (e.g. "x^2" or a hand-drawn matrix)
+does not.`;
 
 /** Layer 4 text for the current rung. Rung is supplied by the caller, never inferred. */
 export function buildLayer4(rung: HintRung | null, courseInstructions: string | null): string {

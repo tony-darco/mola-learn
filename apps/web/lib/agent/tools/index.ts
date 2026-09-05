@@ -3,6 +3,7 @@ import { courseFactsTool } from "./course-facts";
 import { grepSearchTool } from "./grep-search";
 import { bm25SearchTool } from "./bm25-search";
 import { vectorSearchTool } from "./vector-search";
+import { calculatorTool } from "./calculator";
 
 /**
  * The single place tools are wired up. Phase 1 agents add their tools HERE
@@ -14,7 +15,8 @@ export function buildRegistry(): ToolRegistry {
     .register(courseFactsTool)
     .register(grepSearchTool)
     .register(bm25SearchTool)
-    .register(vectorSearchTool);
+    .register(vectorSearchTool)
+    .register(calculatorTool);
 }
 
 /** The retrieval agent's tool allowlist (§6) — used by runRetrievalAgent's subagent spec. */

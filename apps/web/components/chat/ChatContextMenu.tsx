@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useConfirm, usePrompt } from "./shell-context";
 import type { ChatSummary, CourseSummary } from "./types";
 
 interface ChatContextMenuProps {
@@ -15,6 +16,8 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
   const [submenu, setSubmenu] = useState<"courses" | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const confirm = useConfirm();
+  const prompt = usePrompt();
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -52,7 +55,7 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
   };
 
   const handleRename = async () => {
-    const newTitle = prompt("Rename chat:", chat.title);
+    const newTitle = await prompt("Rename chat:", chat.title);
     if (newTitle && newTitle !== chat.title) {
       setIsLoading(true);
       try {
@@ -65,7 +68,7 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
   };
 
   const handleDelete = async () => {
-    if (confirm(`Delete "${chat.title}"? This cannot be undone.`)) {
+    if (await confirm(`Delete "${chat.title}"? This cannot be undone.`)) {
       setIsLoading(true);
       try {
         await onDelete();

@@ -1,4 +1,16 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
+/* One theme loads per color scheme, not both — @import's media condition
+   keeps the unused one from ever being fetched/applied. */
+@import "highlight.js/styles/github.css" (prefers-color-scheme: light);
+@import "highlight.js/styles/github-dark.css" (prefers-color-scheme: dark);
+
+/* MathLive's default rendered-glyph color is a hardcoded black regardless of
+   page theme (confirmed via computed style: rgb(0,0,0) against a body color
+   of rgb(240,238,231) in dark mode) — ::part(content) is the shadow-DOM
+   styling hook it exposes for exactly this. */
+math-field { color: var(--text); }
+math-field::part(content) { color: inherit; }
 
 :root {
   --bg: #faf9f5;
