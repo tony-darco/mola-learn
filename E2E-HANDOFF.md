@@ -49,7 +49,7 @@ attempt to run — plumbing only, no spec logic touched:
 - **`apps/web/.env.local`** (gitignored, not part of the commit):
   `DATABASE_URL` and `AWS_ENDPOINT_URL` were still pointing at `localhost`
   from before the Docker-to-remote-host move (`f73cc57`). Repointed both at
-  `192.168.1.17` (`postgres://mola:REDACTED@192.168.1.17:5433/mola_e2e` and
+  `192.168.1.17` (`postgres://mola:<password>@192.168.1.17:5433/mola_e2e` and
   `http://192.168.1.17:4566`). `MOLA_CHAT_MODEL` was already `qwen3.6:27b`
   in this file — no change needed there.
   - Note for whoever sets this up on a fresh machine: `.env.example` and
@@ -80,7 +80,7 @@ attempt to run — plumbing only, no spec logic touched:
 ## The run
 
 ```
-DATABASE_URL=postgres://mola:REDACTED@192.168.1.17:5433/mola_e2e pnpm --filter @mola/web e2e
+DATABASE_URL=postgres://mola:<password>@192.168.1.17:5433/mola_e2e pnpm --filter @mola/web e2e
 ```
 
 14 tests total, **11 failed, 3 passed**, 16.2 minutes. Full output, plus a

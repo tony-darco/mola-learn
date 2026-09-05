@@ -25,10 +25,16 @@ def _list(name: str, default: str) -> list[str]:
     return [s.strip() for s in os.environ.get(name, default).split(",") if s.strip()]
 
 
+def _required(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} is not set")
+    return value
+
+
 @dataclass(frozen=True)
 class Config:
-    database_url: str = field(default_factory=lambda: os.environ.get(
-        "DATABASE_URL", "postgres://mola:REDACTED@192.168.1.17:5433/mola_b"))
+    database_url: str = field(default_factory=lambda: _required("DATABASE_URL"))
 
     s3_endpoint: str = field(default_factory=lambda: os.environ.get(
         "S3_ENDPOINT", "http://192.168.1.17:4566"))

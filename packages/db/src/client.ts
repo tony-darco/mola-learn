@@ -3,8 +3,8 @@ import postgres from "postgres";
 import * as schema from "./schema";
 import * as authSchema from "./auth-schema";
 
-export const DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://mola:REDACTED@192.168.1.17:5433/mola";
+export const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error("DATABASE_URL is not set");
 
 // Next.js dev-mode hot reload re-evaluates this module on every file change,
 // which would otherwise open a fresh batch of Postgres connections each time

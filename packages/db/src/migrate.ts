@@ -4,7 +4,8 @@ import postgres from "postgres";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const url = process.env.DATABASE_URL ?? "postgres://mola:REDACTED@192.168.1.17:5433/mola";
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is not set");
 const sql = postgres(url, { max: 1 });
 const here = dirname(fileURLToPath(import.meta.url));
 
