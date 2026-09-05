@@ -1,4 +1,5 @@
 import type { ProviderStreamEvent } from "@mola/shared";
+import { modelSupportsThinking } from "./models";
 import type { CompletionRequest, LLMProvider, Message } from "./types";
 
 // OLLAMA_HOST is often set as a bare `host:port` (the `ollama` CLI's own
@@ -27,11 +28,19 @@ type OllamaChunk = {
 /** Chat only — deliberately no `embed` here (contract 3). */
 export class OllamaProvider implements LLMProvider {
   readonly id = "ollama";
+  private readonly think: boolean;
+
   constructor(
     private readonly model: string = DEFAULT_CHAT_MODEL,
     /** Suppress-only: when false, message.thinking (if any) is simply never read below. */
-    private readonly think: boolean = true,
-  ) {}
+    think: boolean = true,
+  ) {
+    // Enforced here, not just by callers (lib/llm/index.ts's ollamaProviderFor) —
+    // Ollama hard-errors ("does not support thinking") on think:true for a model
+    // that doesn't declare support, so this must hold no matter how the class is
+    // constructed, not just through the one call path that currently exists.
+    this.think = think && modelSupportsThinking(this.model);
+  }
 
   async *stream(req: CompletionRequest): AsyncIterable<ProviderStreamEvent> {
     const messages: Message[] = [{ role: "system", content: req.system }, ...req.messages];

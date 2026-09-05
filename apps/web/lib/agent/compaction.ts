@@ -32,6 +32,12 @@ export type Summarizer = (
  * pass the result as maybeCompact's `summarize` override so a chat's
  * compaction runs on the same model the user picked for it, instead of the
  * platform default.
+ *
+ * Goes through getChatProvider (BYOK-or-Ollama), same as a real chat turn —
+ * not forced to local Ollama, since a deployment may not have Ollama
+ * configured at all for a BYOK-only user. `opts` (model/think) only takes
+ * effect on the Ollama branch; a BYOK provider ignores both and summarizes
+ * on whatever model that provider is configured for.
  */
 export function makeLlmSummarizer(userId: string, opts?: ChatProviderOptions): Summarizer {
   return async (turns, priorSummary) => {

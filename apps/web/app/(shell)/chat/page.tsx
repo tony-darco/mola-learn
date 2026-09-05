@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, users } from "@mola/db";
 import { getSession } from "@/lib/auth/session";
+import { getPublicApiKey } from "@/lib/auth/api-keys";
 import { NewCourseChatComposer } from "@/components/chat/NewCourseChatComposer";
 
 export const dynamic = "force-dynamic";
@@ -10,9 +11,12 @@ export default async function ChatLandingPage() {
   const session = await getSession();
   if (!session) return null; // ShellLayout already redirected; unreachable in practice.
 
-  const [user] = await db.select({
-    defaultModel: users.defaultModel, defaultThinkingEnabled: users.defaultThinkingEnabled,
-  }).from(users).where(eq(users.id, session.userId)).limit(1);
+  const [[user], ownKey] = await Promise.all([
+    db.select({
+      defaultModel: users.defaultModel, defaultThinkingEnabled: users.defaultThinkingEnabled,
+    }).from(users).where(eq(users.id, session.userId)).limit(1),
+    getPublicApiKey(session.userId),
+  ]);
 
   return (
     <main className="chat-main flex flex-col items-center justify-center pb-40">
@@ -22,6 +26,7 @@ export default async function ChatLandingPage() {
           placeholder="Ask something, or pick a course from the sidebar…"
           defaultModel={user?.defaultModel}
           defaultThinkingEnabled={user ? user.defaultThinkingEnabled === 1 : undefined}
+          hasOwnKey={ownKey !== null}
         />
       </div>
     </main>
