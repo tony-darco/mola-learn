@@ -6,7 +6,7 @@ services:
     container_name: mola-postgres
     environment:
       POSTGRES_USER: mola
-      POSTGRES_PASSWORD: REDACTED
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: mola
     ports:
       - "5433:5432"
