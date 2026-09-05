@@ -141,7 +141,7 @@ async function main() {
 
   const n = questions.length;
   const row = (label: string, r: number[]) =>
-    `${label.padEnd(26)}` + TOP_K.map((k, i) => `${`${r[i]}/${n}`.padStart(7)}`).join("") +
+    `${label.padEnd(26)}` + TOP_K.map((_k, i) => `${`${r[i]}/${n}`.padStart(7)}`).join("") +
     `   (${((r[2]! / n) * 100).toFixed(0)}% @5)`;
 
   console.log(`${"".padEnd(26)}${TOP_K.map((k) => `   @${k}`.padStart(7)).join("")}`);
