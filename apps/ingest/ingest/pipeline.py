@@ -82,36 +82,46 @@ def process_document(
 
     user_id = doc["user_id"]
 
-    # ── scan/verify ──────────────────────────────────────────────────────────
-    set_document_status(conn, document_id, "scanning")
-    data = download_bytes(s3_client, CONFIG.s3_bucket_raw, doc["s3_key_raw"])
-    sha256 = hashlib.sha256(data).hexdigest()
-    byte_size = len(data)
-
-    try:
+    if doc["s3_key_safe"]:
+        # A previous attempt already scanned this clean and moved it
+        # RAW -> SAFE (that move happens at most once — the RAW object is
+        # gone afterward). A retry must resume from SAFE rather than
+        # re-reading RAW, which would 404.
+        data = download_bytes(s3_client, CONFIG.s3_bucket_safe, doc["s3_key_safe"])
         sniffed = sniff(data, doc["title"])
-    except SniffError as e:
-        _quarantine(conn, s3_client, doc, reason=f"type-sniff rejected: {e}")
-        raise PermanentFailure(str(e)) from e
+        sha256 = doc["content_sha256"]
+        byte_size = doc["byte_size"]
+    else:
+        # ── scan/verify ──────────────────────────────────────────────────────
+        set_document_status(conn, document_id, "scanning")
+        data = download_bytes(s3_client, CONFIG.s3_bucket_raw, doc["s3_key_raw"])
+        sha256 = hashlib.sha256(data).hexdigest()
+        byte_size = len(data)
 
-    try:
-        check_kind_allowed(sniffed.kind)
-        check_size(byte_size)
-        check_quota(conn, user_id, byte_size, document_id)
-    except PolicyError as e:
-        set_document_status(conn, document_id, "failed", detail=str(e))
-        raise PermanentFailure(str(e)) from e
+        try:
+            sniffed = sniff(data, doc["title"])
+        except SniffError as e:
+            _quarantine(conn, s3_client, doc, reason=f"type-sniff rejected: {e}")
+            raise PermanentFailure(str(e)) from e
 
-    scan_result = scanner.scan(data)
-    if not scan_result.clean:
-        _quarantine(conn, s3_client, doc, reason=f"malware detected: {scan_result.signature}")
-        raise PermanentFailure(f"malware detected: {scan_result.signature}")
+        try:
+            check_kind_allowed(sniffed.kind)
+            check_size(byte_size)
+            check_quota(conn, user_id, byte_size, document_id)
+        except PolicyError as e:
+            set_document_status(conn, document_id, "failed", detail=str(e))
+            raise PermanentFailure(str(e)) from e
 
-    # Clean: move RAW -> SAFE. From this point on nothing reads RAW again.
-    safe_key = _rekey(doc["s3_key_raw"], document_id, "safe/")
-    move_object(s3_client, CONFIG.s3_bucket_raw, doc["s3_key_raw"], CONFIG.s3_bucket_safe, safe_key)
-    set_document_safe_key(conn, document_id, safe_key)
-    set_document_hash_and_size(conn, document_id, sha256, byte_size, sniffed.detected_mime)
+        scan_result = scanner.scan(data)
+        if not scan_result.clean:
+            _quarantine(conn, s3_client, doc, reason=f"malware detected: {scan_result.signature}")
+            raise PermanentFailure(f"malware detected: {scan_result.signature}")
+
+        # Clean: move RAW -> SAFE. From this point on nothing reads RAW again.
+        safe_key = _rekey(doc["s3_key_raw"], document_id, "safe/")
+        move_object(s3_client, CONFIG.s3_bucket_raw, doc["s3_key_raw"], CONFIG.s3_bucket_safe, safe_key)
+        set_document_safe_key(conn, document_id, safe_key)
+        set_document_hash_and_size(conn, document_id, sha256, byte_size, sniffed.detected_mime)
 
     # ── dedup (§12 content_sha256) ───────────────────────────────────────────
     duplicate = find_ready_document_by_hash(conn, sha256, exclude_document_id=document_id)

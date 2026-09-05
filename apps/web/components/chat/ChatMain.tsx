@@ -578,7 +578,7 @@ export function ChatMain({ chatId }: { chatId: string }) {
                 />
                 <CalculatorButton />
                 <span className="ml-auto text-xs text-fg-muted">
-                  LLM can make mistakes. Please double-check responses.
+                  LLMs can make mistakes. Please double-check responses.
                 </span>
               </div>
             </div>

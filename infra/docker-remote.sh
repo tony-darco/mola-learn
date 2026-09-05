@@ -56,6 +56,14 @@ esac
 
 rsync -az --delete --exclude 'terraform/' "$SCRIPT_DIR"/ "$HOST:$REMOTE_DIR"/
 
+# The ingest-worker service's Dockerfile build context — synced as a
+# subdirectory of REMOTE_DIR (not a sibling) so it travels with the same
+# rsync target docker-gate.sh already trusts; docker-compose.yml's build
+# context is `./ingest` to match.
+rsync -az --delete \
+  --exclude '.venv/' --exclude '.pytest_cache/' --exclude '__pycache__/' --exclude '.env' \
+  "$SCRIPT_DIR/../apps/ingest"/ "$HOST:$REMOTE_DIR/ingest"/
+
 remote_cmd=("$action" "$@")
 printf -v quoted_cmd '%q ' "${remote_cmd[@]}"
 ssh "$HOST" "$quoted_cmd"

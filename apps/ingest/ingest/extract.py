@@ -18,7 +18,9 @@ def extract_pdf(data: bytes) -> list[tuple[str, str | None]]:
     sections: list[tuple[str, str | None]] = []
     with fitz.open(stream=data, filetype="pdf") as doc:
         for i, page in enumerate(doc):
-            text = page.get_text().strip()
+            # PyMuPDF occasionally emits embedded NUL bytes from certain
+            # fonts' text streams — Postgres text columns reject them outright.
+            text = page.get_text().replace("\x00", "").strip()
             if text:
                 sections.append((text, f"p.{i + 1}"))
     return sections
