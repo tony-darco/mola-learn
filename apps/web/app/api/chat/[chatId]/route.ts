@@ -17,6 +17,7 @@ import {
 } from "@mola/shared";
 import { artifacts, chats, compactionBoundaries, courses, db, messages, users } from "@mola/db";
 import { authzResponse, requireOwned, requireSession } from "@/lib/auth/ownership";
+import { getPublicApiKey } from "@/lib/auth/api-keys";
 import { assembleContext } from "@/lib/context/assemble";
 import { canEscalate, escalate } from "@/lib/context/hint-ladder";
 import { buildRegistry } from "@/lib/agent/tools";
@@ -266,10 +267,26 @@ export async function PATCH(
       updateData.model = targetModel;
       updateData.thinkingEnabled = thinkingEnabled ? 1 : 0;
 
-      await db.update(users).set({
-        defaultModel: targetModel,
-        defaultThinkingEnabled: thinkingEnabled ? 1 : 0,
-      }).where(eq(users.id, session.userId));
+      // Both writes committed together — a partial failure must not leave the
+      // account-wide default changed with no matching effect on the chat that
+      // triggered it (or vice versa).
+      const [updated] = await db.transaction(async (tx) => {
+        await tx.update(users).set({
+          defaultModel: targetModel,
+          defaultThinkingEnabled: thinkingEnabled ? 1 : 0,
+        }).where(eq(users.id, session.userId));
+
+        return tx.update(chats).set(updateData).where(eq(chats.id, chatId)).returning();
+      });
+
+      return Response.json({
+        id: updated!.id,
+        title: updated!.title,
+        courseId: updated!.courseId,
+        isPinned: updated!.isPinned,
+        model: updated!.model,
+        thinkingEnabled: updated!.thinkingEnabled === 1,
+      });
     }
 
     const [updated] = await db.update(chats)
@@ -320,7 +337,7 @@ export async function GET(
     const { chatId } = await params;
     const chat = await requireOwned("chat", chatId);
 
-    const [course, turns, chatArtifacts, [boundary]] = await Promise.all([
+    const [course, turns, chatArtifacts, [boundary], ownKey] = await Promise.all([
       chat.courseId
         ? db.select().from(courses).where(eq(courses.id, chat.courseId)).limit(1).then((r) => r[0] ?? null)
         : Promise.resolve(null),
@@ -328,6 +345,7 @@ export async function GET(
       db.select().from(artifacts).where(eq(artifacts.originChatId, chatId)).orderBy(asc(artifacts.createdAt)),
       db.select().from(compactionBoundaries).where(eq(compactionBoundaries.chatId, chatId))
         .orderBy(desc(compactionBoundaries.createdAt)).limit(1),
+      getPublicApiKey(chat.userId),
     ]);
 
     return Response.json({
@@ -338,6 +356,10 @@ export async function GET(
       compactionBoundary: boundary
         ? { upToMessageId: boundary.upToMessageId, summary: boundary.summary, createdAt: boundary.createdAt }
         : null,
+      // A BYOK user's model/thinking picker has no effect (resolveProvider
+      // never forwards it to OpenAI/Anthropic) — the client uses this to hide
+      // the picker rather than show one that silently does nothing.
+      hasOwnKey: ownKey !== null,
     });
   } catch (err) {
     return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });

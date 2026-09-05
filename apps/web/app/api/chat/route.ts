@@ -7,7 +7,7 @@
 import { desc, eq } from "drizzle-orm";
 import { chats, courses, db, users } from "@mola/db";
 import { authzResponse, requireSession } from "@/lib/auth/ownership";
-import { CHAT_MODELS } from "@/lib/llm";
+import { CHAT_MODELS, DEFAULT_CHAT_MODEL } from "@/lib/llm";
 
 export async function GET() {
   try {
@@ -60,24 +60,32 @@ export async function POST(req: Request) {
     // same rule as changing it on an existing chat (§ model switcher). Stored
     // raw, not clamped against the model — see the PATCH handler's comment
     // for why (the runtime layer in lib/llm/index.ts is the actual guard).
-    const model = body.model ?? user!.defaultModel;
+    //
+    // A fallback to the stored default is re-validated against CHAT_MODELS
+    // too, not just an explicit body.model — a model retired from CHAT_MODELS
+    // after being saved as someone's default must not silently propagate
+    // into a new chat row unchecked.
+    const model = body.model ?? (CHAT_MODELS.some((m) => m.id === user!.defaultModel) ? user!.defaultModel : DEFAULT_CHAT_MODEL);
     const thinkingEnabled = body.thinkingEnabled ?? user!.defaultThinkingEnabled === 1;
 
-    if (body.model !== undefined || body.thinkingEnabled !== undefined) {
-      await db.update(users).set({
-        defaultModel: model, defaultThinkingEnabled: thinkingEnabled ? 1 : 0,
-      }).where(eq(users.id, session.userId));
-    }
+    const chat = await db.transaction(async (tx) => {
+      if (body.model !== undefined || body.thinkingEnabled !== undefined) {
+        await tx.update(users).set({
+          defaultModel: model, defaultThinkingEnabled: thinkingEnabled ? 1 : 0,
+        }).where(eq(users.id, session.userId));
+      }
 
-    const [chat] = await db.insert(chats).values({
-      userId: session.userId,
-      courseId: body.courseId ?? null,
-      title: body.title?.trim() || "New chat",
-      model,
-      thinkingEnabled: thinkingEnabled ? 1 : 0,
-    }).returning();
+      const [row] = await tx.insert(chats).values({
+        userId: session.userId,
+        courseId: body.courseId ?? null,
+        title: body.title?.trim() || "New chat",
+        model,
+        thinkingEnabled: thinkingEnabled ? 1 : 0,
+      }).returning();
+      return row!;
+    });
 
-    return Response.json({ id: chat!.id, model: chat!.model, thinkingEnabled: chat!.thinkingEnabled === 1 });
+    return Response.json({ id: chat.id, model: chat.model, thinkingEnabled: chat.thinkingEnabled === 1 });
   } catch (err) {
     return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });
   }

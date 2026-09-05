@@ -11,13 +11,15 @@ import { ModelPicker } from "./ModelPicker";
  * network doesn't silently drop their first message.
  */
 export function NewCourseChatComposer({
-  courseId, placeholder, defaultModel = "qwen3.6:27b", defaultThinkingEnabled = true,
+  courseId, placeholder, defaultModel = "qwen3.6:27b", defaultThinkingEnabled = true, hasOwnKey = false,
 }: {
   courseId?: string;
   placeholder?: string;
   /** The signed-in user's current default (server-fetched by the page) — what a fresh composer starts on. */
   defaultModel?: string;
   defaultThinkingEnabled?: boolean;
+  /** A BYOK user's model/thinking choice has no effect (resolveProvider ignores it for OpenAI/Anthropic) — hide the picker rather than show one that silently does nothing. */
+  hasOwnKey?: boolean;
 }) {
   const router = useRouter();
   const [text, setText] = useState("");
@@ -63,12 +65,14 @@ export function NewCourseChatComposer({
           className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
         />
         <div className="flex shrink-0 items-center gap-2">
-          <ModelPicker
-            model={model}
-            thinkingEnabled={thinkingEnabled}
-            onChange={(next) => { setModel(next.model); setThinkingEnabled(next.thinkingEnabled); }}
-            disabled={busy}
-          />
+          {!hasOwnKey && (
+            <ModelPicker
+              model={model}
+              thinkingEnabled={thinkingEnabled}
+              onChange={(next) => { setModel(next.model); setThinkingEnabled(next.thinkingEnabled); }}
+              disabled={busy}
+            />
+          )}
           <button
             type="button"
             className="shrink-0 rounded-md bg-transparent px-2 py-1.5 text-xl leading-none text-fg hover:bg-bg disabled:cursor-default disabled:opacity-50"

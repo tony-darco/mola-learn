@@ -22,6 +22,7 @@ type HistoryResponse = {
   }[];
   artifacts: ArtifactRecord[];
   compactionBoundary: CompactionBoundary | null;
+  hasOwnKey: boolean;
 };
 
 function turnsFromHistory(data: HistoryResponse): Turn[] {
@@ -86,6 +87,7 @@ export function ChatMain({ chatId }: { chatId: string }) {
   const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
   const [model, setModel] = useState("qwen3.6:27b");
   const [thinkingEnabled, setThinkingEnabled] = useState(true);
+  const [hasOwnKey, setHasOwnKey] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Keyed by chatId, kept for the life of this mounted ChatMain (it's never
@@ -101,22 +103,40 @@ export function ChatMain({ chatId }: { chatId: string }) {
     setExpandedCompacted(false);
     setModel(data.chat.model);
     setThinkingEnabled(data.chat.thinkingEnabled === 1);
+    setHasOwnKey(data.hasOwnKey);
     const r = lastRung(hydrated);
     setRung(r);
     setCanEscalate(computeCanEscalate(r));
   }
 
   async function changeModel(next: { model: string; thinkingEnabled: boolean }) {
+    const previous = { model, thinkingEnabled };
     setModel(next.model);
     setThinkingEnabled(next.thinkingEnabled);
     try {
-      await fetch(`/api/chat/${chatId}`, {
+      const res = await fetch(`/api/chat/${chatId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(next),
       });
-    } catch {
-      // Best-effort — the next turn just uses whatever the server still has on record.
+      if (!res.ok) throw new Error(`failed to update model (${res.status})`);
+      // Keep the per-chat cache in sync — otherwise a revisit right after this
+      // change would briefly redisplay the pre-change model from the stale
+      // cached entry before the background revalidation fetch corrects it.
+      const cached = historyCache.current.get(chatId);
+      if (cached) {
+        historyCache.current.set(chatId, {
+          ...cached,
+          chat: { ...cached.chat, model: next.model, thinkingEnabled: next.thinkingEnabled ? 1 : 0 },
+        });
+      }
+    } catch (err) {
+      // The picker was showing the new selection optimistically — revert it
+      // since the server never actually persisted the change, so the next
+      // turn (which reads the DB fresh) doesn't silently use something else.
+      console.error(`chat ${chatId} model change failed:`, err);
+      setModel(previous.model);
+      setThinkingEnabled(previous.thinkingEnabled);
     }
   }
 
@@ -393,7 +413,18 @@ export function ChatMain({ chatId }: { chatId: string }) {
                     className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-fg placeholder:text-fg-muted focus:outline-none disabled:opacity-60"
                   />
                   <div className="flex shrink-0 items-center gap-2">
-                    <ModelPicker model={model} thinkingEnabled={thinkingEnabled} onChange={(next) => void changeModel(next)} disabled={busy} />
+                    {!hasOwnKey && (
+                      <ModelPicker
+                        model={model}
+                        thinkingEnabled={thinkingEnabled}
+                        onChange={(next) => void changeModel(next)}
+                        // Also disabled while `loading`: the history fetch for a
+                        // just-switched-to chat hasn't hydrated model/thinkingEnabled
+                        // yet, so a click here would PATCH this chatId using the
+                        // PREVIOUS chat's (or first-mount default) stale values.
+                        disabled={busy || loading}
+                      />
+                    )}
                     <HintControl rung={rung} canEscalate={canEscalate} disabled={busy} onPull={() => void send(true)} />
                     <button
                       type="button"

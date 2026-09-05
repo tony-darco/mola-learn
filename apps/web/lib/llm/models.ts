@@ -27,5 +27,9 @@ export const CHAT_MODELS: readonly ChatModelOption[] = [
 ] as const;
 
 export function modelSupportsThinking(modelId: string): boolean {
-  return CHAT_MODELS.find((m) => m.id === modelId)?.supportsThinking ?? true;
+  // Unrecognized id (a retired model still on an old chat row, or an
+  // unlisted MOLA_CHAT_MODEL) must default to NOT supporting thinking —
+  // sending think:true to a model that can't handle it is a hard Ollama
+  // 400, while think:false to one that can is always a harmless no-op.
+  return CHAT_MODELS.find((m) => m.id === modelId)?.supportsThinking ?? false;
 }

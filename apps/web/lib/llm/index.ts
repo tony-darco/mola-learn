@@ -2,7 +2,6 @@ import { eq } from "drizzle-orm";
 import { apiKeys, db } from "@mola/db";
 import { decryptSecret } from "@/lib/auth/crypto";
 import { DEFAULT_CHAT_MODEL, OllamaProvider } from "./ollama";
-import { modelSupportsThinking } from "./models";
 import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
 import type { CompletionRequest, LLMProvider } from "./types";
@@ -21,11 +20,9 @@ export { SelfHostedEmbeddingProvider } from "./embedding";
  */
 export type ChatProviderOptions = { model?: string; think?: boolean };
 
-/** Clamps `think` to false for any model that doesn't declare thinking support — Ollama hard-errors otherwise. */
+/** Constructs a local OllamaProvider from model/think options — `OllamaProvider` itself also enforces the thinking-support clamp, so it's not solely relied on here. */
 function ollamaProviderFor(opts?: ChatProviderOptions): OllamaProvider {
-  const model = opts?.model ?? DEFAULT_CHAT_MODEL;
-  const think = (opts?.think ?? true) && modelSupportsThinking(model);
-  return new OllamaProvider(model, think);
+  return new OllamaProvider(opts?.model ?? DEFAULT_CHAT_MODEL, opts?.think ?? true);
 }
 
 async function resolveProvider(userId: string, opts?: ChatProviderOptions): Promise<LLMProvider> {

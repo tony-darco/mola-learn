@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { courseMemory, db, documents, scheduleItems, users } from "@mola/db";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
+import { getPublicApiKey } from "@/lib/auth/api-keys";
 import { listCourseChats, uploadCourseDocumentAction } from "@/lib/courses/actions";
 import { NewCourseChatComposer } from "@/components/chat/NewCourseChatComposer";
 import { CourseSummaryField } from "@/components/chat/CourseSummaryField";
@@ -27,7 +28,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
     throw err;
   });
 
-  const [docs, memory, schedule, courseChats, [user]] = await Promise.all([
+  const [docs, memory, schedule, courseChats, [user], ownKey] = await Promise.all([
     db.select().from(documents).where(eq(documents.courseId, courseId)).orderBy(desc(documents.createdAt)),
     db.select().from(courseMemory).where(eq(courseMemory.courseId, courseId)).limit(1),
     db.select().from(scheduleItems).where(eq(scheduleItems.courseId, courseId)).orderBy(desc(scheduleItems.dueAt)),
@@ -35,6 +36,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
     db.select({
       defaultModel: users.defaultModel, defaultThinkingEnabled: users.defaultThinkingEnabled,
     }).from(users).where(eq(users.id, session.userId)).limit(1),
+    getPublicApiKey(session.userId),
   ]);
 
   return (
@@ -50,9 +52,15 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ i
         <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="flex flex-col gap-4">
             <NewCourseChatComposer
+              // Forces a fresh mount (and thus a fresh useState seed from the
+              // props below) on every course-to-course navigation — without
+              // this, Next reconciles the same instance in place and a model
+              // choice made on one course's page silently bleeds into the next.
+              key={course.id}
               courseId={course.id}
               defaultModel={user?.defaultModel}
               defaultThinkingEnabled={user ? user.defaultThinkingEnabled === 1 : undefined}
+              hasOwnKey={ownKey !== null}
             />
             <RecentChats chats={courseChats} />
           </div>
