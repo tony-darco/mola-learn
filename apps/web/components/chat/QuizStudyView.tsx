@@ -315,7 +315,12 @@ function QuizEditor({
                     <input
                       type="radio"
                       checked={row.correctIndex === oi}
-                      onChange={() => updateRow(i, { correctIndex: oi })}
+                      // Not updateRow (setRows only) — this must commit
+                      // immediately like add/remove/reorder do, since there's
+                      // no blur event on a radio to hang a save off of.
+                      // Confirmed live: without this, marking a different
+                      // option correct silently never persisted.
+                      onChange={() => void save(rows.map((r, k) => (k === i ? { ...r, correctIndex: oi } : r)))}
                       title="Mark as correct answer"
                       className="accent-accent"
                     />

@@ -62,6 +62,30 @@ const emitInputSchema = z.object({
 });
 
 /**
+ * Confirmed live: this model has a strong positional bias, consistently
+ * putting the correct option in the same slot across an entire quiz (every
+ * one of 10 questions in one generation had correctIndex=1) — a student who
+ * noticed would just always pick option 2. Fixed deterministically here
+ * rather than by prompting harder for variety, which is not something a
+ * prompt can reliably guarantee. `random` is injectable for testing.
+ */
+export function shuffleOptions(
+  options: string[],
+  correctIndex: number,
+  random: () => number = Math.random,
+): { options: string[]; correctIndex: number } {
+  const indices = options.map((_, i) => i);
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j]!, indices[i]!];
+  }
+  return {
+    options: indices.map((i) => options[i]!),
+    correctIndex: indices.indexOf(correctIndex),
+  };
+}
+
+/**
  * Sub-agent-only — deliberately never passed to buildRegistry(). Terminal
  * call of the quiz-writing sub-agent: validates the quiz shape and wraps it
  * as the artifact envelope the parent loop knows how to persist. Question
@@ -83,9 +107,8 @@ const emitQuizTool: Tool<z.infer<typeof emitInputSchema>> = {
           ? {
               type: "multiple_choice" as const,
               id: randomUUID(),
+              ...shuffleOptions(q.options, q.correctIndex),
               prompt: q.prompt,
-              options: q.options,
-              correctIndex: q.correctIndex,
               explanation: q.explanation ?? null,
             }
           : {
