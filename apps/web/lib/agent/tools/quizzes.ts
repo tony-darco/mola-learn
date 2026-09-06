@@ -121,8 +121,11 @@ You have three search tools (grep_search, bm25_search, vector_search) and one
 finishing tool (emit_quiz).
 
 Rules:
-- Research the requested topic using the search tools before writing any question.
-  Try more than one tool if the first result is thin.
+- Budget your research: 3-5 search calls TOTAL is enough for a whole quiz,
+  regardless of how many questions you're asked for. Research once, broadly,
+  then write every question from what you already have — do not search again
+  per question. Running out of turns before calling emit_quiz is a failure
+  even if every individual step you took was reasonable.
 - Every question, and its correct answer, must be grounded in something a tool
   actually returned. Never invent a fact, definition, or formula that didn't come
   from a retrieved chunk.
@@ -139,7 +142,22 @@ Rules:
   result includes a "documentId" (a UUID); use that exact value, never a filename or
   a made-up id. If you truly cannot find one, omit sources rather than guessing.
 - Call emit_quiz exactly once, with the complete quiz, as your final action.
-- Never use emoji, in any output, for any reason.`;
+- The moment you decide you have enough material, call emit_quiz IN THAT SAME TURN.
+  Do not send a text-only message announcing "I have enough, now I'll write the
+  quiz" — that wastes a turn you don't get back. Deciding and acting are the same step.
+- Never use emoji, in any output, for any reason.
+
+Each entry in "questions" must match one of these two exact shapes — copy the
+field names precisely, especially "type", which is required on every question:
+
+Multiple choice:
+{"type": "multiple_choice", "prompt": "What is 2+2?", "options": ["3", "4", "5"], "correctIndex": 1, "explanation": "2+2=4"}
+
+Short answer (rare — prefer multiple_choice):
+{"type": "short_answer", "prompt": "State the definition of X.", "expectedAnswer": "...", "explanation": null}
+
+Getting this shape wrong on the first call is expensive: fixing it burns turns
+you don't get back on a long quiz. Match it exactly the first time.`;
 
 export const createQuizTool: Tool<z.infer<typeof createInputSchema>> = {
   name: "create_quiz",
@@ -172,9 +190,19 @@ export const createQuizTool: Tool<z.infer<typeof createInputSchema>> = {
       {
         label: `Writing a ${count}-question quiz on "${input.topic}"`,
         systemPrompt: SYSTEM_PROMPT,
-        briefing: `Create a ${count}-question, ${difficulty}-difficulty quiz on: ${input.topic}`,
+        briefing:
+          `Create a ${count}-question, ${difficulty}-difficulty quiz on: ${input.topic}\n\n` +
+          `Research budget: 3-5 search calls total, then write all ${count} questions from ` +
+          `that material in a single emit_quiz call. Do not search once per question.`,
         toolAllowlist: ["grep_search", "bm25_search", "vector_search", "emit_quiz"],
-        maxIterations: 12,
+        // Higher than flashcards' 10, and higher than an earlier 20: this
+        // model (qwen3.8:27b, think:false) has a persistent habit of
+        // narrating "now I'll write the quiz" as a text-only turn right
+        // before the turn that would actually call emit_quiz — confirmed
+        // live across multiple attempts, resistant to an explicit
+        // instruction not to do this. Extra headroom absorbs that wasted
+        // turn rather than fighting the model's own style further.
+        maxIterations: 30,
       },
       subRegistry,
       quizCtx,
