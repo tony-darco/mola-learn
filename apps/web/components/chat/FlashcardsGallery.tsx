@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { ArtifactRecord } from "@mola/shared";
 import type { CourseOption, TermOption } from "@/lib/flashcards/gallery";
 import { artifactIcon, summarizeArtifact } from "./artifact-summary";
-import { ArtifactBlock } from "./artifacts/ArtifactBlock";
 
 /** `ArtifactRecord` with dates as the ISO strings the server page sends over the RSC boundary. */
 type ClientDeck = Omit<ArtifactRecord, "createdAt" | "updatedAt"> & { createdAt: string; updatedAt: string };
@@ -24,10 +24,6 @@ function relativeDate(iso: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function toArtifactRecord(d: ClientDeck): ArtifactRecord {
-  return { ...d, createdAt: new Date(d.createdAt), updatedAt: new Date(d.updatedAt) };
-}
-
 /**
  * The Flashcards gallery: a Claude.ai-Artifacts-style card grid over this
  * user's own decks (never another user's — the server page already scoped
@@ -44,7 +40,6 @@ export function FlashcardsGallery({
   const [textbookFilter, setTextbookFilter] = useState("all");
   const [termFilter, setTermFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("modified");
-  const [openDeckId, setOpenDeckId] = useState<string | null>(null);
 
   const courseMap = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses]);
   const termMap = useMemo(() => new Map(terms.map((t) => [t.id, t])), [terms]);
@@ -97,8 +92,6 @@ export function FlashcardsGallery({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decks, courseFilter, textbookFilter, termFilter, search, sortBy, courseMap]);
-
-  const openDeck = openDeckId ? decks.find((d) => d.id === openDeckId) ?? null : null;
 
   return (
     <div>
@@ -168,55 +161,21 @@ export function FlashcardsGallery({
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((d) => (
-            <DeckCard
-              key={d.id}
-              deck={d}
-              courseLabel={courseLabel(d.courseId)}
-              onOpen={() => setOpenDeckId(d.id)}
-            />
+            <DeckCard key={d.id} deck={d} courseLabel={courseLabel(d.courseId)} />
           ))}
-        </div>
-      )}
-
-      {openDeck && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-6 backdrop-blur-sm"
-          onClick={() => setOpenDeckId(null)}
-        >
-          <div
-            className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-end p-2">
-              <button
-                type="button"
-                onClick={() => setOpenDeckId(null)}
-                className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-bg hover:text-fg"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="px-3 pb-3">
-              <ArtifactBlock artifact={toArtifactRecord(openDeck)} />
-            </div>
-          </div>
         </div>
       )}
     </div>
   );
 }
 
-function DeckCard({
-  deck, courseLabel, onOpen,
-}: { deck: ClientDeck; courseLabel: string | null; onOpen: () => void }) {
+function DeckCard({ deck, courseLabel }: { deck: ClientDeck; courseLabel: string | null }) {
   const cards = deck.payload.kind === "flashcard_deck" ? deck.payload.cards : [];
   const preview = cards.slice(0, 3).map((c) => c.front);
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <Link
+      href={`/flashcards/${deck.id}`}
       className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface text-left transition hover:border-accent"
     >
       <div className="flex h-28 flex-col justify-center gap-1 overflow-hidden bg-bg px-4 py-3">
@@ -235,6 +194,6 @@ function DeckCard({
         </div>
         {courseLabel && <div className="truncate text-xs text-fg-muted">{courseLabel}</div>}
       </div>
-    </button>
+    </Link>
   );
 }
