@@ -7,7 +7,6 @@ import type { ArtifactRecord } from "@mola/shared";
 import type { CourseOption, TermOption } from "@/lib/flashcards/gallery";
 import { renameDeckAction } from "@/lib/flashcards/actions";
 import { artifactIcon, summarizeArtifact } from "./artifact-summary";
-import { usePrompt } from "./shell-context";
 
 /** `ArtifactRecord` with dates as the ISO strings the server page sends over the RSC boundary. */
 type ClientDeck = Omit<ArtifactRecord, "createdAt" | "updatedAt"> & { createdAt: string; updatedAt: string };
@@ -36,21 +35,31 @@ function relativeDate(iso: string): string {
  * rather than round-tripping to an API per keystroke.
  */
 export function FlashcardsGallery({
-  decks, courses, terms,
+  decks: serverDecks, courses, terms,
 }: { decks: ClientDeck[]; courses: CourseOption[]; terms: TermOption[] }) {
   const [search, setSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState("all");
   const [textbookFilter, setTextbookFilter] = useState("all");
   const [termFilter, setTermFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("modified");
-  const prompt = usePrompt();
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamed, setRenamed] = useState<Record<string, string>>({});
   const router = useRouter();
 
-  /** Right-click a deck card to rename it, using the app's own prompt dialog. */
-  async function rename(deckId: string, current: string) {
-    const next = await prompt("Rename deck", current);
-    if (!next || next.trim() === current) return;
-    await renameDeckAction(deckId, next.trim());
+  // A rename shows immediately rather than waiting on the server round trip
+  // and re-render; router.refresh() below reconciles it with the real row.
+  const decks = useMemo(
+    () => serverDecks.map((d) => (renamed[d.id] ? { ...d, title: renamed[d.id]! } : d)),
+    [serverDecks, renamed],
+  );
+
+  /** Commits an inline rename. Saved on blur — same as the deck page's title. */
+  async function rename(deckId: string, next: string, current: string) {
+    setRenamingId(null);
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === current) return;
+    setRenamed((r) => ({ ...r, [deckId]: trimmed }));
+    await renameDeckAction(deckId, trimmed);
     router.refresh();
   }
 
@@ -174,7 +183,15 @@ export function FlashcardsGallery({
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((d) => (
-            <DeckCard key={d.id} deck={d} courseLabel={courseLabel(d.courseId)} onRename={rename} />
+            <DeckCard
+              key={d.id}
+              deck={d}
+              courseLabel={courseLabel(d.courseId)}
+              renaming={renamingId === d.id}
+              onStartRename={() => setRenamingId(d.id)}
+              onCommitRename={(next) => void rename(d.id, next, d.title)}
+              onCancelRename={() => setRenamingId(null)}
+            />
           ))}
         </div>
       )}
@@ -183,18 +200,21 @@ export function FlashcardsGallery({
 }
 
 function DeckCard({
-  deck, courseLabel, onRename,
-}: { deck: ClientDeck; courseLabel: string | null; onRename: (id: string, title: string) => void }) {
+  deck, courseLabel, renaming, onStartRename, onCommitRename, onCancelRename,
+}: {
+  deck: ClientDeck;
+  courseLabel: string | null;
+  renaming: boolean;
+  onStartRename: () => void;
+  onCommitRename: (next: string) => void;
+  onCancelRename: () => void;
+}) {
   const cards = deck.payload.kind === "flashcard_deck" ? deck.payload.cards : [];
   const preview = cards.slice(0, 3).map((c) => c.front);
+  const [draft, setDraft] = useState(deck.title);
 
-  return (
-    <Link
-      href={`/flashcards/${deck.id}`}
-      onContextMenu={(e) => { e.preventDefault(); onRename(deck.id, deck.title); }}
-      title="Right-click to rename"
-      className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface text-left transition hover:border-accent"
-    >
+  const body = (
+    <>
       <div className="flex h-28 flex-col justify-center gap-1 overflow-hidden bg-bg px-4 py-3">
         {preview.length === 0 ? (
           <span className="text-2xl text-fg-muted" aria-hidden="true">{artifactIcon(deck.payload.kind)}</span>
@@ -205,12 +225,46 @@ function DeckCard({
         )}
       </div>
       <div className="flex flex-col gap-1 border-t border-border p-3">
-        <div className="truncate text-sm font-semibold text-fg">{deck.title}</div>
+        {renaming ? (
+          <input
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => onCommitRename(draft)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+              if (e.key === "Escape") { e.preventDefault(); setDraft(deck.title); onCancelRename(); }
+            }}
+            aria-label="Deck title"
+            className="w-full rounded-md border border-border bg-bg px-1.5 py-0.5 text-sm font-semibold text-fg focus:outline-none"
+          />
+        ) : (
+          <div className="truncate text-sm font-semibold text-fg">{deck.title}</div>
+        )}
         <div className="truncate text-xs text-fg-muted">
           Edited {relativeDate(deck.updatedAt)} · {summarizeArtifact(deck.payload)}
         </div>
         {courseLabel && <div className="truncate text-xs text-fg-muted">{courseLabel}</div>}
       </div>
+    </>
+  );
+
+  const shell = "flex flex-col overflow-hidden rounded-xl border border-border bg-surface text-left transition hover:border-accent";
+
+  // While renaming the card is NOT a link — otherwise clicking into the text
+  // box would navigate to the deck instead of letting you type.
+  if (renaming) {
+    return <div className={shell}>{body}</div>;
+  }
+
+  return (
+    <Link
+      href={`/flashcards/${deck.id}`}
+      onContextMenu={(e) => { e.preventDefault(); setDraft(deck.title); onStartRename(); }}
+      title="Right-click to rename"
+      className={shell}
+    >
+      {body}
     </Link>
   );
 }
