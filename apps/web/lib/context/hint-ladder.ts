@@ -1,11 +1,10 @@
 /**
- * LAYER 4 (skeleton) — the graduated hint ladder.
+ * LAYER 4 — the graduated hint ladder and Socratic rulebook (Agent F, §3/§6).
  *
- * Pulled forward into Phase 0 deliberately (plan S6). Agent F owns the full
- * rulebook, per-course override and elaborative interrogation in Phase 1.5;
- * this is the crude version, present from day one so everything built after it
- * is evaluated against real tutoring behavior rather than an answer-dump
- * placeholder.
+ * Pulled forward as a crude skeleton in Phase 0 (plan S6); this is the Phase
+ * 1.5 rulebook — per-course override (buildLayer4Text in assemble.ts already
+ * reads courses.instructions) and elaborative interrogation folded in below,
+ * per §6's explicit call not to make it a standalone tool.
  *
  * Grounding (§3):
  *   - Over-scaffolding produces learned helplessness; under-scaffolding
@@ -46,6 +45,12 @@ their own course — a deadline, what chapter a topic is in, what the syllabus s
 or when they explicitly say they want the answer rather than help getting there.
 
 Never state or imply that you are withholding an answer to make a point. Just teach.
+
+When the student gets something right — answers correctly, completes a step, or
+reasons their way to a conclusion on their own — do not just move on. Ask a brief
+"why is that the case?" or "how did you know to do that?" follow-up before advancing.
+Elaborative interrogation deepens what a correct answer alone does not: skip it only
+when the student is clearly done with the topic or explicitly wants to move on.
 
 Never name or announce the scaffolding. Do not say "pointing hint", "teaching hint",
 "bottom-out hint", or otherwise tell the student which level of help they are getting.

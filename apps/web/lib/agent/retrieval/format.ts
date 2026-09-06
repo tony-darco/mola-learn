@@ -11,7 +11,10 @@ export function formatHits(hits: ChunkHit[], describedAs: string): string {
   }
   const lines = hits.map((h, i) => {
     const loc = h.locator ? `, ${h.locator}` : "";
-    return `[${i + 1}] "${h.documentTitle}" (chunk ${h.ordinal}${loc}):\n${h.text}`;
+    // documentId included so a caller building a SourceRef (§6) — e.g. the
+    // flashcard-creation sub-agent — has the real UUID in hand rather than
+    // only a human-readable title it cannot turn into one.
+    return `[${i + 1}] "${h.documentTitle}" (documentId: ${h.documentId}, chunk ${h.ordinal}${loc}):\n${h.text}`;
   });
   return `${hits.length} chunk(s) found (${describedAs}):\n\n${lines.join("\n\n")}`;
 }

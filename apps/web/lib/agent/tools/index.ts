@@ -4,6 +4,8 @@ import { grepSearchTool } from "./grep-search";
 import { bm25SearchTool } from "./bm25-search";
 import { vectorSearchTool } from "./vector-search";
 import { calculatorTool } from "./calculator";
+import { createFlashcardDeckTool } from "./flashcards";
+import { getDueFlashcardsTool, recordFlashcardReviewTool } from "./flashcard-review";
 
 /**
  * The single place tools are wired up. Phase 1 agents add their tools HERE
@@ -16,7 +18,10 @@ export function buildRegistry(): ToolRegistry {
     .register(grepSearchTool)
     .register(bm25SearchTool)
     .register(vectorSearchTool)
-    .register(calculatorTool);
+    .register(calculatorTool)
+    .register(createFlashcardDeckTool)
+    .register(getDueFlashcardsTool)
+    .register(recordFlashcardReviewTool);
 }
 
 /** The retrieval agent's tool allowlist (§6) — used by runRetrievalAgent's subagent spec. */
