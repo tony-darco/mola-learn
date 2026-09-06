@@ -8,7 +8,7 @@ import { useRefreshSidebar } from "./shell-context";
 type PublicApiKey = { provider: string; lastFour: string };
 type Term = { id: string; label: string };
 type Course = { id: string; name: string; number: string | null; professor: string | null; termId: string | null };
-type Profile = { name: string; university: string | null; year: string | null };
+type Profile = { name: string; university: string | null; year: string | null; defaultQuizQuestionCount: number };
 
 const PROVIDER_LABEL: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic" };
 const YEAR_LABEL: Record<string, string> = {
@@ -76,6 +76,9 @@ export function SettingsModal({
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [newTermLabel, setNewTermLabel] = useState("");
+  const [quizCount, setQuizCount] = useState("10");
+  const [quizCountBusy, setQuizCountBusy] = useState(false);
+  const [quizCountSaved, setQuizCountSaved] = useState(false);
 
   useEffect(() => {
     if (open) setSection(initialSection);
@@ -139,6 +142,7 @@ export function SettingsModal({
         if (data) {
           setProfile(data.user);
           setProfileTerms(data.terms);
+          setQuizCount(String(data.user.defaultQuizQuestionCount ?? 10));
         }
       })
       .finally(() => setLoadingProfile(false));
@@ -265,6 +269,26 @@ export function SettingsModal({
     }
   }
 
+  async function handleSaveQuizCount() {
+    const parsed = Math.min(Math.max(Number(quizCount) || 10, 1), 30);
+    setQuizCountBusy(true);
+    setQuizCountSaved(false);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ defaultQuizQuestionCount: parsed }),
+      });
+      if (!res.ok) throw new Error("failed to save");
+      setQuizCount(String(parsed));
+      setQuizCountSaved(true);
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "failed to save quiz default");
+    } finally {
+      setQuizCountBusy(false);
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -384,6 +408,33 @@ export function SettingsModal({
                       Save
                     </button>
                   </form>
+
+                  <div className="border-t border-border pt-4 mb-6">
+                    <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Quiz defaults</div>
+                    <p className="mb-3 text-xs text-fg-muted">
+                      How many questions a generated quiz has when you don&apos;t say a number.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={quizCount}
+                        onChange={(e) => { setQuizCount(e.target.value); setQuizCountSaved(false); }}
+                        className="w-20 rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg"
+                      />
+                      <span className="text-xs text-fg-muted">questions</span>
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveQuizCount()}
+                        disabled={quizCountBusy}
+                        className="rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      {quizCountSaved && <span className="text-xs text-fg-muted">Saved.</span>}
+                    </div>
+                  </div>
 
                   <div className="border-t border-border pt-4">
                     <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">Terms</div>

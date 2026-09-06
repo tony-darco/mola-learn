@@ -22,6 +22,17 @@ export async function updateProfileAction(formData: FormData) {
   await db.update(users).set({ name, university, year, updatedAt: new Date() }).where(eq(users.id, session.userId));
 }
 
+/** create_quiz's fallback question count when a student's prompt doesn't say (§6). */
+export async function updateQuizDefaultsAction(formData: FormData) {
+  const session = await requireSession();
+  const raw = Number(formData.get("defaultQuizQuestionCount"));
+  const count = Number.isInteger(raw) ? Math.min(Math.max(raw, 1), 30) : 10;
+
+  await db.update(users)
+    .set({ defaultQuizQuestionCount: count, updatedAt: new Date() })
+    .where(eq(users.id, session.userId));
+}
+
 /**
  * Terms are additive, never overwritten (§8) — this route only inserts. There
  * is deliberately no update/delete action here: adding Fall 2026 must not be
