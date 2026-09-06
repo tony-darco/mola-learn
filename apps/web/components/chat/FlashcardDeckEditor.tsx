@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { z } from "zod";
 import type { flashcardSchema } from "@mola/shared";
 import { updateDeckCardsAction, type CardInput } from "@/lib/flashcards/actions";
@@ -9,6 +9,37 @@ type Card = z.infer<typeof flashcardSchema>;
 
 /** A row being edited. `id` is absent for a card the student just added. */
 type Row = { id?: string; front: string; back: string; chapter: string | null; section: string | null; week: number | null };
+
+/**
+ * A textarea that sizes itself to its content, so a long definition is never
+ * clipped behind a scrollbar the student has to drag open by hand. Manual
+ * resizing is switched off precisely because it's no longer needed.
+ */
+function AutoGrowTextarea({
+  value, onChange, onBlur,
+}: { value: string; onChange: (v: string) => void; onBlur: () => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Collapse first, or scrollHeight only ever reports the current height
+    // and the box can grow but never shrink back down.
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
+      rows={1}
+      className="resize-none overflow-hidden rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg focus:outline-none"
+    />
+  );
+}
 
 function toRows(cards: Card[]): Row[] {
   return cards.map((c) => ({ id: c.id, front: c.front, back: c.back, chapter: c.chapter, section: c.section, week: c.week }));
@@ -103,22 +134,18 @@ export function FlashcardDeckEditor({
             <div className="grid flex-1 gap-2 sm:grid-cols-2">
               <label className="flex flex-col gap-1">
                 <span className="text-xs uppercase tracking-wide text-fg-muted">Term</span>
-                <textarea
+                <AutoGrowTextarea
                   value={row.front}
-                  onChange={(e) => updateRow(i, { front: e.target.value })}
+                  onChange={(v) => updateRow(i, { front: v })}
                   onBlur={() => void save(rows)}
-                  rows={2}
-                  className="resize-y rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg focus:outline-none"
                 />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-xs uppercase tracking-wide text-fg-muted">Definition</span>
-                <textarea
+                <AutoGrowTextarea
                   value={row.back}
-                  onChange={(e) => updateRow(i, { back: e.target.value })}
+                  onChange={(v) => updateRow(i, { back: v })}
                   onBlur={() => void save(rows)}
-                  rows={2}
-                  className="resize-y rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg focus:outline-none"
                 />
               </label>
             </div>
