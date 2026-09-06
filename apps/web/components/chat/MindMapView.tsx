@@ -1,22 +1,52 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { z } from "zod";
+import { AnimatePresence, motion } from "motion/react";
+import { select } from "d3-selection";
+import "d3-transition"; // augments Selection with `.transition()`, used by zoomBy()
+import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import type { mindMapPayloadSchema } from "@mola/shared";
 import { layoutTree, LAYOUT_CONSTANTS, type MindMapNode } from "@/lib/mindmaps/layout";
 import { updateMindMapAction } from "@/lib/mindmaps/actions";
 import { renameArtifactAction } from "@/lib/artifacts/rename";
 
 type Payload = z.infer<typeof mindMapPayloadSchema>;
-const { NODE_WIDTH, NODE_HEIGHT } = LAYOUT_CONSTANTS;
+const { NODE_WIDTH, NODE_HEIGHT, H_GAP } = LAYOUT_CONSTANTS;
+
+const PANEL_MIN_WIDTH = 280;
+const PANEL_MAX_WIDTH = 560;
+const PANEL_DEFAULT_WIDTH = 360;
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 2.5;
 
 /**
- * A real visual tree — boxes positioned by lib/mindmaps/layout.ts, connected
- * by SVG lines — not the outline-list rendering artifacts/MindMap.tsx uses
- * for a map that just landed inline in a chat turn (kept as-is; this is the
- * dedicated studying/editing surface, same split as Flashcards/Quizzes).
- * Click a node to select it; the side panel edits label/note, adds a child,
- * or deletes it (and its whole subtree).
+ * Depth-tiered palette matching the reference mock: root is the odd one out
+ * (lavender), everything at depth 1 is blue, depth 2+ is green — the map can
+ * go arbitrarily deep (no fixed number of levels), so anything past depth 2
+ * just keeps the last tier rather than inventing more colors.
+ */
+const TIERS = [
+  { bg: "#d9d6fb", border: "#b3adf5", text: "#2c2560" }, // root
+  { bg: "#cfe3fb", border: "#a7cdf5", text: "#1c3f66" }, // depth 1
+  { bg: "#c9f0dd", border: "#9ee3c2", text: "#154c34" }, // depth 2+
+];
+function tierFor(depth: number) {
+  return TIERS[Math.min(depth, TIERS.length - 1)]!;
+}
+
+/**
+ * A real visual tree — horizontal, left-to-right, collapsible per node, on
+ * an infinite pan/zoom canvas (d3-zoom drives the gesture math; we only own
+ * the resulting transform). Expand/collapse animates via motion's
+ * AnimatePresence: a newly-visible child mounts growing out of its parent's
+ * position, since layoutTree already omits collapsed descendants entirely —
+ * toggling `collapsed` is a real mount/unmount, not just a style change.
+ *
+ * Clicking a node opens a fixed right-side panel (not an inline callout —
+ * an in-flow panel would resize the canvas viewport every time it opens,
+ * fighting a pan/zoom surface that wants a stable size) showing its
+ * definition and the specific sources that node was grounded in.
  */
 export function MindMapView({
   mapId, title: initialTitle, payload: initialPayload,
@@ -24,20 +54,72 @@ export function MindMapView({
   const [title, setTitle] = useState(initialTitle);
   const [editingTitle, setEditingTitle] = useState(false);
   const [payload, setPayload] = useState(initialPayload);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const positioned = useMemo(() => layoutTree(payload.rootId, payload.nodes), [payload]);
+  const [panelWidth, setPanelWidth] = useState(PANEL_DEFAULT_WIDTH);
+  const [panelHandleHover, setPanelHandleHover] = useState(false);
+  const panelDragStart = useRef<{ x: number; width: number } | null>(null);
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity);
+  const seededInitialTransform = useRef(false);
+
+  const positioned = useMemo(() => layoutTree(payload.rootId, payload.nodes, collapsed), [payload, collapsed]);
   const bounds = useMemo(() => {
-    if (positioned.length === 0) return { minX: 0, maxX: NODE_WIDTH, maxY: NODE_HEIGHT };
+    if (positioned.length === 0) return { minY: 0, maxX: NODE_WIDTH, maxY: NODE_HEIGHT };
     return {
-      minX: Math.min(...positioned.map((n) => n.x)),
+      minY: Math.min(...positioned.map((n) => n.y)),
       maxX: Math.max(...positioned.map((n) => n.x)) + NODE_WIDTH,
       maxY: Math.max(...positioned.map((n) => n.y)) + NODE_HEIGHT,
     };
   }, [positioned]);
   const byId = useMemo(() => new Map(positioned.map((n) => [n.id, n])), [positioned]);
-  const selected = selectedId ? payload.nodes.find((n) => n.id === selectedId) ?? null : null;
+  const open = openId ? payload.nodes.find((n) => n.id === openId) ?? null : null;
+
+  // Zoom behavior — wired once. Panning/zooming updates React state so the
+  // content <g> re-renders with the new transform; the +/- buttons and the
+  // gesture handlers below all go back through this same behavior so d3's
+  // internal transform never drifts out of sync with what's on screen.
+  useEffect(() => {
+    if (!svgRef.current) return;
+    const behavior = zoom<SVGSVGElement, unknown>()
+      .scaleExtent([ZOOM_MIN, ZOOM_MAX])
+      .on("zoom", (event) => setTransform(event.transform));
+    select(svgRef.current).call(behavior);
+    zoomBehaviorRef.current = behavior;
+    return () => {
+      select(svgRef.current!).on(".zoom", null);
+      zoomBehaviorRef.current = null;
+    };
+  }, []);
+
+  // Seed the initial view once real layout bounds exist, so the first paint
+  // matches the old static top-left placement — never re-seeded afterward,
+  // so collapsing/expanding a node never recenters or resets the view.
+  useEffect(() => {
+    if (seededInitialTransform.current || positioned.length === 0 || !svgRef.current || !zoomBehaviorRef.current) return;
+    seededInitialTransform.current = true;
+    const seed = zoomIdentity.translate(20, 20 - bounds.minY);
+    select(svgRef.current).call(zoomBehaviorRef.current.transform, seed);
+  }, [positioned.length, bounds.minY]);
+
+  function zoomBy(factor: number) {
+    if (!svgRef.current || !zoomBehaviorRef.current) return;
+    select(svgRef.current).transition().duration(200).call(zoomBehaviorRef.current.scaleBy, factor);
+  }
+
+  function toggleCollapsed(id: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   function commitTitle() {
     setEditingTitle(false);
@@ -57,22 +139,22 @@ export function MindMapView({
     }
   }
 
-  function updateSelected(patch: Partial<MindMapNode>) {
-    if (!selectedId) return;
-    void persist({ ...payload, nodes: payload.nodes.map((n) => (n.id === selectedId ? { ...n, ...patch } : n)) });
+  function updateOpen(patch: Partial<MindMapNode>) {
+    if (!openId) return;
+    void persist({ ...payload, nodes: payload.nodes.map((n) => (n.id === openId ? { ...n, ...patch } : n)) });
   }
 
   function addChild() {
-    if (!selectedId) return;
+    if (!openId) return;
     const id = crypto.randomUUID();
-    void persist({ ...payload, nodes: [...payload.nodes, { id, label: "New node", parentId: selectedId, note: null }] });
-    setSelectedId(id);
+    void persist({ ...payload, nodes: [...payload.nodes, { id, label: "New node", parentId: openId, note: null, sources: [] }] });
+    setOpenId(id);
+    setEditMode(true);
   }
 
-  function deleteSelected() {
-    if (!selectedId || selectedId === payload.rootId) return; // the root can't be deleted from under itself
-    // Remove the node and its whole subtree, plus any edge touching them.
-    const toRemove = new Set<string>([selectedId]);
+  function deleteOpen() {
+    if (!openId || openId === payload.rootId) return; // the root can't be deleted from under itself
+    const toRemove = new Set<string>([openId]);
     let grew = true;
     while (grew) {
       grew = false;
@@ -88,8 +170,31 @@ export function MindMapView({
       nodes: payload.nodes.filter((n) => !toRemove.has(n.id)),
       edges: payload.edges.filter((e) => !toRemove.has(e.from) && !toRemove.has(e.to)),
     });
-    setSelectedId(null);
+    setOpenId(null);
+    setEditMode(false);
   }
+
+  function startPanelDrag(e: React.PointerEvent) {
+    panelDragStart.current = { x: e.clientX, width: panelWidth };
+    window.addEventListener("pointermove", onPanelPointerMove);
+    window.addEventListener("pointerup", onPanelPointerUp);
+  }
+  function onPanelPointerMove(e: PointerEvent) {
+    if (!panelDragStart.current) return;
+    // Panel is right-anchored — dragging left (negative clientX delta) widens it.
+    const delta = panelDragStart.current.x - e.clientX;
+    setPanelWidth(Math.min(Math.max(panelDragStart.current.width + delta, PANEL_MIN_WIDTH), PANEL_MAX_WIDTH));
+  }
+  function onPanelPointerUp() {
+    panelDragStart.current = null;
+    window.removeEventListener("pointermove", onPanelPointerMove);
+    window.removeEventListener("pointerup", onPanelPointerUp);
+  }
+  useEffect(() => () => {
+    window.removeEventListener("pointermove", onPanelPointerMove);
+    window.removeEventListener("pointerup", onPanelPointerUp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -119,132 +224,223 @@ export function MindMapView({
         {saving && <div className="shrink-0 text-xs text-fg-muted">Saving…</div>}
       </div>
 
-      <div className="flex gap-4">
-        <div className="flex-1 overflow-auto rounded-xl border border-border bg-surface p-4">
-          <svg
-            width={bounds.maxX - bounds.minX + 40}
-            height={bounds.maxY + 40}
-            className="block"
-          >
-            <g transform={`translate(${20 - bounds.minX}, 20)`}>
-              {/* Parent/child tree edges, drawn first so nodes sit on top. */}
-              {positioned.filter((n) => n.parentId).map((n) => {
-                const parent = byId.get(n.parentId!);
-                if (!parent) return null;
-                const x1 = parent.x + NODE_WIDTH / 2, y1 = parent.y + NODE_HEIGHT;
-                const x2 = n.x + NODE_WIDTH / 2, y2 = n.y;
-                return (
-                  <path
-                    key={`edge-${n.id}`}
-                    d={`M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}`}
-                    fill="none"
-                    className="stroke-border"
-                    strokeWidth={1.5}
-                  />
-                );
-              })}
+      <div className="relative h-[70vh] overflow-hidden rounded-xl border border-border bg-white dark:bg-surface">
+        <svg ref={svgRef} width="100%" height="100%" className="block cursor-grab active:cursor-grabbing">
+          <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.k})`}>
+            {/* Parent -> child tree edges, anchored on the arrow position (not
+                the node box), drawn first so nodes/arrows sit on top. */}
+            {positioned.filter((n) => n.parentId).map((n) => {
+              const parent = byId.get(n.parentId!);
+              if (!parent) return null;
+              const x1 = parent.x + NODE_WIDTH + H_GAP / 2, y1 = parent.y + NODE_HEIGHT / 2;
+              const x2 = n.x, y2 = n.y + NODE_HEIGHT / 2;
+              return (
+                <path
+                  key={`edge-${n.id}`}
+                  d={`M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke="#a6b0c3"
+                  strokeWidth={1.5}
+                />
+              );
+            })}
 
-              {/* Cross-links — dashed, labeled, distinct from the tree spine. */}
-              {payload.edges.map((e, i) => {
-                const from = byId.get(e.from), to = byId.get(e.to);
-                if (!from || !to) return null;
-                const x1 = from.x + NODE_WIDTH / 2, y1 = from.y + NODE_HEIGHT / 2;
-                const x2 = to.x + NODE_WIDTH / 2, y2 = to.y + NODE_HEIGHT / 2;
-                return (
-                  <g key={`cross-${i}`}>
-                    <line x1={x1} y1={y1} x2={x2} y2={y2} className="stroke-accent" strokeWidth={1.25} strokeDasharray="4 3" opacity={0.6} />
-                    {e.label && (
-                      <text x={(x1 + x2) / 2} y={(y1 + y2) / 2} className="fill-fg-muted text-[10px]" textAnchor="middle">
-                        {e.label}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-
-              {positioned.map((n) => (
-                <g
-                  key={n.id}
-                  transform={`translate(${n.x}, ${n.y})`}
-                  onClick={() => setSelectedId(n.id)}
-                  className="cursor-pointer"
-                >
-                  <rect
-                    width={NODE_WIDTH}
-                    height={NODE_HEIGHT}
-                    rx={10}
-                    className={
-                      n.id === selectedId
-                        ? "fill-accent stroke-accent"
-                        : n.id === payload.rootId
-                          ? "fill-fg stroke-fg"
-                          : "fill-bg stroke-border"
-                    }
-                    strokeWidth={1.5}
-                  />
-                  <foreignObject x={6} y={4} width={NODE_WIDTH - 12} height={NODE_HEIGHT - 8}>
-                    <div
-                      className={`flex h-full items-center justify-center overflow-hidden text-center text-xs leading-tight ${
-                        n.id === selectedId
-                          ? "text-accent-fg"
-                          : n.id === payload.rootId
-                            ? "text-bg"
-                            : "text-fg"
-                      }`}
-                    >
-                      {n.label}
-                    </div>
-                  </foreignObject>
+            {/* Cross-links — dashed, labeled, distinct from the tree spine. */}
+            {payload.edges.map((e, i) => {
+              const from = byId.get(e.from), to = byId.get(e.to);
+              if (!from || !to) return null;
+              const x1 = from.x + NODE_WIDTH / 2, y1 = from.y + NODE_HEIGHT / 2;
+              const x2 = to.x + NODE_WIDTH / 2, y2 = to.y + NODE_HEIGHT / 2;
+              return (
+                <g key={`cross-${i}`}>
+                  <line x1={x1} y1={y1} x2={x2} y2={y2} className="stroke-accent" strokeWidth={1.25} strokeDasharray="4 3" opacity={0.6} />
+                  {e.label && (
+                    <text x={(x1 + x2) / 2} y={(y1 + y2) / 2} className="fill-fg-muted text-[10px]" textAnchor="middle">
+                      {e.label}
+                    </text>
+                  )}
                 </g>
-              ))}
-            </g>
-          </svg>
+              );
+            })}
+
+            <AnimatePresence initial={false}>
+              {positioned.map((n) => {
+                const tier = tierFor(n.depth);
+                const isCollapsedHere = collapsed.has(n.id);
+                const parentPos = n.parentId ? byId.get(n.parentId) : null;
+                const origin = parentPos ?? { x: n.x, y: n.y };
+                return (
+                  <motion.g
+                    key={n.id}
+                    initial={{ x: origin.x, y: origin.y, scale: 0, opacity: 0 }}
+                    animate={{ x: n.x, y: n.y, scale: 1, opacity: 1 }}
+                    exit={{ x: origin.x, y: origin.y, scale: 0, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                  >
+                    <rect
+                      width={NODE_WIDTH}
+                      height={NODE_HEIGHT}
+                      rx={10}
+                      fill={tier.bg}
+                      stroke={n.id === openId ? tier.text : tier.border}
+                      strokeWidth={n.id === openId ? 2 : 1.5}
+                      className="cursor-pointer"
+                      onClick={() => setOpenId((cur) => (cur === n.id ? null : n.id))}
+                    />
+                    <foreignObject
+                      x={8} y={4} width={NODE_WIDTH - 16} height={NODE_HEIGHT - 8}
+                      className="pointer-events-none"
+                    >
+                      <div
+                        className="flex h-full items-center justify-center overflow-hidden text-center text-[13px] font-medium leading-tight"
+                        style={{ color: tier.text }}
+                      >
+                        {n.label}
+                      </div>
+                    </foreignObject>
+
+                    {n.hasChildren && (
+                      <g
+                        transform={`translate(${NODE_WIDTH + H_GAP / 2}, ${NODE_HEIGHT / 2})`}
+                        className="cursor-pointer"
+                        onClick={() => toggleCollapsed(n.id)}
+                      >
+                        <circle r={10} fill="#eef1f6" stroke="#a6b0c3" strokeWidth={1} />
+                        <text
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          className="select-none fill-[#4b5566] text-[11px]"
+                        >
+                          {isCollapsedHere ? "›" : "‹"}
+                        </text>
+                      </g>
+                    )}
+                  </motion.g>
+                );
+              })}
+            </AnimatePresence>
+          </g>
+        </svg>
+
+        <div className="absolute bottom-3 right-3 flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => zoomBy(1.3)}
+            aria-label="Zoom in"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-fg shadow hover:bg-bg"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => zoomBy(1 / 1.3)}
+            aria-label="Zoom out"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-fg shadow hover:bg-bg"
+          >
+            −
+          </button>
         </div>
 
-        <div className="w-64 shrink-0 rounded-xl border border-border bg-surface p-4">
-          {selected ? (
-            <div className="flex flex-col gap-3">
-              <div>
-                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Label</div>
-                <input
-                  value={selected.label}
-                  onChange={(e) => setPayload((p) => ({ ...p, nodes: p.nodes.map((n) => (n.id === selectedId ? { ...n, label: e.target.value } : n)) }))}
-                  onBlur={() => updateSelected({ label: selected.label })}
-                  className="w-full rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg focus:outline-none"
-                />
-              </div>
-              <div>
-                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Note</div>
-                <textarea
-                  value={selected.note ?? ""}
-                  onChange={(e) => setPayload((p) => ({ ...p, nodes: p.nodes.map((n) => (n.id === selectedId ? { ...n, note: e.target.value || null } : n)) }))}
-                  onBlur={() => updateSelected({ note: selected.note })}
-                  rows={3}
-                  className="w-full resize-y rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg focus:outline-none"
-                />
-              </div>
+        {open && (
+          <div
+            className="fixed right-0 top-0 z-50 h-full overflow-y-auto border-l border-border bg-surface p-5 shadow-2xl"
+            style={{ width: panelWidth }}
+          >
+            <div
+              onPointerDown={startPanelDrag}
+              onPointerEnter={() => setPanelHandleHover(true)}
+              onPointerLeave={() => setPanelHandleHover(false)}
+              className="absolute inset-y-0 left-0 z-10 w-3 cursor-col-resize"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize node panel"
+            >
+              {panelHandleHover && <div className="absolute inset-y-0 left-1 w-0.5 bg-accent" />}
+            </div>
+
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-fg">{open.label}</h2>
               <button
                 type="button"
-                onClick={addChild}
-                className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg hover:bg-surface"
+                onClick={() => { setOpenId(null); setEditMode(false); }}
+                aria-label="Close"
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-fg-muted hover:bg-bg hover:text-fg"
               >
-                + Add child node
+                ✕
               </button>
-              {selected.id !== payload.rootId && (
+            </div>
+
+            {editMode ? (
+              <div className="flex flex-col gap-3">
+                <div>
+                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Label</div>
+                  <input
+                    value={open.label}
+                    onChange={(e) => setPayload((p) => ({ ...p, nodes: p.nodes.map((n) => (n.id === openId ? { ...n, label: e.target.value } : n)) }))}
+                    onBlur={() => updateOpen({ label: open.label })}
+                    className="w-full rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Definition</div>
+                  <textarea
+                    value={open.note ?? ""}
+                    onChange={(e) => setPayload((p) => ({ ...p, nodes: p.nodes.map((n) => (n.id === openId ? { ...n, note: e.target.value || null } : n)) }))}
+                    onBlur={() => updateOpen({ note: open.note })}
+                    rows={3}
+                    className="w-full resize-y rounded-lg border border-border bg-bg px-2.5 py-2 text-sm text-fg focus:outline-none"
+                  />
+                </div>
+                <SourcesList sources={open.sources} />
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setEditMode(false)} className="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-sm text-fg hover:bg-surface">
+                    Done
+                  </button>
+                  <button type="button" onClick={addChild} className="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-sm text-fg hover:bg-surface">
+                    + Child
+                  </button>
+                  {open.id !== payload.rootId && (
+                    <button type="button" onClick={deleteOpen} className="rounded-lg border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950">
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div className="text-sm text-fg-muted">{open.note ?? "No definition yet."}</div>
+                <SourcesList sources={open.sources} />
                 <button
                   type="button"
-                  onClick={deleteSelected}
-                  className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                  onClick={() => setEditMode(true)}
+                  className="mt-1 self-start text-xs text-accent hover:underline"
                 >
-                  Delete node (and its children)
+                  Edit
                 </button>
-              )}
-            </div>
-          ) : (
-            <div className="text-sm text-fg-muted">Click a node to edit it.</div>
-          )}
-        </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function SourcesList({ sources }: { sources: MindMapNode["sources"] }) {
+  return (
+    <div className="mt-1">
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Sources</div>
+      {sources.length === 0 ? (
+        <div className="text-sm text-fg-muted">No sources recorded for this node.</div>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {sources.map((s, i) => (
+            <li key={i} className="text-sm text-fg">
+              {s.documentTitle}{s.locator ? ` — ${s.locator}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
