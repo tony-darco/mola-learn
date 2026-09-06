@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { z } from "zod";
 import type { flashcardSchema } from "@mola/shared";
+import { FlashcardLearnMode } from "./FlashcardLearnMode";
 import { Markdown } from "./Markdown";
 
 type Card = z.infer<typeof flashcardSchema>;
+type Mode = "flashcards" | "learn";
 
 const AUTOPLAY_INTERVAL_MS = 4000;
 
@@ -17,6 +19,7 @@ const AUTOPLAY_INTERVAL_MS = 4000;
  * component is for the dedicated studying experience.
  */
 export function FlashcardStudyView({ title, cards }: { title: string; cards: Card[] }) {
+  const [mode, setMode] = useState<Mode>("flashcards");
   const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -83,18 +86,27 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
     <div ref={containerRef} className="relative bg-bg">
       <h1 className="mb-4 text-2xl font-semibold text-fg">{title}</h1>
 
-      {/* Mode tabs, mirroring Quizlet — Learn/Test are placeholders until
-          the quiz-generation feature (Phase 2) exists to power a real Test mode. */}
+      {/* Mode tabs, mirroring Quizlet. Test stays a placeholder until the
+          quiz-generation feature (Phase 2) exists to power it. */}
       <div className="mb-5 flex gap-3">
-        <div className="flex-1 rounded-xl bg-surface px-4 py-3 text-center text-sm font-medium text-fg">
+        <button
+          type="button"
+          onClick={() => setMode("flashcards")}
+          className={`flex-1 rounded-xl px-4 py-3 text-center text-sm font-medium ${
+            mode === "flashcards" ? "bg-accent text-accent-fg" : "bg-surface text-fg hover:opacity-90"
+          }`}
+        >
           Flashcards
-        </div>
-        <div
-          className="flex-1 cursor-not-allowed rounded-xl bg-surface px-4 py-3 text-center text-sm font-medium text-fg-muted opacity-50"
-          title="Coming soon"
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("learn")}
+          className={`flex-1 rounded-xl px-4 py-3 text-center text-sm font-medium ${
+            mode === "learn" ? "bg-accent text-accent-fg" : "bg-surface text-fg hover:opacity-90"
+          }`}
         >
           Learn
-        </div>
+        </button>
         <div
           className="flex-1 cursor-not-allowed rounded-xl bg-surface px-4 py-3 text-center text-sm font-medium text-fg-muted opacity-50"
           title="Coming soon — once quizzes are generated from this deck"
@@ -102,6 +114,8 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
           Test
         </div>
       </div>
+
+      {mode === "learn" && <FlashcardLearnMode cards={cards} />}
 
       <div className="mb-2 flex justify-end">
         <button
@@ -118,6 +132,7 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
         </button>
       </div>
 
+      {mode === "flashcards" && (
       <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
         <button
           type="button"
@@ -143,7 +158,9 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
           </div>
         )}
       </div>
+      )}
 
+      {mode === "flashcards" && (
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <IconButton
@@ -195,6 +212,7 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
           )}
         </IconButton>
       </div>
+      )}
 
       {showTerms && (
         <>
