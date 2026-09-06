@@ -8,7 +8,7 @@
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { artifacts, db } from "@mola/db";
-import { mindMapPayloadSchema } from "@mola/shared";
+import { mindMapPayloadSchema, type SourceRef } from "@mola/shared";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
 
 async function requireOwnMindMap(mapId: string, userId: string) {
@@ -20,7 +20,10 @@ async function requireOwnMindMap(mapId: string, userId: string) {
   return row;
 }
 
-export type NodeInput = { id: string; label: string; parentId: string | null; note: string | null };
+export type NodeInput = {
+  id: string; label: string; parentId: string | null; note: string | null;
+  sources: SourceRef[];
+};
 export type EdgeInput = { from: string; to: string; label: string | null };
 
 /**

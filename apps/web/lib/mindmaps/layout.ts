@@ -4,26 +4,40 @@
  * outline list. No layout library: a mind map is a tree (plus a few cross-
  * edges), and a plain recursive layout is a well-understood, easily-tested
  * problem that doesn't need a dependency.
+ *
+ * Horizontal, left-to-right orientation (depth -> x, sibling order -> y) —
+ * the mind-map convention, not a top-down org-chart. A `collapsed` set of
+ * node ids lets a caller fold a subtree: a collapsed node's descendants are
+ * simply left out of both the slot-counting and the returned positions, so
+ * hiding a huge branch also shrinks the layout instead of leaving a gap.
  */
 
-export type MindMapNode = { id: string; label: string; parentId: string | null; note: string | null };
+import type { SourceRef } from "@mola/shared";
 
-export type PositionedNode = MindMapNode & { x: number; y: number; depth: number };
+export type MindMapNode = {
+  id: string; label: string; parentId: string | null; note: string | null;
+  sources: SourceRef[];
+};
 
-const NODE_WIDTH = 160;
+export type PositionedNode = MindMapNode & { x: number; y: number; depth: number; hasChildren: boolean };
+
+const NODE_WIDTH = 180;
 const NODE_HEIGHT = 44;
-const H_GAP = 24;
-const V_GAP = 70;
+const H_GAP = 64;
+const V_GAP = 20;
 
 /**
- * Classic Reingold-Tilford-lite: each leaf gets one "slot" of width
- * NODE_WIDTH+H_GAP; an internal node centers over the span of its children.
- * Depth maps directly to y. Returns null positions are never produced —
- * a node with a parentId that isn't in the tree is simply not reachable and
- * won't appear (callers should validate structural integrity before this,
- * as emit_mind_map's execute() already does at creation time).
+ * Classic Reingold-Tilford-lite, rotated: each visible leaf gets one "slot"
+ * of height NODE_HEIGHT+V_GAP; an internal node centers over the span of its
+ * visible children. Depth maps directly to x. A node inside `collapsed` is
+ * still placed itself, but its children are treated as absent — they never
+ * reach `positions`, so they never appear in the returned array.
  */
-export function layoutTree(rootId: string, nodes: MindMapNode[]): PositionedNode[] {
+export function layoutTree(
+  rootId: string,
+  nodes: MindMapNode[],
+  collapsed: ReadonlySet<string> = new Set(),
+): PositionedNode[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const childrenOf = new Map<string, MindMapNode[]>();
   for (const n of nodes) {
@@ -33,21 +47,23 @@ export function layoutTree(rootId: string, nodes: MindMapNode[]): PositionedNode
     childrenOf.set(n.parentId, list);
   }
 
-  const positions = new Map<string, { x: number; y: number; depth: number }>();
+  const positions = new Map<string, { x: number; y: number; depth: number; hasChildren: boolean }>();
   let nextSlot = 0;
 
   function place(nodeId: string, depth: number): number {
-    const children = childrenOf.get(nodeId) ?? [];
-    if (children.length === 0) {
-      const x = nextSlot * (NODE_WIDTH + H_GAP);
+    const allChildren = childrenOf.get(nodeId) ?? [];
+    const visibleChildren = collapsed.has(nodeId) ? [] : allChildren;
+
+    if (visibleChildren.length === 0) {
+      const y = nextSlot * (NODE_HEIGHT + V_GAP);
       nextSlot += 1;
-      positions.set(nodeId, { x, y: depth * (NODE_HEIGHT + V_GAP), depth });
-      return x;
+      positions.set(nodeId, { x: depth * (NODE_WIDTH + H_GAP), y, depth, hasChildren: allChildren.length > 0 });
+      return y;
     }
-    const childXs = children.map((c) => place(c.id, depth + 1));
-    const x = (Math.min(...childXs) + Math.max(...childXs)) / 2;
-    positions.set(nodeId, { x, y: depth * (NODE_HEIGHT + V_GAP), depth });
-    return x;
+    const childYs = visibleChildren.map((c) => place(c.id, depth + 1));
+    const y = (Math.min(...childYs) + Math.max(...childYs)) / 2;
+    positions.set(nodeId, { x: depth * (NODE_WIDTH + H_GAP), y, depth, hasChildren: allChildren.length > 0 });
+    return y;
   }
 
   const root = byId.get(rootId);

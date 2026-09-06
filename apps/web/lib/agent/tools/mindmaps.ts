@@ -38,6 +38,9 @@ const emitNodeSchema = z.object({
   label: z.string().min(1),
   parentId: z.string().nullable().describe("The id of this node's parent, or null only for the root node"),
   note: z.string().nullable().optional(),
+  sources: z.array(toolSourceRefSchema).optional().describe(
+    "Sources this specific node's content is grounded in — a subset of the map-level sources",
+  ),
 });
 
 const emitInputSchema = z.object({
@@ -84,7 +87,10 @@ const emitMindMapTool: Tool<z.infer<typeof emitInputSchema>> = {
     const payload = mindMapPayloadSchema.parse({
       kind: "mind_map",
       rootId: input.rootId,
-      nodes: input.nodes.map((n) => ({ id: n.id, label: n.label, parentId: n.parentId, note: n.note ?? null })),
+      nodes: input.nodes.map((n) => ({
+        id: n.id, label: n.label, parentId: n.parentId, note: n.note ?? null,
+        sources: (n.sources ?? []).map((s) => ({ ...s, chunkOrdinals: s.chunkOrdinals ?? [] })),
+      })),
       edges: (input.edges ?? []).map((e) => ({ from: e.from, to: e.to, label: e.label ?? null })),
     });
 
@@ -114,6 +120,12 @@ Rules:
   Research once, broadly, then build the whole tree from what you already have.
 - Every node must be grounded in something a tool actually returned — never
   invent a concept or relationship that didn't come from a retrieved chunk.
+- Optionally, attach a node's "sources" array to name the specific document/
+  locator its label and note came from — but only for a handful of the most
+  important nodes (e.g. the root and 2-3 key branches). Leave "sources" out
+  entirely on most nodes. This is a nice-to-have, not a per-node requirement —
+  never slow down or hesitate over it, and never let it stop you from calling
+  emit_mind_map. The map-level "sources" field is what actually matters.
 - Structure: one root node (the topic itself), a handful of main-branch nodes
   (key concepts), and leaf nodes under each branch (definitions, examples,
   formulas). Two or three levels deep is usually right — don't build a single
@@ -127,8 +139,10 @@ Rules:
   fix exactly that problem and call it again — don't restart your research.
 - Never use emoji, in any output, for any reason.
 
-Node shape — copy this exactly:
-{"id": "n2", "label": "Linear independence", "parentId": "root", "note": "optional one-line elaboration or null"}`;
+Node shape — copy this exactly (most nodes omit "sources" entirely):
+{"id": "n2", "label": "Linear independence", "parentId": "root", "note": "optional one-line elaboration or null"}
+A key node MAY add sources like this instead:
+{"id": "root", "label": "Vector Spaces", "parentId": null, "note": "...", "sources": [{"documentId": "<uuid from the tool result>", "documentTitle": "...", "locator": "ch.3", "chunkOrdinals": [12]}]}`;
 
 export const createMindMapTool: Tool<z.infer<typeof createInputSchema>> = {
   name: "create_mind_map",
