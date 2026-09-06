@@ -33,6 +33,12 @@ const FONT_SCALES = [
 ] as const;
 const FONT_SCALE_STORAGE_KEY = "mola-font-scale";
 
+const THEMES = [
+  { value: "mola", label: "Mola" },
+  { value: "inspired", label: "Inspired" },
+] as const;
+const THEME_STORAGE_KEY = "mola-theme";
+
 export type SettingsSection = (typeof SECTIONS)[number]["key"];
 
 export function SettingsModal({
@@ -44,6 +50,7 @@ export function SettingsModal({
 
   // ── General ─────────────────────────────────────────────────────────────
   const [fontScale, setFontScale] = useState("87.5");
+  const [theme, setTheme] = useState("mola");
 
   // ── API keys ────────────────────────────────────────────────────────────
   const [apiKey, setApiKey] = useState<PublicApiKey | null>(null);
@@ -80,6 +87,7 @@ export function SettingsModal({
   useEffect(() => {
     if (!open) return;
     setFontScale(localStorage.getItem(FONT_SCALE_STORAGE_KEY) ?? "87.5");
+    setTheme(localStorage.getItem(THEME_STORAGE_KEY) ?? "mola");
   }, [open]);
 
   useEffect(() => {
@@ -142,6 +150,12 @@ export function SettingsModal({
     document.documentElement.style.fontSize = `${value}%`;
     localStorage.setItem(FONT_SCALE_STORAGE_KEY, value);
     setFontScale(value);
+  }
+
+  function handleSetTheme(value: string) {
+    document.documentElement.setAttribute("data-theme", value);
+    localStorage.setItem(THEME_STORAGE_KEY, value);
+    setTheme(value);
   }
 
   async function handleSaveKey() {
@@ -289,9 +303,30 @@ export function SettingsModal({
           {section === "general" && (
             <div className="max-w-md">
               <h2 className="mb-1 text-sm font-semibold text-fg">General</h2>
-              <p className="mb-4 text-xs text-fg-muted">Appearance settings — coming soon.</p>
+              <p className="mb-4 text-xs text-fg-muted">Appearance settings.</p>
 
-              <div className="border-t border-border pt-4">
+              <div>
+                <div className="mb-1 text-xs font-medium text-fg">Theme</div>
+                <p className="mb-3 text-xs text-fg-muted">Saved on this device only.</p>
+                <div className="flex gap-2">
+                  {THEMES.map((t) => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => handleSetTheme(t.value)}
+                      className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                        theme === t.value
+                          ? "border-accent bg-accent text-accent-fg"
+                          : "border-border text-fg-muted hover:bg-bg hover:text-fg"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4 mt-4">
                 <div className="mb-1 text-xs font-medium text-fg">App-wide font size</div>
                 <p className="mb-3 text-xs text-fg-muted">Dev tool — rescales all text in the app, saved on this device only.</p>
                 <div className="flex gap-2">

@@ -12,6 +12,12 @@
 math-field { color: var(--text); }
 math-field::part(content) { color: inherit; }
 
+/* Two named themes, picked in Settings > General and persisted as
+   `data-theme` on <html> (see layout.tsx's pre-paint script). "Mola" is the
+   default — its values live on the bare `:root` so an unset/unrecognized
+   attribute still resolves to it; "Inspired" is the favicon-derived redesign,
+   under its own attribute selector. Dark mode isn't themed yet — both themes
+   share the same dark palette until a dark version of "Inspired" is designed. */
 :root {
   --bg: #faf9f5;
   --panel: #ffffff;
@@ -21,6 +27,16 @@ math-field::part(content) { color: inherit; }
   --accent: #c2603a;
   --accent-fg: #ffffff;
   --sidebar-bg: #f3f1ea;
+}
+html[data-theme="inspired"] {
+  --bg: #f7f5ee;
+  --panel: #ffffff;
+  --border: #e5e1d3;
+  --text: #1c1b18;
+  --muted: #7a776e;
+  --accent: #481715;
+  --accent-fg: #f7f5ee;
+  --sidebar-bg: #f7f5ee;
 }
 @media (prefers-color-scheme: dark) {
   :root {
