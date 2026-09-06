@@ -2,9 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ArtifactRecord } from "@mola/shared";
 import type { CourseOption, TermOption } from "@/lib/flashcards/gallery";
+import { renameDeckAction } from "@/lib/flashcards/actions";
 import { artifactIcon, summarizeArtifact } from "./artifact-summary";
+import { usePrompt } from "./shell-context";
 
 /** `ArtifactRecord` with dates as the ISO strings the server page sends over the RSC boundary. */
 type ClientDeck = Omit<ArtifactRecord, "createdAt" | "updatedAt"> & { createdAt: string; updatedAt: string };
@@ -40,6 +43,16 @@ export function FlashcardsGallery({
   const [textbookFilter, setTextbookFilter] = useState("all");
   const [termFilter, setTermFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("modified");
+  const prompt = usePrompt();
+  const router = useRouter();
+
+  /** Right-click a deck card to rename it, using the app's own prompt dialog. */
+  async function rename(deckId: string, current: string) {
+    const next = await prompt("Rename deck", current);
+    if (!next || next.trim() === current) return;
+    await renameDeckAction(deckId, next.trim());
+    router.refresh();
+  }
 
   const courseMap = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses]);
   const termMap = useMemo(() => new Map(terms.map((t) => [t.id, t])), [terms]);
@@ -161,7 +174,7 @@ export function FlashcardsGallery({
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((d) => (
-            <DeckCard key={d.id} deck={d} courseLabel={courseLabel(d.courseId)} />
+            <DeckCard key={d.id} deck={d} courseLabel={courseLabel(d.courseId)} onRename={rename} />
           ))}
         </div>
       )}
@@ -169,13 +182,17 @@ export function FlashcardsGallery({
   );
 }
 
-function DeckCard({ deck, courseLabel }: { deck: ClientDeck; courseLabel: string | null }) {
+function DeckCard({
+  deck, courseLabel, onRename,
+}: { deck: ClientDeck; courseLabel: string | null; onRename: (id: string, title: string) => void }) {
   const cards = deck.payload.kind === "flashcard_deck" ? deck.payload.cards : [];
   const preview = cards.slice(0, 3).map((c) => c.front);
 
   return (
     <Link
       href={`/flashcards/${deck.id}`}
+      onContextMenu={(e) => { e.preventDefault(); onRename(deck.id, deck.title); }}
+      title="Right-click to rename"
       className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface text-left transition hover:border-accent"
     >
       <div className="flex h-28 flex-col justify-center gap-1 overflow-hidden bg-bg px-4 py-3">

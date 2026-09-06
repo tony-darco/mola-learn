@@ -25,7 +25,7 @@ export default async function FlashcardDeckPage({ params }: { params: Promise<{ 
   return (
     <main className="flex-1 min-w-0 overflow-y-auto py-8 pl-4 pr-6">
       <div className="mx-auto max-w-5xl">
-        <FlashcardStudyView title={deck.title} cards={deck.payload.cards} />
+        <FlashcardStudyView deckId={deck.id} title={deck.title} cards={deck.payload.cards} />
       </div>
     </main>
   );

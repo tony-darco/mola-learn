@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { z } from "zod";
 import type { flashcardSchema } from "@mola/shared";
+import { renameDeckAction } from "@/lib/flashcards/actions";
+import { FlashcardDeckEditor } from "./FlashcardDeckEditor";
 import { FlashcardLearnMode } from "./FlashcardLearnMode";
 import { Markdown } from "./Markdown";
 
@@ -10,6 +12,9 @@ type Card = z.infer<typeof flashcardSchema>;
 type Mode = "flashcards" | "learn";
 
 const AUTOPLAY_INTERVAL_MS = 4000;
+const TERMS_MIN_WIDTH = 280;
+const TERMS_MAX_WIDTH = 720;
+const TERMS_DEFAULT_WIDTH = 420;
 
 /**
  * Quizlet-style study view for one deck — its own page (app/(shell)/flashcards/[deckId])
@@ -18,16 +23,26 @@ const AUTOPLAY_INTERVAL_MS = 4000;
  * compact inline renderer for a deck that just landed in a chat turn — this
  * component is for the dedicated studying experience.
  */
-export function FlashcardStudyView({ title, cards }: { title: string; cards: Card[] }) {
+export function FlashcardStudyView({
+  deckId, title: initialTitle, cards: initialCards,
+}: { deckId: string; title: string; cards: Card[] }) {
   const [mode, setMode] = useState<Mode>("flashcards");
-  const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
+  const [cards, setCards] = useState<Card[]>(initialCards);
+  const [title, setTitle] = useState(initialTitle);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingCards, setEditingCards] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [order, setOrder] = useState<number[]>(() => initialCards.map((_, i) => i));
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [hasFlippedOnce, setHasFlippedOnce] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
+  const [termsWidth, setTermsWidth] = useState(TERMS_DEFAULT_WIDTH);
+  const [handleHover, setHandleHover] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragStart = useRef<{ x: number; width: number } | null>(null);
 
   const card = cards[order[index] ?? 0];
 
@@ -35,6 +50,38 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
     setIndex(Math.min(Math.max(next, 0), cards.length - 1));
     setFlipped(false);
   };
+
+  /** Saved on blur — no button, matching how the gallery renames a deck. */
+  function commitTitle() {
+    setEditingTitle(false);
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setTitle(initialTitle); // an empty box reverts rather than erasing the name
+      return;
+    }
+    if (trimmed === initialTitle) return;
+    void renameDeckAction(deckId, trimmed);
+  }
+
+  /** The terms panel drags to width exactly like the left sidebar does. */
+  const onTermsPointerMove = useCallback((e: PointerEvent) => {
+    if (!dragStart.current) return;
+    // Dragging left widens: the panel is anchored to the right edge.
+    const delta = dragStart.current.x - e.clientX;
+    setTermsWidth(Math.min(Math.max(dragStart.current.width + delta, TERMS_MIN_WIDTH), TERMS_MAX_WIDTH));
+  }, []);
+
+  const onTermsPointerUp = useCallback(() => {
+    dragStart.current = null;
+    window.removeEventListener("pointermove", onTermsPointerMove);
+    window.removeEventListener("pointerup", onTermsPointerUp);
+  }, [onTermsPointerMove]);
+
+  function startTermsDrag(e: React.PointerEvent) {
+    dragStart.current = { x: e.clientX, width: termsWidth };
+    window.addEventListener("pointermove", onTermsPointerMove);
+    window.addEventListener("pointerup", onTermsPointerUp);
+  }
 
   useEffect(() => {
     if (!playing) return;
@@ -84,11 +131,87 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
 
   return (
     <div ref={containerRef} className="relative bg-bg">
-      <h1 className="mb-4 text-2xl font-semibold text-fg">{title}</h1>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        {editingTitle ? (
+          <input
+            value={title}
+            autoFocus
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+              if (e.key === "Escape") { e.preventDefault(); setTitle(initialTitle); setEditingTitle(false); }
+            }}
+            aria-label="Deck title"
+            className="w-full rounded-lg border border-border bg-bg px-2 py-1 text-2xl font-semibold text-fg focus:outline-none"
+          />
+        ) : (
+          <h1
+            className="cursor-text rounded-lg px-2 py-1 text-2xl font-semibold text-fg hover:bg-surface"
+            onClick={() => setEditingTitle(true)}
+            title="Click to rename"
+          >
+            {title}
+          </h1>
+        )}
+
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            title="Deck options"
+            aria-label="Deck options"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-surface hover:text-fg"
+          >
+            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="5" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="12" cy="19" r="1.6" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div className="absolute right-0 z-50 mt-1 w-48 rounded-lg border border-border bg-surface p-1 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => { setEditingCards((v) => !v); setMenuOpen(false); }}
+                  className="w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
+                >
+                  {editingCards ? "Done editing terms" : "Edit terms"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEditingTitle(true); setMenuOpen(false); }}
+                  className="w-full rounded-md px-2.5 py-1.5 text-left text-sm text-fg hover:bg-bg"
+                >
+                  Rename deck
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {editingCards && (
+        <div className="mb-5">
+          <FlashcardDeckEditor
+            deckId={deckId}
+            cards={cards}
+            onSaved={(next) => {
+              setCards(next);
+              setOrder(next.map((_, i) => i));
+              setIndex(0);
+              setFlipped(false);
+            }}
+          />
+        </div>
+      )}
 
       {/* Mode tabs, mirroring Quizlet. Test stays a placeholder until the
-          quiz-generation feature (Phase 2) exists to power it. */}
-      <div className="mb-5 flex gap-3">
+          quiz-generation feature (Phase 2) exists to power it. Hidden while
+          editing terms — the editor owns the surface. */}
+      <div className={`mb-5 flex gap-3 ${editingCards ? "hidden" : ""}`}>
         <button
           type="button"
           onClick={() => setMode("flashcards")}
@@ -115,9 +238,9 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
         </div>
       </div>
 
-      {mode === "learn" && <FlashcardLearnMode cards={cards} />}
+      {mode === "learn" && !editingCards && <FlashcardLearnMode cards={cards} />}
 
-      <div className="mb-2 flex justify-end">
+      <div className={`mb-2 flex justify-end ${editingCards ? "hidden" : ""}`}>
         <button
           type="button"
           onClick={() => setShowTerms((v) => !v)}
@@ -132,7 +255,7 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
         </button>
       </div>
 
-      {mode === "flashcards" && (
+      {mode === "flashcards" && !editingCards && (
       <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
         <button
           type="button"
@@ -160,7 +283,7 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
       </div>
       )}
 
-      {mode === "flashcards" && (
+      {mode === "flashcards" && !editingCards && (
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <IconButton
@@ -216,8 +339,32 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
 
       {showTerms && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setShowTerms(false)} />
-          <div className="fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto border-l border-border bg-surface p-5 shadow-2xl">
+          {/* No click-away backdrop: this is a persistent side panel that
+              drags to width like the left sidebar, not a modal. */}
+          <div
+            className="fixed right-0 top-0 z-50 h-full overflow-y-auto border-l border-border bg-surface p-5 shadow-2xl"
+            style={{ width: termsWidth }}
+          >
+            <div
+              onPointerDown={startTermsDrag}
+              onPointerEnter={() => setHandleHover(true)}
+              onPointerLeave={() => setHandleHover(false)}
+              className="absolute inset-y-0 left-0 z-10 w-3 cursor-col-resize"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize terms panel"
+            >
+              {handleHover && (
+                <span
+                  className="absolute left-1/2 top-1/2 flex h-9 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border border-border bg-surface text-fg-muted shadow-sm"
+                  aria-hidden="true"
+                >
+                  <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M15 6l-6 6 6 6" />
+                  </svg>
+                </span>
+              )}
+            </div>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-fg">Terms in this set ({cards.length})</h2>
               <button
