@@ -116,6 +116,14 @@ export function Sidebar({
 
           <div className="mb-4 flex flex-col gap-2">
             <Link
+              href="/artifacts"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/artifacts" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Artifacts
+            </Link>
+            <Link
               href="/quizzes"
               className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
                 pathname === "/quizzes" ? "text-fg" : "text-fg-muted"
