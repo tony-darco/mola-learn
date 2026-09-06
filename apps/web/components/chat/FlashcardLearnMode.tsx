@@ -112,9 +112,9 @@ export function FlashcardLearnMode({ cards }: { cards: Card[] }) {
         <div className="mt-4">
           <div className="mb-2 text-center text-sm text-fg-muted">Did you get it right?</div>
           <div className="flex gap-2">
-            <GradeButton label="No" hint="see it twice more" onClick={() => grade("no")} />
-            <GradeButton label="Close" hint="see it once more" onClick={() => grade("close")} />
             <GradeButton label="Yes" hint="done for this session" onClick={() => grade("yes")} primary />
+            <GradeButton label="Close" hint="see it once more" onClick={() => grade("close")} />
+            <GradeButton label="No" hint="see it twice more" onClick={() => grade("no")} />
           </div>
         </div>
       )}
