@@ -200,6 +200,10 @@ export class OllamaProvider implements LLMProvider {
         };
         return;
       }
+      if (err instanceof Error && err.name === "AbortError") {
+        yield { type: "error", message: "request aborted (client disconnected or stopped generation)" };
+        return;
+      }
       throw err;
     } finally {
       stall.clear();

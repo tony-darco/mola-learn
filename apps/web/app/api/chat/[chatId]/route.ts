@@ -120,6 +120,11 @@ export async function POST(
             messages: [...context.messages, { role: "user", content: userText }],
             tools: registry,
             ctx,
+            // loop.ts's own default (8) is too low for a weaker tool-caller
+            // (e.g. gemma4:12b) that needs a few extra tries on the same
+            // search before it gives up — overridden here rather than in
+            // loop.ts itself, which is frozen (contract 4).
+            maxIterations: Number(process.env.MOLA_AGENT_MAX_ITERATIONS ?? 16),
             persistArtifact: (result) => persistArtifact(result, ctx),
           })) {
             if (ev.type === "text_delta") text += ev.text;

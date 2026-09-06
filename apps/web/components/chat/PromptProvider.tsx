@@ -36,11 +36,14 @@ export function PromptProvider({ children }: { children: ReactNode }) {
     <PromptContext.Provider value={prompt}>
       {children}
       {pending && (
-        <>
-          {/* Invisible — an outside click cancels, but nothing else on the
-              page is visually blocked the way a native prompt() would. */}
-          <div className="fixed inset-0 z-40" onClick={() => respond(null)} />
-          <div className="fixed left-1/2 top-1/2 z-50 flex max-w-sm -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => respond(null)}
+        >
+          <div
+            className="flex max-w-sm items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex flex-col gap-1.5">
               <span className="text-sm text-fg">{pending.message}</span>
               <input
@@ -80,7 +83,7 @@ export function PromptProvider({ children }: { children: ReactNode }) {
               </button>
             </div>
           </div>
-        </>
+        </div>
       )}
     </PromptContext.Provider>
   );
