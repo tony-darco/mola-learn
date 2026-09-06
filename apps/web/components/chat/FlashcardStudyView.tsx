@@ -20,6 +20,7 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
   const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [hasFlippedOnce, setHasFlippedOnce] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -120,7 +121,10 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
       <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
         <button
           type="button"
-          onClick={() => setFlipped((f) => !f)}
+          onClick={() => {
+            setFlipped((f) => !f);
+            setHasFlippedOnce(true);
+          }}
           className="flex min-h-[340px] w-full flex-col items-center justify-center gap-2 p-10 text-center"
           aria-label={flipped ? "Showing answer, click to show question" : "Showing question, click to reveal answer"}
         >
@@ -133,7 +137,7 @@ export function FlashcardStudyView({ title, cards }: { title: string; cards: Car
             {[card.chapter && `Ch. ${card.chapter}`, card.section].filter(Boolean).join(" · ")}
           </div>
         )}
-        {!flipped && (
+        {!flipped && !hasFlippedOnce && (
           <div className="bg-accent px-4 py-3 text-center text-sm font-medium text-accent-fg">
             Click the card to flip
           </div>
