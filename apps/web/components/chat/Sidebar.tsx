@@ -10,9 +10,9 @@ import type { ChatSummary, CourseSummary } from "./types";
 
 // Placeholders for features not built yet — styled like the Courses/Chats
 // section headers, sitting above Courses. Not wired to anything yet.
-// "Flashcards" now has a real page (rendered separately, in its old slot
-// between "Quizzes" and "Plan") and isn't one of these.
-const PLACEHOLDER_SECTIONS = ["Quizzes", "Plan", "Schedule"] as const;
+// "Flashcards" and "Quizzes" now have real pages (rendered separately, each
+// in its old slot in this list) and aren't among these.
+const PLACEHOLDER_SECTIONS = ["Plan", "Schedule"] as const;
 
 const DEFAULT_WIDTH = 288;
 const MIN_WIDTH = 220;
@@ -115,9 +115,14 @@ export function Sidebar({
           </button>
 
           <div className="mb-4 flex flex-col gap-2">
-            <div className="px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">
-              {PLACEHOLDER_SECTIONS[0]}
-            </div>
+            <Link
+              href="/quizzes"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/quizzes" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Quizzes
+            </Link>
             <Link
               href="/flashcards"
               className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
@@ -126,7 +131,7 @@ export function Sidebar({
             >
               Flashcards
             </Link>
-            {PLACEHOLDER_SECTIONS.slice(1).map((label) => (
+            {PLACEHOLDER_SECTIONS.map((label) => (
               <div key={label} className="px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">
                 {label}
               </div>

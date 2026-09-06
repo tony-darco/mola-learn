@@ -6,11 +6,11 @@
  * applied to a list instead of a single `requireOwned` lookup.
  */
 import { and, desc, eq } from "drizzle-orm";
-import { artifacts, courses, db, terms } from "@mola/db";
+import { artifacts, db } from "@mola/db";
 import { artifactRecordSchema, type ArtifactRecord } from "@mola/shared";
 
-export type CourseOption = { id: string; name: string; number: string | null; termId: string | null };
-export type TermOption = { id: string; label: string };
+export type { CourseOption, TermOption } from "../artifacts/filters";
+export { listCoursesForFilters, listTermsForFilters } from "../artifacts/filters";
 
 /** Every flashcard deck the caller owns — never another user's. */
 export async function listFlashcardDecks(userId: string): Promise<ArtifactRecord[]> {
@@ -20,17 +20,4 @@ export async function listFlashcardDecks(userId: string): Promise<ArtifactRecord
     .where(and(eq(artifacts.userId, userId), eq(artifacts.kind, "flashcard_deck")))
     .orderBy(desc(artifacts.createdAt));
   return rows.map((r) => artifactRecordSchema.parse(r));
-}
-
-/** Backs the course filter — the caller's own courses only. */
-export async function listCoursesForFilters(userId: string): Promise<CourseOption[]> {
-  return db
-    .select({ id: courses.id, name: courses.name, number: courses.number, termId: courses.termId })
-    .from(courses)
-    .where(eq(courses.userId, userId));
-}
-
-/** Backs the semester/year filter — the caller's own terms only. */
-export async function listTermsForFilters(userId: string): Promise<TermOption[]> {
-  return db.select({ id: terms.id, label: terms.label }).from(terms).where(eq(terms.userId, userId));
 }
