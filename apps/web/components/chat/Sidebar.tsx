@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOutAction } from "@/lib/auth/actions";
 import { ChatLink } from "./ChatLink";
 import type { SettingsSection } from "./SettingsModal";
@@ -10,7 +10,9 @@ import type { ChatSummary, CourseSummary } from "./types";
 
 // Placeholders for features not built yet — styled like the Courses/Chats
 // section headers, sitting above Courses. Not wired to anything yet.
-const PLACEHOLDER_SECTIONS = ["Quizzes", "Flashcards", "Plan", "Schedule"] as const;
+// "Flashcards" now has a real page (rendered separately, in its old slot
+// between "Quizzes" and "Plan") and isn't one of these.
+const PLACEHOLDER_SECTIONS = ["Quizzes", "Plan", "Schedule"] as const;
 
 const DEFAULT_WIDTH = 288;
 const MIN_WIDTH = 220;
@@ -43,6 +45,7 @@ export function Sidebar({
   onOpenSearch: () => void;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [collapsed, setCollapsed] = useState(false);
@@ -112,7 +115,18 @@ export function Sidebar({
           </button>
 
           <div className="mb-4 flex flex-col gap-2">
-            {PLACEHOLDER_SECTIONS.map((label) => (
+            <div className="px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">
+              {PLACEHOLDER_SECTIONS[0]}
+            </div>
+            <Link
+              href="/flashcards"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/flashcards" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Flashcards
+            </Link>
+            {PLACEHOLDER_SECTIONS.slice(1).map((label) => (
               <div key={label} className="px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">
                 {label}
               </div>
