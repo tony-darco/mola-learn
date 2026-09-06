@@ -21,6 +21,7 @@ import { type ArtifactToolResult, flashcardDeckPayloadSchema } from "@mola/share
 import type { Tool } from "../registry";
 import { ToolRegistry } from "../registry";
 import { runSubagent } from "../subagent";
+import { withCallLogging } from "@/lib/debug/tool-log";
 import { grepSearchTool } from "./grep-search";
 import { bm25SearchTool } from "./bm25-search";
 import { vectorSearchTool } from "./vector-search";
@@ -119,11 +120,14 @@ export const createFlashcardDeckTool: Tool<z.infer<typeof createInputSchema>> = 
   label: (input) => `Creating flashcards: ${input.topic}`,
 
   async execute(input, ctx) {
+    // This private sub-agent registry never passes through buildRegistry()
+    // (tools/index.ts) — wrapped again here so its tool calls (research +
+    // the final emit_flashcard_deck) still reach the debug logger.
     const subRegistry = new ToolRegistry()
-      .register(grepSearchTool)
-      .register(bm25SearchTool)
-      .register(vectorSearchTool)
-      .register(emitFlashcardDeckTool);
+      .register(withCallLogging(grepSearchTool))
+      .register(withCallLogging(bm25SearchTool))
+      .register(withCallLogging(vectorSearchTool))
+      .register(withCallLogging(emitFlashcardDeckTool));
 
     const count = input.count ?? 10;
     const { result } = await runSubagent(

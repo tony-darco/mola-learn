@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import type { Tool, ToolContext } from "../registry";
 import { ToolRegistry } from "../registry";
 import { runSubagent } from "../subagent";
+import { withCallLogging } from "@/lib/debug/tool-log";
 import { grepSearchTool } from "./grep-search";
 import { bm25SearchTool } from "./bm25-search";
 import { vectorSearchTool } from "./vector-search";
@@ -191,11 +192,14 @@ export const createQuizTool: Tool<z.infer<typeof createInputSchema>> = {
   label: (input) => `Creating quiz: ${input.topic}`,
 
   async execute(input, ctx) {
+    // This private sub-agent registry never passes through buildRegistry()
+    // (tools/index.ts) — wrapped again here so its tool calls (research +
+    // the final emit_quiz) still reach the debug logger.
     const subRegistry = new ToolRegistry()
-      .register(grepSearchTool)
-      .register(bm25SearchTool)
-      .register(vectorSearchTool)
-      .register(emitQuizTool);
+      .register(withCallLogging(grepSearchTool))
+      .register(withCallLogging(bm25SearchTool))
+      .register(withCallLogging(vectorSearchTool))
+      .register(withCallLogging(emitQuizTool));
 
     let count = input.count;
     if (!count) {

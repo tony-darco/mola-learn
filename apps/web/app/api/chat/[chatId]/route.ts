@@ -28,6 +28,7 @@ import { maybeCompact, makeLlmSummarizer } from "@/lib/agent/compaction";
 import { getChatProvider, CHAT_MODELS } from "@/lib/llm";
 import { generateChatTitle } from "@/lib/llm/title";
 import { logChatTurn } from "@/lib/debug/chat-log";
+import { beginTurn, finalizeTurn } from "@/lib/debug/agent-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,6 +99,11 @@ export async function POST(
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        // Ambient turn context for the debug logger (agent-log.ts) — a no-op
+        // unless its own two-switch gate is satisfied. Entered here, once per
+        // request, so it stays available through every await underneath,
+        // including inside a sub-agent spawned via the frozen subagent.ts.
+        const turn = beginTurn({ chatId, userId: session.userId, userEmail: session.email });
         const enc = new TextEncoder();
         const send = (ev: StreamEvent) => controller.enqueue(enc.encode(encodeSSE(ev)));
         let text = "";
@@ -202,6 +208,7 @@ export async function POST(
             direction: "output", chatId, userId: session.userId, userEmail: session.email,
             model: chat.model, text, error: errorMessage,
           });
+          void finalizeTurn(turn.turnId, chatId, session.userId, session.email);
           controller.close();
         }
       },

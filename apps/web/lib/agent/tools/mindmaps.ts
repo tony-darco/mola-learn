@@ -20,6 +20,7 @@ import { type ArtifactToolResult, mindMapPayloadSchema } from "@mola/shared";
 import type { Tool, ToolContext } from "../registry";
 import { ToolRegistry } from "../registry";
 import { runSubagent } from "../subagent";
+import { withCallLogging } from "@/lib/debug/tool-log";
 import { grepSearchTool } from "./grep-search";
 import { bm25SearchTool } from "./bm25-search";
 import { vectorSearchTool } from "./vector-search";
@@ -138,11 +139,14 @@ export const createMindMapTool: Tool<z.infer<typeof createInputSchema>> = {
   label: (input) => `Creating mind map: ${input.topic}`,
 
   async execute(input, ctx) {
+    // This private sub-agent registry never passes through buildRegistry()
+    // (tools/index.ts) — wrapped again here so its tool calls (research +
+    // the final emit_mind_map) still reach the debug logger.
     const subRegistry = new ToolRegistry()
-      .register(grepSearchTool)
-      .register(bm25SearchTool)
-      .register(vectorSearchTool)
-      .register(emitMindMapTool);
+      .register(withCallLogging(grepSearchTool))
+      .register(withCallLogging(bm25SearchTool))
+      .register(withCallLogging(vectorSearchTool))
+      .register(withCallLogging(emitMindMapTool));
 
     // think:false — see quizzes.ts's identical reasoning; building a tree
     // from already-retrieved material doesn't need reasoning, and the
