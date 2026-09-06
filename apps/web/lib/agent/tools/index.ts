@@ -3,6 +3,8 @@ import { courseFactsTool } from "./course-facts";
 import { grepSearchTool } from "./grep-search";
 import { bm25SearchTool } from "./bm25-search";
 import { vectorSearchTool } from "./vector-search";
+import { grepChatSearchTool } from "./grep-chat-search";
+import { bm25ChatSearchTool } from "./bm25-chat-search";
 import { calculatorTool } from "./calculator";
 import { createFlashcardDeckTool } from "./flashcards";
 import { getDueFlashcardsTool, recordFlashcardReviewTool } from "./flashcard-review";
@@ -20,6 +22,8 @@ export function buildRegistry(): ToolRegistry {
     .register(grepSearchTool)
     .register(bm25SearchTool)
     .register(vectorSearchTool)
+    .register(grepChatSearchTool)
+    .register(bm25ChatSearchTool)
     .register(calculatorTool)
     .register(createFlashcardDeckTool)
     .register(getDueFlashcardsTool)
