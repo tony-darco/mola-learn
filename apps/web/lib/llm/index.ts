@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { apiKeys, db } from "@mola/db";
 import { decryptSecret } from "@/lib/auth/crypto";
+import { withLlmCallLogging } from "@/lib/debug/llm-log";
 import { DEFAULT_CHAT_MODEL, OllamaProvider } from "./ollama";
 import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
@@ -53,7 +54,9 @@ async function resolveProvider(userId: string, opts?: ChatProviderOptions): Prom
  * `for await`. Callers never construct a provider directly either way.
  */
 export function getChatProvider(userId: string, opts?: ChatProviderOptions): LLMProvider {
-  return new LazyProvider(userId, opts);
+  // Logging is a no-op wrapper unless the debug logger's own two-switch gate
+  // (agent-log.ts) is satisfied for the ambient turn — see lib/debug/llm-log.ts.
+  return withLlmCallLogging(new LazyProvider(userId, opts), opts?.model);
 }
 
 class LazyProvider implements LLMProvider {
