@@ -226,6 +226,25 @@ export function PlanTab({
     );
   }
 
+  // Mirrors the week block below: an empty state until there is a semester
+  // plan, then the same PlanSection an open proposal would render — unless a
+  // semester proposal is already leading the page (`hoisted`), in which case
+  // the aside stays empty rather than showing the plan twice.
+  const aside = plans.semester === null
+    ? (
+      <EmptyPlan
+        title="The semester"
+        line="No semester plan yet."
+        label="Propose a semester plan"
+        onPropose={() => propose("semester")}
+        busy={busy}
+        testid="propose-semester"
+      />
+    )
+    : !hoisted.has(plans.semester.id)
+      ? section(plans.semester, false)
+      : null;
+
   return (
     <main className="flex-1 min-w-0 overflow-y-auto py-8 pl-4 pr-6">
       <div className="mx-auto max-w-7xl">
