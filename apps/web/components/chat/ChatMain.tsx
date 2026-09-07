@@ -70,6 +70,57 @@ function turnsFromHistory(data: HistoryResponse): Turn[] {
   }));
 }
 
+const SESSION_CACHE_PREFIX = "mola:chat-history:";
+
+/** sessionStorage-backed twin of the in-memory `historyCache` — same data,
+ * surviving a reload of this tab (cleared when the tab closes, never shared
+ * with other tabs). The in-memory Map stays the fast path for a same-session
+ * revisit; this is only consulted on a cold mount where the Map is empty.
+ * Read/write are both best-effort: private browsing, a full quota, or
+ * disabled storage should degrade to a plain network fetch, never break the
+ * chat. */
+function readSessionCache(chatId: string): HistoryResponse | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_CACHE_PREFIX + chatId);
+    return raw ? (JSON.parse(raw) as HistoryResponse) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionCache(chatId: string, data: HistoryResponse) {
+  try {
+    sessionStorage.setItem(SESSION_CACHE_PREFIX + chatId, JSON.stringify(data));
+  } catch {
+    // Quota exceeded or storage disabled — the in-memory cache still covers
+    // this tab for the rest of the session.
+  }
+}
+
+// Module-level (not per-component-instance) so it survives React Strict
+// Mode's dev-only mount→cleanup→mount double-invoke of the loading effect
+// below, which was firing this exact GET twice back-to-back for the same
+// chatId (confirmed live: two /api/chat/{id} responses of identical byte
+// size on every single chat open). A second invocation for a chatId that's
+// still in flight reuses the same promise instead of issuing a second
+// network request and a second DB read.
+const inFlightHistoryFetches = new Map<string, Promise<HistoryResponse>>();
+
+function fetchHistory(chatId: string): Promise<HistoryResponse> {
+  const existing = inFlightHistoryFetches.get(chatId);
+  if (existing) return existing;
+  const promise = fetch(`/api/chat/${chatId}`)
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`failed to load chat (${res.status})`);
+      return (await res.json()) as HistoryResponse;
+    })
+    .finally(() => {
+      inFlightHistoryFetches.delete(chatId);
+    });
+  inFlightHistoryFetches.set(chatId, promise);
+  return promise;
+}
+
 /** The literal placeholder both client and server store for a hint pull with
  * no typed text (send()'s body, and the POST route's own fallback) — used to
  * tell retryFrom() whether to replay a turn as pullHint rather than as text. */
@@ -112,7 +163,10 @@ export function ChatMain({ chatId }: { chatId: string }) {
   // Keyed by chatId, kept for the life of this mounted ChatMain (it's never
   // remounted between chats — see the comment below). Lets a revisit within
   // the same session hydrate instantly instead of flashing a blank loading
-  // state (PROPOSALS.md §1 / e2e/flash-flicker.spec.ts).
+  // state (PROPOSALS.md §1 / e2e/flash-flicker.spec.ts). Mirrored into
+  // sessionStorage (see readSessionCache/writeSessionCache above) so a
+  // reload of this tab still gets the fast path — this Map alone is wiped
+  // by one.
   const historyCache = useRef<Map<string, HistoryResponse>>(new Map());
   const pendingDraftRef = useRef<string | null>(null);
   const [mathCategory, setMathCategory] = useState<string | null>(null);
@@ -212,15 +266,18 @@ export function ChatMain({ chatId }: { chatId: string }) {
         body: JSON.stringify(next),
       });
       if (!res.ok) throw new Error(`failed to update model (${res.status})`);
-      // Keep the per-chat cache in sync — otherwise a revisit right after this
-      // change would briefly redisplay the pre-change model from the stale
-      // cached entry before the background revalidation fetch corrects it.
+      // Keep the per-chat cache in sync — otherwise a revisit (or a reload,
+      // via the sessionStorage copy) right after this change would briefly
+      // redisplay the pre-change model from the stale cached entry before
+      // the background revalidation fetch corrects it.
       const cached = historyCache.current.get(chatId);
       if (cached) {
-        historyCache.current.set(chatId, {
+        const updated: HistoryResponse = {
           ...cached,
           chat: { ...cached.chat, model: next.model, thinkingEnabled: next.thinkingEnabled ? 1 : 0 },
-        });
+        };
+        historyCache.current.set(chatId, updated);
+        writeSessionCache(chatId, updated);
       }
     } catch (err) {
       // The picker was showing the new selection optimistically — revert it
@@ -238,7 +295,17 @@ export function ChatMain({ chatId }: { chatId: string }) {
     let cancelled = false;
     setLoadError(null);
 
-    const cached = historyCache.current.get(chatId);
+    let cached = historyCache.current.get(chatId);
+    if (!cached) {
+      // Cold mount (fresh tab, or a reload) — the in-memory Map is always
+      // empty here regardless of what was cached before, so fall back to
+      // sessionStorage's copy of the same data before hitting the network.
+      const fromSession = readSessionCache(chatId);
+      if (fromSession) {
+        cached = fromSession;
+        historyCache.current.set(chatId, fromSession);
+      }
+    }
     if (cached) {
       // Stale-while-revalidate: paint the cached turns immediately (no
       // spinner), then silently refresh from the network below.
@@ -248,14 +315,11 @@ export function ChatMain({ chatId }: { chatId: string }) {
       setLoading(true);
     }
 
-    fetch(`/api/chat/${chatId}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`failed to load chat (${res.status})`);
-        return (await res.json()) as HistoryResponse;
-      })
+    fetchHistory(chatId)
       .then((data) => {
         if (cancelled) return;
         historyCache.current.set(chatId, data);
+        writeSessionCache(chatId, data);
         hydrate(data);
       })
       .catch((err: Error) => {
