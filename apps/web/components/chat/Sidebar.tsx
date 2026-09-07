@@ -48,8 +48,13 @@ export function Sidebar({
   const didDrag = useRef(false);
 
   // Stable sort: pinned chats float to the top, most-recent-first within
-  // each group, since `chats` already arrives sorted by updatedAt.
+  // each group, since `chats` already arrives sorted by updatedAt — a newly
+  // created or just-updated chat is already first, so nothing extra is
+  // needed to keep new chats at the top of the list.
   const sortedChats = useMemo(() => [...chats].sort((a, b) => b.isPinned - a.isPinned), [chats]);
+  const VISIBLE_CHAT_LIMIT = 10;
+  const visibleChats = sortedChats.slice(0, VISIBLE_CHAT_LIMIT);
+  const hasMoreChats = sortedChats.length > VISIBLE_CHAT_LIMIT;
 
   const onPointerMove = useCallback((e: PointerEvent) => {
     if (!dragStart.current) return;
@@ -95,7 +100,10 @@ export function Sidebar({
 
   return (
     <aside className="relative flex h-full shrink-0 flex-col border-r border-border bg-sidebar" style={{ width }}>
-      <div className="flex h-full flex-col gap-1 overflow-y-auto px-4 py-4">
+      {/* No overflow-y-auto here — the Chats list below scrolls on its own,
+          independent of this header/nav block and the footer, both of which
+          stay put. */}
+      <div className="flex h-full min-h-0 flex-col gap-1 px-4 py-4">
         <div className="flex min-h-[25vh] shrink-0 flex-col">
           <Link href="/chat" className="px-1 text-xl font-semibold text-fg no-underline">Mola</Link>
 
@@ -168,17 +176,28 @@ export function Sidebar({
           )}
         </div>
 
-        <div className="mb-3">
-          <div className="mb-1 px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">Chats</div>
-          {sortedChats.length === 0 && (
-            <div className="px-1 py-1 text-sm text-fg-muted">No chats yet</div>
+        <div className="mb-3 flex min-h-0 flex-1 flex-col">
+          <div className="mb-1 shrink-0 px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">Chats</div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {sortedChats.length === 0 && (
+              <div className="px-1 py-1 text-sm text-fg-muted">No chats yet</div>
+            )}
+            {visibleChats.map((chat) => (
+              <ChatLink key={chat.id} chat={chat} active={chat.id === activeChatId} courses={courses} />
+            ))}
+          </div>
+          {hasMoreChats && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className="shrink-0 rounded-md px-2 py-1.5 text-left text-sm text-fg-muted hover:bg-surface hover:text-fg"
+            >
+              View all conversations
+            </button>
           )}
-          {sortedChats.map((chat) => (
-            <ChatLink key={chat.id} chat={chat} active={chat.id === activeChatId} courses={courses} />
-          ))}
         </div>
 
-        <div className="mt-auto flex flex-col gap-1">
+        <div className="mt-auto shrink-0 flex flex-col gap-1">
           <button
             type="button"
             onClick={onOpenSearch}

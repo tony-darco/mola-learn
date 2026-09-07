@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useConfirm, usePrompt } from "./shell-context";
 import type { ChatSummary, CourseSummary } from "./types";
 
@@ -11,26 +12,72 @@ interface ChatContextMenuProps {
   onDelete: () => Promise<void>;
 }
 
+const MENU_WIDTH = 192; // w-48
+const GAP = 4;
+
 export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatContextMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [submenu, setSubmenu] = useState<"courses" | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // Anchored to the viewport (position: fixed) rather than to this row, and
+  // rendered through a portal into <body> — the Chats list scrolls in its
+  // own overflow-y-auto box now (independent of the rest of the sidebar), and
+  // any ancestor with overflow-y set to anything but visible clips an
+  // absolutely-positioned descendant that extends past its bounds, no matter
+  // its z-index. A menu that opens upward from a row near the top of that
+  // box was getting cut off by the box's own edge. Escaping to a portal
+  // sidesteps every such ancestor, present or future.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; openUpward: boolean } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const confirm = useConfirm();
   const prompt = usePrompt();
 
+  // Recomputed every time the menu opens — a fixed-position element doesn't
+  // need to track scroll (closing on scroll, below, is simpler and matches
+  // how a native context menu behaves), but the trigger's position on screen
+  // can differ between opens (list scrolled, window resized).
+  useLayoutEffect(() => {
+    if (!isOpen || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const openUpward = rect.top > window.innerHeight / 2;
+    setMenuPos({
+      top: openUpward ? window.innerHeight - rect.top + GAP : rect.bottom + GAP,
+      left: Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - GAP),
+      openUpward,
+    });
+  }, [isOpen]);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-        setSubmenu(null);
+      const target = event.target as Node;
+      if (
+        triggerRef.current?.contains(target) ||
+        menuRef.current?.contains(target)
+      ) {
+        return;
       }
+      setIsOpen(false);
+      setSubmenu(null);
     }
 
     if (isOpen) {
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
+  }, [isOpen]);
+
+  // A fixed-position menu stays glued to the same screen coordinates while
+  // the row it belongs to scrolls out from under it — close instead of
+  // letting it drift away from its trigger.
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleScroll() {
+      setIsOpen(false);
+      setSubmenu(null);
+    }
+    document.addEventListener("scroll", handleScroll, true);
+    return () => document.removeEventListener("scroll", handleScroll, true);
   }, [isOpen]);
 
   const handlePin = async () => {
@@ -119,8 +166,9 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
   const deleteKeyboard = "D";
 
   return (
-    <div ref={menuRef} className="relative">
+    <div className="relative">
       <button
+        ref={triggerRef}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -138,8 +186,17 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
         </svg>
       </button>
 
-      {isOpen && (
-        <div className="absolute bottom-full right-0 z-50 mb-1 w-48 rounded-lg border border-border bg-surface p-1 shadow-lg">
+      {isOpen && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            left: menuPos.left,
+            width: MENU_WIDTH,
+            ...(menuPos.openUpward ? { bottom: menuPos.top } : { top: menuPos.top }),
+          }}
+          className="z-50 rounded-lg border border-border bg-surface p-1 shadow-lg"
+        >
           {/* Pin option */}
           <button
             onClick={handlePin}
@@ -151,8 +208,7 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
           </button>
 
           {/* Move to course option — expands in place rather than flying out
-              sideways, since a flyout would render past the sidebar's own
-              width and get clipped by its scroll container. */}
+              sideways, since a flyout could render past the viewport edge. */}
           <div>
             <button
               onClick={() => setSubmenu(submenu === "courses" ? null : "courses")}
@@ -216,7 +272,8 @@ export function ChatContextMenu({ chat, courses, onUpdate, onDelete }: ChatConte
             <span>Delete</span>
             <span className="text-sm text-fg-muted">{deleteKeyboard}</span>
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
