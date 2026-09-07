@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { z } from "zod";
-import { AnimatePresence, animate, motion, motionValue, useTransform, type MotionValue } from "motion/react";
+import { AnimatePresence, motion, motionValue, useTransform, type MotionValue } from "motion/react";
 import { select } from "d3-selection";
 import "d3-transition"; // augments Selection with `.transition()`, used by zoomBy()
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
@@ -92,15 +92,27 @@ export function MindMapView({
   // Entries are created lazily during render (the one standard exception to
   // "no side effects in render" — see the React docs on lazy ref init) so a
   // brand-new node always has an entry to bind to on the very same render
-  // that first includes it; the effect below only ever *animates* them.
+  // that first includes it.
+  //
+  // The motion itself is driven declaratively (each node's `animate` prop
+  // below targets `n.x`/`n.y` on this same value, since it's also bound via
+  // `style`) rather than by an imperative animate() call fired from a
+  // separate effect. That imperative version had a real, reproducible bug:
+  // a value's first-ever animate() call, fired in the same commit that just
+  // created it, did not visually move the node — it silently reached its
+  // target internally, and the DOM only caught up once some unrelated
+  // re-render forced Framer Motion to reconcile `style` again (observed
+  // live as "a new child renders on top of its parent and only slides into
+  // place once a sibling branch is toggled"). Framer Motion's own `animate`
+  // prop is exactly the supported way to retarget a style-bound motion
+  // value, including on the render that mounts it, so it doesn't have that
+  // gap.
   const nodeMotionRef = useRef<Map<string, NodeMotionEntry>>(new Map());
   const parentOfRef = useRef<Map<string, string | null>>(new Map());
   const prevVisibleIdsRef = useRef<Set<string>>(new Set());
-  const newIdsThisRenderRef = useRef<Set<string>>(new Set());
   const hasMountedRef = useRef(false);
 
   const newIdsThisRender = new Set(positioned.filter((n) => !nodeMotionRef.current.has(n.id)).map((n) => n.id));
-  newIdsThisRenderRef.current = newIdsThisRender;
 
   // Sibling stagger — only new arrivals cascade; a node just gliding to a new
   // spot because a sibling branch expanded/collapsed starts immediately.
@@ -129,46 +141,20 @@ export function MindMapView({
     }
   }
 
-  // Drive the actual motion — every visible node glides to its layout
-  // target (covers both a freshly-arrived child AND an unrelated node just
-  // reflowing because a sibling branch's size changed).
+  // Bookkeeping only — the motion itself is driven by the `animate` prop in
+  // the JSX below, not from here.
   useEffect(() => {
-    // React's Strict Mode (on by default in Next.js dev builds) double-
-    // invokes every effect — mount, cleanup, mount again — to surface
-    // exactly this class of bug. Without a cleanup that undoes what THIS
-    // invocation started, the throwaway first pass's animate() calls and
-    // the real second pass's calls both end up live at once, racing for
-    // the same motion values. Track exactly what this invocation touches
-    // and reverse it on cleanup; in production, where Strict Mode's
-    // double-invoke doesn't happen, this cleanup only ever runs on the
-    // next real update or unmount, which is the normal case `useEffect`
-    // cleanup is for anyway.
-    const stoppedByThisRun: NodeMotionEntry[] = [];
-
     if (hasMountedRef.current) {
-      for (const n of positioned) {
-        const entry = nodeMotionRef.current.get(n.id);
-        if (!entry) continue;
-        const isArrival = newIdsThisRenderRef.current.has(n.id);
-        const delay = isArrival ? staggerDelay.get(n.id) ?? 0 : 0;
-        entry.x.stop();
-        entry.y.stop();
-        animate(entry.x, n.x, { duration: MOVE_DURATION, ease: "easeOut", delay });
-        animate(entry.y, n.y, { duration: MOVE_DURATION, ease: "easeOut", delay });
-        stoppedByThisRun.push(entry);
-      }
       // A node that just left `positioned` (collapsed away) drops its
       // bookkeeping immediately and synchronously — no grace period, no
       // timer, no reuse window. AnimatePresence keeps rendering its last
-      // frame (bound to this same MotionValue object, retained by
-      // closure on the already-committed element) through its own
-      // declarative exit animation regardless of when this map entry
-      // goes away, so deleting now is safe. Every reappearance is
-      // therefore unambiguously a fresh arrival with a freshly-created
-      // entry (see the lazy-init pass above) — there is no stale entry
-      // left over from a previous visibility span for a fast re-expand
-      // to accidentally pick up. The cost: a departing node now fades
-      // out in place instead of sliding into its parent as it shrinks.
+      // frame (bound to this same MotionValue object, retained by closure
+      // on the already-committed element) through its own declarative exit
+      // animation regardless of when this map entry goes away, so deleting
+      // now is safe. Every reappearance is therefore unambiguously a fresh
+      // arrival with a freshly-created entry (see the lazy-init pass
+      // above) — there is no stale entry left over from a previous
+      // visibility span for a fast re-expand to accidentally pick up.
       const currentIds = new Set(positioned.map((n) => n.id));
       for (const id of prevVisibleIdsRef.current) {
         if (currentIds.has(id)) continue;
@@ -178,13 +164,6 @@ export function MindMapView({
     }
     prevVisibleIdsRef.current = new Set(positioned.map((n) => n.id));
     hasMountedRef.current = true;
-
-    return () => {
-      for (const entry of stoppedByThisRun) {
-        entry.x.stop();
-        entry.y.stop();
-      }
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on layout targets only; staggerDelay is derived from the same `positioned` each render.
   }, [positioned]);
 
@@ -379,7 +358,7 @@ export function MindMapView({
                     key={n.id}
                     style={{ x: entry.x, y: entry.y }}
                     initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
+                    animate={{ x: n.x, y: n.y, scale: 1, opacity: 1 }}
                     exit={{ scale: 0.8, opacity: 0, transition: { duration: MOVE_DURATION, ease: "easeIn" } }}
                     transition={{ duration: MOVE_DURATION, ease: "easeOut", delay }}
                   >
