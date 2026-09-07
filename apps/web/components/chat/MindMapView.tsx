@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { z } from "zod";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, animate, motion, motionValue, useTransform, type MotionValue } from "motion/react";
 import { select } from "d3-selection";
 import "d3-transition"; // augments Selection with `.transition()`, used by zoomBy()
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
@@ -19,6 +19,12 @@ const PANEL_MAX_WIDTH = 560;
 const PANEL_DEFAULT_WIDTH = 360;
 const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 2.5;
+
+/** Expand/collapse timing (NotebookLM-style: snappy, never past ~400ms). */
+const MOVE_DURATION = 0.3;
+const STAGGER_STEP = 0.05;
+
+type NodeMotionEntry = { x: MotionValue<number>; y: MotionValue<number> };
 
 /**
  * Depth-tiered palette matching the reference mock: root is the odd one out
@@ -79,6 +85,91 @@ export function MindMapView({
   }, [positioned]);
   const byId = useMemo(() => new Map(positioned.map((n) => [n.id, n])), [positioned]);
   const open = openId ? payload.nodes.find((n) => n.id === openId) ?? null : null;
+
+  // Persistent per-node position — plain motion values, not React state, so
+  // an edge can live-track its endpoints every frame (via useTransform)
+  // while a node glides, instead of snapping to the layout's final x/y.
+  // Entries are created lazily during render (the one standard exception to
+  // "no side effects in render" — see the React docs on lazy ref init) so a
+  // brand-new node always has an entry to bind to on the very same render
+  // that first includes it; the effect below only ever *animates* them.
+  const nodeMotionRef = useRef<Map<string, NodeMotionEntry>>(new Map());
+  const parentOfRef = useRef<Map<string, string | null>>(new Map());
+  const prevVisibleIdsRef = useRef<Set<string>>(new Set());
+  const newIdsThisRenderRef = useRef<Set<string>>(new Set());
+  const hasMountedRef = useRef(false);
+
+  const newIdsThisRender = new Set(positioned.filter((n) => !nodeMotionRef.current.has(n.id)).map((n) => n.id));
+  newIdsThisRenderRef.current = newIdsThisRender;
+
+  // Sibling stagger — only new arrivals cascade; a node just gliding to a new
+  // spot because a sibling branch expanded/collapsed starts immediately.
+  const staggerDelay = new Map<string, number>();
+  {
+    const counters = new Map<string, number>();
+    for (const n of positioned) {
+      if (!newIdsThisRender.has(n.id)) continue;
+      const key = n.parentId ?? "__root__";
+      const idx = counters.get(key) ?? 0;
+      counters.set(key, idx + 1);
+      staggerDelay.set(n.id, idx * STAGGER_STEP);
+    }
+  }
+
+  for (const n of positioned) {
+    parentOfRef.current.set(n.id, n.parentId);
+    if (!nodeMotionRef.current.has(n.id)) {
+      const parentEntry = n.parentId ? nodeMotionRef.current.get(n.parentId) : null;
+      // First paint ever: land directly on the final position, no animation
+      // (mirrors the old AnimatePresence initial={false} behavior). Every
+      // later arrival originates from its parent's CURRENT live position.
+      const originX = hasMountedRef.current ? (parentEntry?.x.get() ?? n.x) : n.x;
+      const originY = hasMountedRef.current ? (parentEntry?.y.get() ?? n.y) : n.y;
+      nodeMotionRef.current.set(n.id, { x: motionValue(originX), y: motionValue(originY) });
+    }
+  }
+
+  // Drive the actual motion — every visible node glides to its layout
+  // target (covers both a freshly-arrived child AND an unrelated node just
+  // reflowing because a sibling branch's size changed), and a node that
+  // just left `positioned` keeps animating toward its former parent's
+  // *current* position for the same duration before AnimatePresence
+  // actually unmounts it, so its connector shrinks in step instead of
+  // freezing mid-air.
+  useEffect(() => {
+    if (hasMountedRef.current) {
+      for (const n of positioned) {
+        const entry = nodeMotionRef.current.get(n.id);
+        if (!entry) continue;
+        const isArrival = newIdsThisRenderRef.current.has(n.id);
+        const delay = isArrival ? staggerDelay.get(n.id) ?? 0 : 0;
+        animate(entry.x, n.x, { duration: MOVE_DURATION, ease: "easeOut", delay });
+        animate(entry.y, n.y, { duration: MOVE_DURATION, ease: "easeOut", delay });
+      }
+      const currentIds = new Set(positioned.map((n) => n.id));
+      for (const id of prevVisibleIdsRef.current) {
+        if (currentIds.has(id)) continue;
+        const entry = nodeMotionRef.current.get(id);
+        const parentId = parentOfRef.current.get(id) ?? null;
+        const parentEntry = parentId ? nodeMotionRef.current.get(parentId) : null;
+        if (!entry || !parentEntry) continue;
+        // Once the shrink-to-parent finishes, drop the entry entirely —
+        // otherwise re-expanding this branch later would reuse a stale
+        // entry frozen at wherever the parent was at collapse time instead
+        // of being treated as a fresh arrival (wrong origin, no stagger).
+        Promise.all([
+          animate(entry.x, parentEntry.x.get(), { duration: MOVE_DURATION, ease: "easeIn" }),
+          animate(entry.y, parentEntry.y.get(), { duration: MOVE_DURATION, ease: "easeIn" }),
+        ]).then(() => {
+          nodeMotionRef.current.delete(id);
+          parentOfRef.current.delete(id);
+        });
+      }
+    }
+    prevVisibleIdsRef.current = new Set(positioned.map((n) => n.id));
+    hasMountedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on layout targets only; staggerDelay is derived from the same `positioned` each render.
+  }, [positioned]);
 
   // Zoom behavior — wired once. Panning/zooming updates React state so the
   // content <g> re-renders with the new transform; the +/- buttons and the
@@ -228,22 +319,18 @@ export function MindMapView({
         <svg ref={svgRef} width="100%" height="100%" className="block cursor-grab active:cursor-grabbing">
           <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.k})`}>
             {/* Parent -> child tree edges, anchored on the arrow position (not
-                the node box), drawn first so nodes/arrows sit on top. */}
-            {positioned.filter((n) => n.parentId).map((n) => {
-              const parent = byId.get(n.parentId!);
-              if (!parent) return null;
-              const x1 = parent.x + NODE_WIDTH + H_GAP / 2, y1 = parent.y + NODE_HEIGHT / 2;
-              const x2 = n.x, y2 = n.y + NODE_HEIGHT / 2;
-              return (
-                <path
-                  key={`edge-${n.id}`}
-                  d={`M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`}
-                  fill="none"
-                  stroke="#a6b0c3"
-                  strokeWidth={1.5}
-                />
-              );
-            })}
+                the node box). Each edge's `d` is a MotionValue derived live
+                from both endpoints' motion values, so it stays in sync frame
+                by frame while either node glides — on arrival, on reflow,
+                and on collapse (drawn first so nodes/arrows sit on top). */}
+            <AnimatePresence initial={false}>
+              {positioned.filter((n) => n.parentId).map((n) => {
+                const parentEntry = nodeMotionRef.current.get(n.parentId!);
+                const childEntry = nodeMotionRef.current.get(n.id);
+                if (!parentEntry || !childEntry) return null;
+                return <MindMapEdge key={`edge-${n.id}`} parent={parentEntry} child={childEntry} />;
+              })}
+            </AnimatePresence>
 
             {/* Cross-links — dashed, labeled, distinct from the tree spine. */}
             {payload.edges.map((e, i) => {
@@ -267,15 +354,17 @@ export function MindMapView({
               {positioned.map((n) => {
                 const tier = tierFor(n.depth);
                 const isCollapsedHere = collapsed.has(n.id);
-                const parentPos = n.parentId ? byId.get(n.parentId) : null;
-                const origin = parentPos ?? { x: n.x, y: n.y };
+                const entry = nodeMotionRef.current.get(n.id);
+                if (!entry) return null;
+                const delay = staggerDelay.get(n.id) ?? 0;
                 return (
                   <motion.g
                     key={n.id}
-                    initial={{ x: origin.x, y: origin.y, scale: 0, opacity: 0 }}
-                    animate={{ x: n.x, y: n.y, scale: 1, opacity: 1 }}
-                    exit={{ x: origin.x, y: origin.y, scale: 0, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    style={{ x: entry.x, y: entry.y }}
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.8, opacity: 0, transition: { duration: MOVE_DURATION, ease: "easeIn" } }}
+                    transition={{ duration: MOVE_DURATION, ease: "easeOut", delay }}
                   >
                     <rect
                       width={NODE_WIDTH}
@@ -423,6 +512,34 @@ export function MindMapView({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * A tree edge whose path data is a MotionValue<string>, recomputed every
+ * frame from its two endpoints' live motion values — this is what makes the
+ * connector "draw in" as a new child arrives (it starts at zero length, both
+ * endpoints coincident at the parent) and shrink back on collapse, rather
+ * than snapping to a straight line the instant positions change.
+ */
+function MindMapEdge({ parent, child }: { parent: NodeMotionEntry; child: NodeMotionEntry }) {
+  const d = useTransform([parent.x, parent.y, child.x, child.y], (latest: number[]) => {
+    const [px, py, cx, cy] = latest;
+    const x1 = px! + NODE_WIDTH + H_GAP / 2, y1 = py! + NODE_HEIGHT / 2;
+    const x2 = cx!, y2 = cy! + NODE_HEIGHT / 2;
+    return `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`;
+  });
+  return (
+    <motion.path
+      d={d}
+      fill="none"
+      stroke="#a6b0c3"
+      strokeWidth={1.5}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: MOVE_DURATION, ease: "easeIn" } }}
+      transition={{ duration: MOVE_DURATION * 0.6 }}
+    />
   );
 }
 
