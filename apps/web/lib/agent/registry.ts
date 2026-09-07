@@ -17,6 +17,13 @@ export type ToolContext = {
   /** The chat's model/thinking choice — a sub-agent inherits its parent chat's, not the platform default. */
   model?: string;
   think?: boolean;
+  /**
+   * Overrides tiered-search.ts's DEFAULT_MIN_RESULTS for grep_search/bm25_search
+   * calls made under this context — e.g. quizzes.ts raises this since a quiz
+   * draws several questions and needs broader source coverage than a single
+   * mind-map node or chat answer. Undefined means "use the default."
+   */
+  retrievalMinResults?: number;
 };
 
 export type Tool<I = unknown> = {

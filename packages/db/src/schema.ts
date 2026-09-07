@@ -156,6 +156,19 @@ export const documentStatusEnum = pgEnum("document_status", [
   "scanning", "extracting", "indexing", "ready", "failed", "quarantined",
 ]);
 
+/**
+ * Textbook chapter-tree progress, independent of documents.status (a textbook
+ * is already "ready" via the base chunk/embed pipeline regardless of how far
+ * the chapter-tree pass has gotten). "not_applicable" is the default so every
+ * non-textbook document, and every .txt textbook (chapter-tree only runs on
+ * PDFs), never needs this column touched at all. "no_toc_found" is not an
+ * error — a textbook whose TOC heuristic can't find a confident match still
+ * finishes ingestion normally, it just never gets a chapter tree.
+ */
+export const textbookTocStatusEnum = pgEnum("textbook_toc_status", [
+  "not_applicable", "pending", "no_toc_found", "building", "ready",
+]);
+
 export const documents = pgTable("documents", {
   id: id(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -180,6 +193,8 @@ export const documents = pgTable("documents", {
   contentSha256: text("content_sha256"),
   byteSize: integer("byte_size"),
   mimeType: text("mime_type"),
+  /** Chapter-tree pass progress for textbook kind — see textbookTocStatusEnum. */
+  textbookTocStatus: textbookTocStatusEnum("textbook_toc_status").notNull().default("not_applicable"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -221,6 +236,80 @@ export const documentChunks = pgTable("document_chunks", {
   // no training step, and it does not degrade as the corpus grows during a semester.
   index("chunks_embedding_idx")
     .using("hnsw", t.embedding.op("vector_cosine_ops")),
+]);
+
+// ── Textbook knowledge tree ──────────────────────────────────────────────────
+//
+// Additive extension of Contract 1: a textbook's own chapter/subsection
+// structure, stored as markdown so mind maps/quizzes/flashcards/chat can grep
+// and BM25 search it directly instead of always going through document_chunks
+// or pgvector. Populated by a separate, eager pass after base ingestion
+// completes (apps/ingest/ingest/chapters.py) — never required for a document
+// to reach documents.status = "ready".
+
+export const textbookUnitStatusEnum = pgEnum("textbook_unit_status", [
+  "pending", "filling", "ready", "failed",
+]);
+
+/**
+ * One row per chapter detected in a textbook's table of contents. Indexed
+ * identically to document_chunks (GIN trigram + GIN tsvector on `markdown`)
+ * so the same grep/BM25 query shape works against either table.
+ */
+export const textbookChapters = pgTable("textbook_chapters", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  ordinal: integer("ordinal").notNull(),
+  chapterNumber: integer("chapter_number"),
+  title: text("title").notNull(),
+  /** Page locator where this chapter's own TOC line was found, e.g. "p.3" — for debugging/citation, not content. */
+  tocLocator: text("toc_locator"),
+  /** Page locators bounding this chapter's content. endLocator is the next chapter's startLocator, or null (unresolved / last chapter). */
+  startLocator: text("start_locator"),
+  endLocator: text("end_locator"),
+  topics: jsonb("topics").notNull().default(sql`'[]'::jsonb`),
+  markdown: text("markdown"),
+  status: textbookUnitStatusEnum("status").notNull().default("pending"),
+  statusDetail: text("status_detail"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("textbook_chapters_doc_ordinal_idx").on(t.documentId, t.ordinal),
+  index("textbook_chapters_user_idx").on(t.userId),
+  index("textbook_chapters_doc_status_idx").on(t.documentId, t.status),
+  index("textbook_chapters_fts_idx").using("gin", sql`to_tsvector('english', ${t.markdown})`),
+  index("textbook_chapters_trgm_idx").using("gin", sql`${t.markdown} gin_trgm_ops`),
+]);
+
+/**
+ * Subsections within a chapter. Boundaries are model-proposed by scanning the
+ * chapter's own text (not dependent on the book's TOC having subsection-level
+ * entries) — see apps/ingest/ingest/chapters.py. Status defaults to "ready"
+ * because a section row is only ever inserted already filled in, in the same
+ * job that fills its parent chapter.
+ */
+export const textbookSections = pgTable("textbook_sections", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  chapterId: uuid("chapter_id").notNull().references(() => textbookChapters.id, { onDelete: "cascade" }),
+  ordinal: integer("ordinal").notNull(),
+  title: text("title").notNull(),
+  startLocator: text("start_locator"),
+  endLocator: text("end_locator"),
+  markdown: text("markdown"),
+  status: textbookUnitStatusEnum("status").notNull().default("ready"),
+  statusDetail: text("status_detail"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex("textbook_sections_chapter_ordinal_idx").on(t.chapterId, t.ordinal),
+  index("textbook_sections_user_idx").on(t.userId),
+  index("textbook_sections_doc_idx").on(t.documentId),
+  index("textbook_sections_chapter_idx").on(t.chapterId),
+  index("textbook_sections_fts_idx").using("gin", sql`to_tsvector('english', ${t.markdown})`),
+  index("textbook_sections_trgm_idx").using("gin", sql`${t.markdown} gin_trgm_ops`),
 ]);
 
 // ── Artifacts (mirrors contract 6) ───────────────────────────────────────────

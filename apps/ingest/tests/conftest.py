@@ -67,6 +67,11 @@ def minimal_pdf_bytes() -> bytes:
 
 
 @pytest.fixture()
+def minimal_md_bytes() -> bytes:
+    return b"# Notes\n\nOperating systems manage processes and memory.\n"
+
+
+@pytest.fixture()
 def minimal_docx_bytes() -> bytes:
     doc = DocxDocument()
     doc.add_paragraph("Operating systems manage processes and memory.")

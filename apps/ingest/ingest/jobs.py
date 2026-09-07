@@ -17,14 +17,20 @@ import psycopg
 from .config import CONFIG
 
 INGEST_JOB_KIND = "ingest_document"
+DETECT_TOC_JOB_KIND = "detect_textbook_toc"
+FILL_CHAPTER_JOB_KIND = "fill_textbook_chapter"
 
 
 def claim_job(conn: psycopg.Connection) -> dict[str, Any] | None:
+    """Claims the oldest pending row of ANY kind — worker.py dispatches on
+    job["kind"]. (Previously scoped to INGEST_JOB_KIND only; the jobs table
+    docstring already frames it as "the ONE trigger", not "the one job
+    kind", so serving more kinds through the same queue is a narrowing
+    correction, not a contract break.)"""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT * FROM jobs WHERE status = 'pending' AND run_after <= now() "
-            "AND kind = %s ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
-            (INGEST_JOB_KIND,),
+            "ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
         )
         row = cur.fetchone()
         if row is None:
@@ -70,11 +76,11 @@ def mark_failed(
     conn.commit()
 
 
-def enqueue(conn: psycopg.Connection, user_id: str, document_id: str) -> str:
+def enqueue(conn: psycopg.Connection, user_id: str, kind: str, payload: dict[str, Any]) -> str:
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO jobs (user_id, kind, payload) VALUES (%s, %s, %s) RETURNING id",
-            (user_id, INGEST_JOB_KIND, psycopg.types.json.Json({"documentId": document_id})),
+            (user_id, kind, psycopg.types.json.Json(payload)),
         )
         job_id = cur.fetchone()["id"]
     conn.commit()

@@ -97,6 +97,36 @@ def test_status_walk_reaches_ready_with_1024_dim_embeddings(db_conn, s3_client, 
         assert c["embedding_version"] == CONFIG.embed_version
 
 
+def test_student_notes_md_reaches_ready(db_conn, s3_client, test_user, minimal_md_bytes):
+    document_id = _upload_and_insert(db_conn, s3_client, test_user, "notes.md", minimal_md_bytes)
+
+    process_document(db_conn, s3_client, document_id, StubScanner(), FakeEmbedder(), FakeSummarizer())
+
+    doc = _get_document(db_conn, document_id)
+    assert doc["status"] == "ready"
+    assert len(_get_chunks(db_conn, document_id)) > 0
+
+
+def test_student_notes_docx_reaches_ready(db_conn, s3_client, test_user, minimal_docx_bytes):
+    document_id = _upload_and_insert(db_conn, s3_client, test_user, "notes.docx", minimal_docx_bytes)
+
+    process_document(db_conn, s3_client, document_id, StubScanner(), FakeEmbedder(), FakeSummarizer())
+
+    doc = _get_document(db_conn, document_id)
+    assert doc["status"] == "ready"
+    assert len(_get_chunks(db_conn, document_id)) > 0
+
+
+def test_pdf_as_student_notes_is_rejected(db_conn, s3_client, test_user, minimal_pdf_bytes):
+    document_id = _upload_and_insert(db_conn, s3_client, test_user, "notes.pdf", minimal_pdf_bytes)
+
+    with pytest.raises(PermanentFailure):
+        process_document(db_conn, s3_client, document_id, StubScanner(), FakeEmbedder(), FakeSummarizer())
+
+    doc = _get_document(db_conn, document_id)
+    assert doc["status"] == "failed"
+
+
 @requires_clamd
 def test_malware_is_quarantined_and_never_reaches_safe(db_conn, s3_client, test_user):
     document_id = _upload_and_insert(db_conn, s3_client, test_user, "virus.txt", EICAR)

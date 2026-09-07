@@ -50,6 +50,13 @@
       "when": 1788710358295,
       "tag": "0006_slimy_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788759742964,
+      "tag": "0007_kind_naoko",
+      "breakpoints": true
     }
   ]
 }

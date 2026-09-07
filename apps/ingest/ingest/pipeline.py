@@ -21,6 +21,7 @@ from .chunk import chunk_sections
 from .config import CONFIG
 from .db import (
     copy_chunks_from,
+    copy_textbook_tree_from,
     find_ready_document_by_hash,
     get_chunks_needing_embedding,
     get_document,
@@ -29,12 +30,20 @@ from .db import (
     set_document_pointer,
     set_document_safe_key,
     set_document_status,
+    set_textbook_toc_status,
     write_embedding,
 )
 from .embed import EmbeddingProvider
 from .extract import extract
+from .jobs import DETECT_TOC_JOB_KIND, enqueue
 from .pointer import Summarizer, render_pointer_md
-from .policy import PolicyError, check_kind_allowed, check_quota, check_size
+from .policy import (
+    PolicyError,
+    check_kind_allowed,
+    check_kind_matches_document_kind,
+    check_quota,
+    check_size,
+)
 from .s3 import download_bytes, move_object
 from .scanner import MalwareScanner
 from .sniff import SniffError, sniff
@@ -106,6 +115,7 @@ def process_document(
 
         try:
             check_kind_allowed(sniffed.kind)
+            check_kind_matches_document_kind(sniffed.kind, doc["kind"])
             check_size(byte_size)
             check_quota(conn, user_id, byte_size, document_id)
         except PolicyError as e:
@@ -130,6 +140,10 @@ def process_document(
         chunk_count = copy_chunks_from(conn, duplicate["id"], document_id, user_id)
         # Identical bytes -> identical summary; skip the LLM call too.
         set_document_pointer(conn, document_id, duplicate["pointer_md"] or "")
+        # Identical bytes -> identical chapter tree (if any) — copy it instead
+        # of re-running TOC detection and N chapter-fill jobs.
+        copy_textbook_tree_from(conn, duplicate["id"], document_id, user_id)
+        set_textbook_toc_status(conn, document_id, duplicate["textbook_toc_status"])
         set_document_status(
             conn, document_id, "ready",
             detail=f"deduplicated from document {duplicate['id']} ({chunk_count} chunks reused)",
@@ -168,5 +182,13 @@ def process_document(
         chunk_count=len(chunks),
     )
     set_document_pointer(conn, document_id, pointer_md)
+
+    # ── textbook chapter tree (eager, PDF only) ─────────────────────────────
+    # A .txt textbook has no page structure to build a chapter tree from
+    # (extract_txt returns one section, locator=None) — textbook_toc_status
+    # stays "not_applicable" for it, same as every non-textbook kind.
+    if doc["kind"] == "textbook" and sniffed.kind == "pdf":
+        set_textbook_toc_status(conn, document_id, "pending")
+        enqueue(conn, user_id, DETECT_TOC_JOB_KIND, {"documentId": document_id})
 
     set_document_status(conn, document_id, "ready")

@@ -3,11 +3,16 @@
  * Postgres full-text search (ts_rank_cd over the generated tsvector index).
  * Strong on exact tokens, weak on paraphrase — the opposite failure mode of
  * vector_search (evals/golden/RESULTS.md).
+ *
+ * Backed by tiered-search.ts's shared strategy: textbook chapter tree first,
+ * then raw document chunks, then pgvector as a last resort — all inside this
+ * one tool call, so every consumer that already imports bm25SearchTool
+ * (main chat, mind maps, quizzes, flashcards) gets the tiering for free.
  */
 import { z } from "zod";
-import { bm25Search } from "../retrieval/queries";
+import { SelfHostedEmbeddingProvider } from "../../llm";
 import type { Tool } from "../registry";
-import { formatHits } from "../retrieval/format";
+import { formatTieredResult, tieredBm25 } from "../retrieval/tiered-search";
 
 const inputSchema = z.object({
   query: z.string().min(1).describe("Keywords to rank document chunks by lexical relevance"),
@@ -22,11 +27,13 @@ export const bm25SearchTool: Tool<z.infer<typeof inputSchema>> = {
   label: (input) => `Keyword search: "${input.query}"`,
 
   async execute(input, ctx) {
-    const hits = await bm25Search(input.query, {
-      userId: ctx.session.userId,
-      courseId: ctx.courseId,
-      limit: input.limit,
-    });
-    return formatHits(hits, `keyword relevance for "${input.query}"`);
+    const embedder = new SelfHostedEmbeddingProvider();
+    const result = await tieredBm25(
+      input.query,
+      { userId: ctx.session.userId, courseId: ctx.courseId, limit: input.limit },
+      embedder,
+      { minResults: ctx.retrievalMinResults },
+    );
+    return formatTieredResult(result, `keyword relevance for "${input.query}"`);
   },
 };

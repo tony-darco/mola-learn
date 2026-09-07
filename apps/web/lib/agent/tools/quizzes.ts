@@ -209,9 +209,12 @@ export const createQuizTool: Tool<z.infer<typeof createInputSchema>> = {
     }
     const difficulty = input.difficulty ?? "standard";
 
-    // think:false — see module docstring. A plain object, not a mutation of
+    // think:false — see module docstring. retrievalMinResults raised: a quiz
+    // draws several questions and needs broader source coverage than the
+    // default tiered-search.ts threshold (tuned for a single mind-map node
+    // or one chat answer) would guarantee. Plain object, not a mutation of
     // the caller's ctx.
-    const quizCtx: ToolContext = { ...ctx, think: false };
+    const quizCtx: ToolContext = { ...ctx, think: false, retrievalMinResults: 8 };
 
     const { result } = await runSubagent(
       {

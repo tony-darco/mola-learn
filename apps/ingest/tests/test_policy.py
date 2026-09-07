@@ -1,7 +1,13 @@
 import pytest
 
 from ingest.config import CONFIG
-from ingest.policy import PolicyError, check_kind_allowed, check_quota, check_size
+from ingest.policy import (
+    PolicyError,
+    check_kind_allowed,
+    check_kind_matches_document_kind,
+    check_quota,
+    check_size,
+)
 
 
 def test_size_cap():
@@ -14,6 +20,29 @@ def test_kind_allowed():
     check_kind_allowed("pdf")
     with pytest.raises(PolicyError):
         check_kind_allowed("exe")
+
+
+def test_pdf_rejected_as_student_notes():
+    with pytest.raises(PolicyError):
+        check_kind_matches_document_kind("pdf", "student_notes")
+
+
+def test_docx_allowed_as_student_notes():
+    check_kind_matches_document_kind("docx", "student_notes")  # does not raise
+
+
+def test_docx_rejected_as_textbook():
+    with pytest.raises(PolicyError):
+        check_kind_matches_document_kind("docx", "textbook")
+
+
+def test_pdf_allowed_as_textbook():
+    check_kind_matches_document_kind("pdf", "textbook")  # does not raise
+
+
+def test_unrestricted_document_kinds_accept_any_format():
+    check_kind_matches_document_kind("pdf", "syllabus")  # does not raise
+    check_kind_matches_document_kind("docx", "lecture_transcript")  # does not raise
 
 
 def test_quota_ok_under_limit(db_conn, test_user):

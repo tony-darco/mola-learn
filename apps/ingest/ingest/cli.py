@@ -15,7 +15,7 @@ import uuid
 
 from .config import CONFIG
 from .db import get_conn
-from .jobs import enqueue
+from .jobs import INGEST_JOB_KIND, enqueue
 from .s3 import get_s3_client, upload_bytes
 
 
@@ -42,7 +42,7 @@ def cmd_enqueue(args: argparse.Namespace) -> None:
                 (document_id, args.user_id, args.course_id, args.kind, filename, raw_key, len(data)),
             )
         conn.commit()
-        job_id = enqueue(conn, args.user_id, document_id)
+        job_id = enqueue(conn, args.user_id, INGEST_JOB_KIND, {"documentId": document_id})
 
     print(f"document {document_id} uploaded to {CONFIG.s3_bucket_raw}/{raw_key}")
     print(f"job {job_id} enqueued")

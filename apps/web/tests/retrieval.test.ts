@@ -12,7 +12,7 @@
  * No live Ollama call — SelfHostedEmbeddingProvider is mocked so this suite
  * runs without a reachable embedding host, unlike the golden-set harness.
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { chats, courses, db, users } from "@mola/db";
 import { EMBEDDING, type EmbeddingKind } from "@mola/shared";
@@ -67,6 +67,18 @@ afterAll(async () => {
 });
 
 describe("tool: grep_search", () => {
+  // grep_search now falls back through tiered-search.ts's chunks -> vector
+  // tiers internally when a query's hit count is thin (both fixtures here
+  // are well under the default minResults), so it can reach the embedder —
+  // mocked in every test in this block so none of them depend on whether a
+  // "ready" document happens to exist elsewhere in testCourseId yet.
+  beforeEach(() => {
+    vi.spyOn(SelfHostedEmbeddingProvider.prototype, "embed").mockResolvedValue([FIXED_VECTOR]);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("finds an exact literal substring", async () => {
     await seedTestDocument({
       userId: alice.id,
@@ -89,6 +101,13 @@ describe("tool: grep_search", () => {
 });
 
 describe("tool: bm25_search", () => {
+  beforeEach(() => {
+    vi.spyOn(SelfHostedEmbeddingProvider.prototype, "embed").mockResolvedValue([FIXED_VECTOR]);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("ranks by keyword relevance", async () => {
     await seedTestDocument({
       userId: alice.id,

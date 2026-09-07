@@ -11,10 +11,11 @@ from __future__ import annotations
 import logging
 import time
 
+from .chapters import get_chapter_summarizer, process_chapter_fill, process_toc_detection
 from .config import CONFIG
 from .db import get_conn
 from .embed import get_embedding_provider
-from .jobs import claim_job, mark_done, mark_failed
+from .jobs import DETECT_TOC_JOB_KIND, FILL_CHAPTER_JOB_KIND, INGEST_JOB_KIND, claim_job, mark_done, mark_failed
 from .pipeline import PermanentFailure, process_document
 from .pointer import get_summarizer
 from .s3 import get_s3_client
@@ -29,6 +30,7 @@ def run_once() -> bool:
     scanner = get_scanner()
     embedder = get_embedding_provider()
     summarizer = get_summarizer()
+    chapter_summarizer = get_chapter_summarizer()
     s3_client = get_s3_client()
 
     with get_conn() as conn:
@@ -37,9 +39,17 @@ def run_once() -> bool:
             return False
 
         document_id = job["payload"]["documentId"]
-        log.info("claimed job %s (document %s, attempt %s)", job["id"], document_id, job["attempts"] + 1)
+        log.info("claimed job %s (kind %s, document %s, attempt %s)",
+                  job["id"], job["kind"], document_id, job["attempts"] + 1)
         try:
-            process_document(conn, s3_client, document_id, scanner, embedder, summarizer)
+            if job["kind"] == INGEST_JOB_KIND:
+                process_document(conn, s3_client, document_id, scanner, embedder, summarizer)
+            elif job["kind"] == DETECT_TOC_JOB_KIND:
+                process_toc_detection(conn, document_id)
+            elif job["kind"] == FILL_CHAPTER_JOB_KIND:
+                process_chapter_fill(conn, document_id, job["payload"]["chapterId"], chapter_summarizer)
+            else:
+                raise PermanentFailure(f"unknown job kind: {job['kind']}")
         except PermanentFailure as e:
             log.warning("job %s permanently failed: %s", job["id"], e)
             mark_failed(conn, job["id"], job["attempts"], str(e), permanent=True)
