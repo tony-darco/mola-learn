@@ -16,7 +16,8 @@
  */
 import { z } from "zod";
 import { and, asc, desc, eq, gt, isNull, lte, ne, or, sql } from "drizzle-orm";
-import { courses, db, planAmendments, plans, scheduleItems, tasks } from "@mola/db";
+import { courses, db, plans, scheduleItems, tasks } from "@mola/db";
+import { updateTask } from "../../planning/lifecycle";
 import {
   dayPlanPayloadSchema, weekPlanPayloadSchema, type PlannedItem,
 } from "@mola/shared";
@@ -560,38 +561,21 @@ async function complete(target: Candidate, ctx: ToolContext): Promise<unknown> {
     return { completed: { id: target.id, title: target.title, at: formatWhen(now, false) } };
   }
 
-  const [row] = await db.update(tasks)
-    .set({ status: "done", completedAt: now, updatedAt: now })
-    .where(and(eq(tasks.id, target.id), eq(tasks.userId, ctx.session.userId)))
-    .returning();
-  if (!row) return { error: "No open task with that id." };
-
-  if (row.planId && row.planItemId) {
-    await recordCompletedAmendment(ctx.session.userId, row.planId, row.planItemId, row.title);
+  // updateTask (lib/planning/lifecycle.ts) does the status flip, the
+  // completedAt stamp, AND — when the task came from a plan — the
+  // plan_amendments write, all in one place. That write is not optional:
+  // plan_amendments IS the §5 feedback loop, and a completion that never
+  // lands there is invisible to the end-of-week review even though the task
+  // shows as done. Calling it here rather than hand-rolling the same update
+  // a second time is what keeps "done in conversation" and "done from the
+  // Plan tab" behaving identically instead of two paths drifting apart.
+  try {
+    const view = await updateTask(ctx.session, target.id, { status: "done" });
+    return { completed: { id: view.id, title: view.title, at: formatWhen(now, false) } };
+  } catch (err) {
+    if (err instanceof AuthzError) throw err;
+    return { error: "No open task with that id." };
   }
-  return { completed: { id: row.id, title: row.title, at: formatWhen(now, false) } };
-}
-
-/**
- * TODO(J5→J3 merge): replace this body with J3's amendment helper from
- * `lib/planning/` — one line. It is written out here only because J3 is being
- * built in parallel and that module does not exist in this worktree yet.
- *
- * The write itself is not optional: `plan_amendments` IS the §5 feedback loop,
- * and a completion that never lands there is invisible to the end-of-week
- * review even though the task shows as done.
- */
-async function recordCompletedAmendment(
-  userId: string, planId: string, itemId: string, title: string,
-): Promise<void> {
-  await db.insert(planAmendments).values({
-    userId,
-    planId,
-    itemId,
-    action: "completed",
-    after: { title, completedAt: new Date().toISOString() },
-    reason: "checked off in conversation",
-  });
 }
 
 const NOT_FOUND = {
