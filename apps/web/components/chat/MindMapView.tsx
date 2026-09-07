@@ -98,14 +98,6 @@ export function MindMapView({
   const prevVisibleIdsRef = useRef<Set<string>>(new Set());
   const newIdsThisRenderRef = useRef<Set<string>>(new Set());
   const hasMountedRef = useRef(false);
-  // A departed node's entry is removed on a plain timer, not a Promise tied
-  // to its shrink animation — a Promise from an *interrupted* animate() call
-  // can resolve at an indeterminate point relative to a fast re-expand's own
-  // render/effect, and by the time it does, deleting is no longer safe to
-  // gate correctly (caught live: exactly this race stacked a re-expanded
-  // node's whole subtree onto a stale position). A timer can be positively
-  // cancelled the instant the node reappears — no ambiguity either way.
-  const pendingDeleteRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const newIdsThisRender = new Set(positioned.filter((n) => !nodeMotionRef.current.has(n.id)).map((n) => n.id));
   newIdsThisRenderRef.current = newIdsThisRender;
@@ -125,15 +117,6 @@ export function MindMapView({
   }
 
   for (const n of positioned) {
-    // This node is visible again — if it was mid-shrink-to-parent from a
-    // very recent collapse, cancel that pending removal outright rather
-    // than trying to reason about whether an in-flight animation's promise
-    // will resolve before or after this render's effect runs.
-    const pendingDelete = pendingDeleteRef.current.get(n.id);
-    if (pendingDelete !== undefined) {
-      clearTimeout(pendingDelete);
-      pendingDeleteRef.current.delete(n.id);
-    }
     parentOfRef.current.set(n.id, n.parentId);
     if (!nodeMotionRef.current.has(n.id)) {
       const parentEntry = n.parentId ? nodeMotionRef.current.get(n.parentId) : null;
@@ -148,28 +131,19 @@ export function MindMapView({
 
   // Drive the actual motion — every visible node glides to its layout
   // target (covers both a freshly-arrived child AND an unrelated node just
-  // reflowing because a sibling branch's size changed), and a node that
-  // just left `positioned` keeps animating toward its former parent's
-  // *current* position for the same duration before AnimatePresence
-  // actually unmounts it, so its connector shrinks in step instead of
-  // freezing mid-air.
+  // reflowing because a sibling branch's size changed).
   useEffect(() => {
     // React's Strict Mode (on by default in Next.js dev builds) double-
     // invokes every effect — mount, cleanup, mount again — to surface
     // exactly this class of bug. Without a cleanup that undoes what THIS
     // invocation started, the throwaway first pass's animate() calls and
     // the real second pass's calls both end up live at once, racing for
-    // the same motion values (caught live: this alone reproduced the
-    // "re-expanded branch stacks on the parent" bug even with `.stop()`
-    // called before every `animate()` — the stop was correctly clearing
-    // the *previous state update's* animation, but not a duplicate
-    // invocation of this exact same one). Track exactly what this
-    // invocation touches and reverse it on cleanup; in production, where
-    // Strict Mode's double-invoke doesn't happen, this cleanup only ever
-    // runs on the next real update or unmount, which is the normal case
-    // `useEffect` cleanup is for anyway.
+    // the same motion values. Track exactly what this invocation touches
+    // and reverse it on cleanup; in production, where Strict Mode's
+    // double-invoke doesn't happen, this cleanup only ever runs on the
+    // next real update or unmount, which is the normal case `useEffect`
+    // cleanup is for anyway.
     const stoppedByThisRun: NodeMotionEntry[] = [];
-    const timersByThisRun: { id: string; timer: ReturnType<typeof setTimeout> }[] = [];
 
     if (hasMountedRef.current) {
       for (const n of positioned) {
@@ -183,30 +157,23 @@ export function MindMapView({
         animate(entry.y, n.y, { duration: MOVE_DURATION, ease: "easeOut", delay });
         stoppedByThisRun.push(entry);
       }
+      // A node that just left `positioned` (collapsed away) drops its
+      // bookkeeping immediately and synchronously — no grace period, no
+      // timer, no reuse window. AnimatePresence keeps rendering its last
+      // frame (bound to this same MotionValue object, retained by
+      // closure on the already-committed element) through its own
+      // declarative exit animation regardless of when this map entry
+      // goes away, so deleting now is safe. Every reappearance is
+      // therefore unambiguously a fresh arrival with a freshly-created
+      // entry (see the lazy-init pass above) — there is no stale entry
+      // left over from a previous visibility span for a fast re-expand
+      // to accidentally pick up. The cost: a departing node now fades
+      // out in place instead of sliding into its parent as it shrinks.
       const currentIds = new Set(positioned.map((n) => n.id));
       for (const id of prevVisibleIdsRef.current) {
         if (currentIds.has(id)) continue;
-        const entry = nodeMotionRef.current.get(id);
-        const parentId = parentOfRef.current.get(id) ?? null;
-        const parentEntry = parentId ? nodeMotionRef.current.get(parentId) : null;
-        if (!entry || !parentEntry) continue;
-        entry.x.stop();
-        entry.y.stop();
-        animate(entry.x, parentEntry.x.get(), { duration: MOVE_DURATION, ease: "easeIn" });
-        animate(entry.y, parentEntry.y.get(), { duration: MOVE_DURATION, ease: "easeIn" });
-        stoppedByThisRun.push(entry);
-        // Drop the entry once the shrink would have finished — otherwise
-        // re-expanding this branch later would reuse a stale entry frozen
-        // at wherever the parent was at collapse time instead of being
-        // treated as a fresh arrival. Cancelled the instant this id
-        // reappears in `positioned` (in the lazy-init pass above).
-        const timer = setTimeout(() => {
-          pendingDeleteRef.current.delete(id);
-          nodeMotionRef.current.delete(id);
-          parentOfRef.current.delete(id);
-        }, MOVE_DURATION * 1000);
-        pendingDeleteRef.current.set(id, timer);
-        timersByThisRun.push({ id, timer });
+        nodeMotionRef.current.delete(id);
+        parentOfRef.current.delete(id);
       }
     }
     prevVisibleIdsRef.current = new Set(positioned.map((n) => n.id));
@@ -216,10 +183,6 @@ export function MindMapView({
       for (const entry of stoppedByThisRun) {
         entry.x.stop();
         entry.y.stop();
-      }
-      for (const { id, timer } of timersByThisRun) {
-        clearTimeout(timer);
-        if (pendingDeleteRef.current.get(id) === timer) pendingDeleteRef.current.delete(id);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on layout targets only; staggerDelay is derived from the same `positioned` each render.
