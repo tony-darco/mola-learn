@@ -27,10 +27,13 @@ function titleFor(view: CalendarView, anchor: Date): string {
   const sunday = addDays(monday, 6);
   const sameMonth = monday.getMonth() === sunday.getMonth();
   const left = monday.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const right = sunday.toLocaleDateString(undefined, {
-    month: sameMonth ? undefined : "short", day: "numeric", year: "numeric",
-  });
-  return `${left} – ${right}`;
+  // The right half is composed rather than formatted in one call. Asking Intl
+  // for year+day without month has no standard pattern, and it answers with a
+  // literal "2026 (day: 13)" — which is exactly what this header used to read.
+  const right = sameMonth
+    ? String(sunday.getDate())
+    : sunday.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${left} – ${right}, ${sunday.getFullYear()}`;
 }
 
 /**

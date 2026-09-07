@@ -1,8 +1,16 @@
 /**
  * Kind → chip colour. Translucent backgrounds rather than solid ones, because
  * the same chip sits on `bg-surface` in the month grid and on the ruled time
- * grid in week view, and both themes have to read — an opacity wash over the
- * page ground works on either, a fixed tint does not.
+ * grid in week view — an opacity wash over the page ground works on either, a
+ * fixed tint does not.
+ *
+ * Text is deliberately `text-fg`, the theme's own foreground token, rather
+ * than a per-hue shade. Tailwind's `dark:` variant keys off the OS setting,
+ * but the default "Mola" theme is light-only and ignores it (see globals.css),
+ * so `dark:text-sky-200` was winning on a light page and rendering the labels
+ * nearly invisible on any machine set to dark mode. Colour therefore carries
+ * the CATEGORY (wash + dot) and the theme carries the contrast, which is the
+ * only combination that holds across both themes.
  */
 import type { CalendarEvent } from "@mola/shared";
 
@@ -16,32 +24,32 @@ const NEUTRAL: KindStyle = {
 
 const BY_KIND: Record<CalendarEvent["kind"], KindStyle> = {
   class: {
-    chip: "bg-sky-500/15 text-sky-900 border-sky-500/30 dark:text-sky-200",
+    chip: "bg-sky-500/15 text-fg border-sky-500/30",
     dot: "bg-sky-500",
     label: "Class",
   },
   exam: {
-    chip: "bg-red-500/15 text-red-900 border-red-500/30 dark:text-red-200",
+    chip: "bg-red-500/15 text-fg border-red-500/30",
     dot: "bg-red-500",
     label: "Exam",
   },
   assignment: {
-    chip: "bg-amber-500/20 text-amber-900 border-amber-500/35 dark:text-amber-200",
+    chip: "bg-amber-500/20 text-fg border-amber-500/35",
     dot: "bg-amber-500",
     label: "Assignment",
   },
   deadline: {
-    chip: "bg-amber-500/20 text-amber-900 border-amber-500/35 dark:text-amber-200",
+    chip: "bg-amber-500/20 text-fg border-amber-500/35",
     dot: "bg-amber-500",
     label: "Deadline",
   },
   study_session: {
-    chip: "bg-emerald-500/15 text-emerald-900 border-emerald-500/30 dark:text-emerald-200",
+    chip: "bg-emerald-500/15 text-fg border-emerald-500/30",
     dot: "bg-emerald-500",
     label: "Study session",
   },
   recurring_task: {
-    chip: "bg-violet-500/15 text-violet-900 border-violet-500/30 dark:text-violet-200",
+    chip: "bg-violet-500/15 text-fg border-violet-500/30",
     dot: "bg-violet-500",
     label: "Recurring task",
   },
