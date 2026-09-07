@@ -9,7 +9,8 @@
     "start": "next start -p 3000",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "worker": "tsx scripts/worker.ts"
   },
   "dependencies": {
     "@auth/core": "0.41.3",

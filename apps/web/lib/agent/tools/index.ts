@@ -11,6 +11,9 @@ import { createFlashcardDeckTool } from "./flashcards";
 import { getDueFlashcardsTool, recordFlashcardReviewTool } from "./flashcard-review";
 import { createQuizTool } from "./quizzes";
 import { createMindMapTool } from "./mindmaps";
+import {
+  addScheduleItemTool, completeTaskTool, readPlanTool, readScheduleTool,
+} from "./calendar";
 
 /**
  * The single place tools are wired up. Phase 1 agents add their tools HERE
@@ -36,7 +39,11 @@ export function buildRegistry(): ToolRegistry {
     .register(withCallLogging(getDueFlashcardsTool))
     .register(withCallLogging(recordFlashcardReviewTool))
     .register(withCallLogging(createQuizTool))
-    .register(withCallLogging(createMindMapTool));
+    .register(withCallLogging(createMindMapTool))
+    .register(withCallLogging(readScheduleTool))
+    .register(withCallLogging(readPlanTool))
+    .register(withCallLogging(addScheduleItemTool))
+    .register(withCallLogging(completeTaskTool));
 }
 
 /** The retrieval agent's tool allowlist (§6) — used by runRetrievalAgent's subagent spec. */

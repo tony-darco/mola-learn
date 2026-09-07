@@ -9,11 +9,21 @@
  * No route hand-rolls this check.
  */
 import { and, eq } from "drizzle-orm";
-import { artifacts, chats, courses, db, documents, flashcards, messages } from "@mola/db";
+import {
+  artifacts, chats, courses, db, documents, flashcards, messages,
+  plans, scheduleItems, tasks,
+} from "@mola/db";
 import { getSession, type Session } from "./session";
 
+// Re-exported because the calendar and planning modules take a Session as a
+// parameter and would otherwise reach past this file to ./session for it —
+// the point of contract 2 is that authorization has one front door.
+export type { Session };
+
 /** Every resource with a shareable id (§9). */
-export type OwnedKind = "chat" | "course" | "artifact" | "document" | "message" | "flashcard";
+export type OwnedKind =
+  | "chat" | "course" | "artifact" | "document" | "message" | "flashcard"
+  | "scheduleItem" | "plan" | "task";
 
 const TABLES = {
   chat: chats,
@@ -22,6 +32,13 @@ const TABLES = {
   document: documents,
   message: messages,
   flashcard: flashcards,
+  // Agent J. All three are loaded by id from a route or an agent tool — a
+  // calendar event on check-off, a plan on accept/amend, a task on completion —
+  // so each needs the same one-predicate check as everything above it. A tool
+  // is not exempt from §9 just because a model was the caller.
+  scheduleItem: scheduleItems,
+  plan: plans,
+  task: tasks,
 } as const;
 
 export class AuthzError extends Error {

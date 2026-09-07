@@ -392,8 +392,15 @@ export const quizAttempts = pgTable("quiz_attempts", {
 
 // ── Schedule and planning ────────────────────────────────────────────────────
 
-export const scheduleSourceEnum = pgEnum("schedule_source", ["ics", "google", "student"]);
-export const scheduleKindEnum = pgEnum("schedule_kind", ["deadline", "recurring_task", "study_session"]);
+/** "chat" and "plan" are Agent J additions — an item the tutor recorded from a
+ * conversation, or one the planning loop time-boxed. Additive only: existing
+ * values keep their meaning and ordinal. */
+export const scheduleSourceEnum = pgEnum("schedule_source", ["ics", "google", "student", "chat", "plan"]);
+/** "class", "exam", "assignment" and "event" are Agent J additions — a real
+ * calendar feed carries spans and sittings, not only point deadlines. */
+export const scheduleKindEnum = pgEnum("schedule_kind", [
+  "deadline", "recurring_task", "study_session", "class", "exam", "assignment", "event",
+]);
 
 export const scheduleItems = pgTable("schedule_items", {
   id: id(),
@@ -409,10 +416,84 @@ export const scheduleItems = pgTable("schedule_items", {
   externalId: text("external_id"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
+
+  // ── Agent J additions ──────────────────────────────────────────────────
+  /** Which feed produced this row; null for student/chat/plan-authored items. */
+  calendarSourceId: uuid("calendar_source_id").references(() => calendarSources.id, { onDelete: "cascade" }),
+  /** Span events (a lecture, an exam sitting). A pure deadline leaves these
+   * null and carries only `dueAt` — the calendar renders `startAt ?? dueAt`. */
+  startAt: timestamp("start_at", { withTimezone: true }),
+  endAt: timestamp("end_at", { withTimezone: true }),
+  /** 0/1, matching this schema's existing integer-for-boolean convention. */
+  allDay: integer("all_day").notNull().default(0),
+  location: text("location"),
+  description: text("description"),
+  /** Homework check-off (§8 planner surface). Null means outstanding. */
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  /** LAST-MODIFIED from the feed — lets a re-sync skip untouched rows. */
+  externalUpdatedAt: timestamp("external_updated_at", { withTimezone: true }),
 }, (t) => [
   index("schedule_user_due_idx").on(t.userId, t.dueAt),
   uniqueIndex("schedule_external_idx").on(t.userId, t.source, t.externalId),
+  index("schedule_user_start_idx").on(t.userId, t.startAt),
 ]);
+
+// ── Calendar sources (Agent J) ───────────────────────────────────────────────
+
+/** Tier 1 is the Blackboard-style ICS feed URL; Tier 2 is Google `events.watch` (§10). */
+export const calendarSourceKindEnum = pgEnum("calendar_source_kind", ["ics", "google"]);
+/**
+ * "expired" is its own state on purpose: a Google watch channel lapses within
+ * days and then stops delivering notifications SILENTLY, with no error raised
+ * (§10, §15.3). It has to be visible rather than inferred from staleness.
+ */
+export const calendarSyncStatusEnum = pgEnum("calendar_sync_status", [
+  "active", "error", "expired", "disabled",
+]);
+
+export const calendarSources = pgTable("calendar_sources", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: calendarSourceKindEnum("kind").notNull(),
+  /** Student-facing label, e.g. "Blackboard — Fall 2026". */
+  name: text("name").notNull(),
+  /** ICS feed URL. Null for Google sources. */
+  url: text("url"),
+  /** Google calendar id (usually the account email, or a secondary calendar). */
+  googleCalendarId: text("google_calendar_id"),
+  status: calendarSyncStatusEnum("status").notNull().default("active"),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  lastSyncError: text("last_sync_error"),
+  /** Google incremental-sync token; a 410 from Google clears it and forces a full resync. */
+  syncToken: text("sync_token"),
+  /** Google watch channel — renewal reads `channelExpiresAt` (§10 operational catch). */
+  channelId: text("channel_id"),
+  channelResourceId: text("channel_resource_id"),
+  channelExpiresAt: timestamp("channel_expires_at", { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index("calendar_sources_user_idx").on(t.userId),
+  index("calendar_sources_renewal_idx").on(t.channelExpiresAt),
+]);
+
+/**
+ * Google OAuth refresh tokens. Deliberately a SEPARATE table from `api_keys`
+ * (contract 3 reserves that one for BYOK chat keys) but the same encryption
+ * discipline applies: ciphertext only, never logged, never returned to the
+ * client (§9).
+ */
+export const googleCredentials = pgTable("google_credentials", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  googleAccountEmail: text("google_account_email").notNull(),
+  ciphertext: text("ciphertext").notNull(),
+  iv: text("iv").notNull(),
+  authTag: text("auth_tag").notNull(),
+  scope: text("scope").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [uniqueIndex("google_credentials_user_account_idx").on(t.userId, t.googleAccountEmail)]);
 
 export const planHorizonEnum = pgEnum("plan_horizon", ["day", "week", "semester"]);
 /** A proposal PERSISTS if the app isn't opened Sunday, and is shown on next open (§5). */
@@ -427,7 +508,85 @@ export const plans = pgTable("plans", {
   payload: jsonb("payload").notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (t) => [index("plans_user_period_idx").on(t.userId, t.horizon, t.periodStart)]);
+
+  // ── Agent J additions ──────────────────────────────────────────────────
+  periodEnd: timestamp("period_end", { withTimezone: true }),
+  /** Decomposition link: a day plan's parent is its week, a week's is the semester (§5). */
+  parentPlanId: uuid("parent_plan_id"),
+  /** Set the moment the student accepts. `status` alone can't distinguish
+   * "approved just now" from "approved three weeks ago" for the review step. */
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  supersededByPlanId: uuid("superseded_by_plan_id"),
+}, (t) => [
+  index("plans_user_period_idx").on(t.userId, t.horizon, t.periodStart),
+  index("plans_parent_idx").on(t.parentPlanId),
+]);
+
+/**
+ * Every edit the student makes to a proposed or approved plan, recorded as an
+ * event rather than folded into the payload.
+ *
+ * This table IS the feedback loop of §5: "at end of week, a review step
+ * examines the PATTERN of amendments made and re-proposes adjustments to the
+ * semester plan." A payload that is simply overwritten in place cannot answer
+ * "what kept slipping this week", so the amendments are kept as their own log.
+ */
+export const planAmendmentActionEnum = pgEnum("plan_amendment_action", [
+  "added", "removed", "rescheduled", "resized", "completed", "skipped", "reordered",
+]);
+
+export const planAmendments = pgTable("plan_amendments", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  planId: uuid("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
+  /** PlannedItem.id inside the plan payload; null for whole-plan amendments. */
+  itemId: text("item_id"),
+  action: planAmendmentActionEnum("action").notNull(),
+  before: jsonb("before"),
+  after: jsonb("after"),
+  /** Free text from the student, when they gave one ("lab ran long"). */
+  reason: text("reason"),
+  createdAt: createdAt(),
+}, (t) => [
+  index("plan_amendments_plan_idx").on(t.planId),
+  index("plan_amendments_user_created_idx").on(t.userId, t.createdAt),
+]);
+
+// ── Tasks (Agent J) ──────────────────────────────────────────────────────────
+
+export const taskStatusEnum = pgEnum("task_status", ["todo", "done", "skipped"]);
+/** Who put it on the list: the planning loop, the student, or the tutor mid-chat. */
+export const taskSourceEnum = pgEnum("task_source", ["plan", "student", "agent"]);
+
+/**
+ * The check-off surface. A task is the *actionable* unit ("read §4.2, 30 min");
+ * a schedule_item is the *calendar* unit ("Quiz 3, Thursday 2pm"). A task
+ * usually points at the schedule item it serves, which is what lets the home
+ * page say "your quiz is Thursday — two review sessions left".
+ */
+export const tasks = pgTable("tasks", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  courseId: uuid("course_id").references(() => courses.id, { onDelete: "cascade" }),
+  planId: uuid("plan_id").references(() => plans.id, { onDelete: "set null" }),
+  /** PlannedItem.id this was materialised from, so re-proposing doesn't duplicate it. */
+  planItemId: text("plan_item_id"),
+  scheduleItemId: uuid("schedule_item_id").references(() => scheduleItems.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  notes: text("notes"),
+  status: taskStatusEnum("status").notNull().default("todo"),
+  source: taskSourceEnum("source").notNull().default("plan"),
+  /** The day this task is FOR (a plan slot), distinct from the deadline it serves. */
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+  estimatedMinutes: integer("estimated_minutes"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index("tasks_user_scheduled_idx").on(t.userId, t.scheduledFor),
+  index("tasks_user_status_idx").on(t.userId, t.status),
+  uniqueIndex("tasks_plan_item_idx").on(t.planId, t.planItemId),
+]);
 
 // ── Secrets ──────────────────────────────────────────────────────────────────
 

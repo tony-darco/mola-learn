@@ -57,6 +57,13 @@
       "when": 1788759742964,
       "tag": "0007_kind_naoko",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788762807110,
+      "tag": "0008_public_manta",
+      "breakpoints": true
     }
   ]
 }
