@@ -88,3 +88,24 @@ export async function fetchEvents(from: Date, to: Date): Promise<CalendarEvent[]
   const { events } = await request<{ events: CalendarEvent[] }>(`/api/calendar/events?${query}`);
   return events;
 }
+
+/**
+ * The same calls as one object, so the Plan tab takes its backend as a value.
+ * Only `?fixtures=1` in development substitutes anything else (see
+ * ./fixtures) — every other path through the app is `planApi`, hitting the
+ * real routes, so nothing about the shipped behaviour depends on the stand-in.
+ */
+export type PlanApi = {
+  fetchPlan: typeof fetchPlan;
+  proposePlan: typeof proposePlan;
+  acceptPlan: typeof acceptPlan;
+  amendPlan: typeof amendPlan;
+  fetchTasks: typeof fetchTasks;
+  createTask: typeof createTask;
+  patchTask: typeof patchTask;
+  fetchEvents: typeof fetchEvents;
+};
+
+export const planApi: PlanApi = {
+  fetchPlan, proposePlan, acceptPlan, amendPlan, fetchTasks, createTask, patchTask, fetchEvents,
+};

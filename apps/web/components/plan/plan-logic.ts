@@ -118,6 +118,65 @@ export function summarizeTasks(tasks: TaskView[]): { done: number; total: number
   return { done, total: tasks.length, minutesLeft };
 }
 
+// ── Tasks ────────────────────────────────────────────────────────────────────
+
+/** The bucket for a task carrying no `scheduledFor` — it belongs to no day. */
+export const UNSCHEDULED = "";
+
+/** Keyed by the task's own local day, for the same reason a plan date is
+ * (contract B): `scheduledFor` is an instant, and a Monday-evening task in
+ * UTC-5 is a Tuesday task to `toISOString`. */
+export function groupTasksByDay(tasks: TaskView[]): Map<string, TaskView[]> {
+  const byDay = new Map<string, TaskView[]>();
+  for (const task of tasks) {
+    const key = task.scheduledFor ? localDayKey(new Date(task.scheduledFor)) : UNSCHEDULED;
+    const bucket = byDay.get(key);
+    if (bucket) bucket.push(task);
+    else byDay.set(key, [task]);
+  }
+  return byDay;
+}
+
+/** Checked-off work sinks: it is a record of the day, not part of what is left. */
+const TASK_RANK: Record<TaskView["status"], number> = { todo: 0, skipped: 1, done: 2 };
+
+/**
+ * Today's list. `GET /api/tasks?date=` already narrows the fetch, so the
+ * day filter here is only a second line of defence — but the undated half is
+ * deliberate: a task typed with no day attached still has to appear
+ * somewhere, and now is the only honest place to put it.
+ */
+export function tasksForToday(tasks: TaskView[], now: Date): TaskView[] {
+  const byDay = groupTasksByDay(tasks);
+  const today = [...(byDay.get(localDayKey(now)) ?? []), ...(byDay.get(UNSCHEDULED) ?? [])];
+  return today
+    .map((task, i) => ({ task, i }))
+    .sort((a, b) => TASK_RANK[a.task.status] - TASK_RANK[b.task.status] || a.i - b.i)
+    .map(({ task }) => task);
+}
+
+// ── Labels the renderers need but should not decide for themselves ───────────
+
+export type CourseOption = { id: string; name: string; number: string | null };
+
+/** A course reads as its number where it has one — "CMSC 421" is what the
+ * student calls it, and it fits a badge in a way the full name does not. */
+export function makeCourseLabel(courses: CourseOption[]) {
+  const byId = new Map(courses.map((c) => [c.id, c.number ?? c.name]));
+  return (courseId: string | null | undefined): string | null =>
+    (courseId ? byId.get(courseId) ?? null : null);
+}
+
+/** "for Project 1 · Thursday" — the deadline a block is in service of, which
+ * is the difference between a plan and a list of chores. */
+export function makeRelatedLabel(events: CalendarEvent[], now: Date) {
+  const byId = new Map(events.map((e) => [e.id, e]));
+  return (scheduleItemId: string | null | undefined): string | null => {
+    const event = scheduleItemId ? byId.get(scheduleItemId) : undefined;
+    return event ? `for ${event.title} · ${describeWhen(new Date(event.start), now)}` : null;
+  };
+}
+
 // ── Which proposal the page leads with (§5) ──────────────────────────────────
 
 /**
@@ -138,20 +197,39 @@ const PROPOSAL_RANK: Record<PlanHorizon, number> = { semester: 1, week: 2, day: 
  * accepted or not, so status alone would both drop a proposal out of the gate
  * the moment the student edited it and drag an accepted plan back into it.
  */
-export function awaitsAnswer(plan: PlanRecord | null | undefined): plan is PlanRecord {
+export function awaitsAnswer(plan: PlanRecord | null | undefined): boolean {
   return !!plan && plan.approvedAt === null && plan.status !== "superseded";
 }
 
-export function pickLeadProposal(plans: (PlanRecord | null | undefined)[]): PlanRecord | null {
-  const proposed = plans.filter(awaitsAnswer);
-  if (proposed.length === 0) return null;
-
-  return proposed.slice().sort((a, b) => {
+/** Every open question, in the order they deserve an answer. All of them are
+ * shown: a second unanswered proposal that the ranking pushed down is still
+ * unanswered, and hiding it is how it stays that way. */
+export function openProposals(plans: (PlanRecord | null | undefined)[]): PlanRecord[] {
+  return plans.filter((plan): plan is PlanRecord => awaitsAnswer(plan)).sort((a, b) => {
     const aReview = hasReview(a) ? 0 : 1;
     const bReview = hasReview(b) ? 0 : 1;
     if (aReview !== bReview) return aReview - bReview;
     return PROPOSAL_RANK[a.horizon] - PROPOSAL_RANK[b.horizon];
-  })[0]!;
+  });
+}
+
+export function pickLeadProposal(plans: (PlanRecord | null | undefined)[]): PlanRecord | null {
+  return openProposals(plans)[0] ?? null;
+}
+
+const PERIOD_NOUN: Record<PlanHorizon, string> = { day: "day", week: "week", semester: "term" };
+
+/**
+ * Why a proposal is still sitting there. The §5 case worth naming out loud is
+ * the Sunday proposal nobody answered: on Wednesday the useful fact is not
+ * that it is unanswered but that the week it plans is already half gone.
+ */
+export function proposalStatusLine(plan: PlanRecord, now: Date): string {
+  const days = daysUntil(plan.periodStart, now);
+  const noun = PERIOD_NOUN[plan.horizon];
+  if (days > 0) return `Waiting on you — this ${noun} starts ${describeWhen(plan.periodStart, now)}.`;
+  if (days === 0) return `Waiting on you — this ${noun} starts today.`;
+  return `Waiting on you — this ${noun} started ${describeWhen(plan.periodStart, now)}.`;
 }
 
 export function planReview(plan: PlanRecord | null | undefined) {
@@ -184,6 +262,26 @@ export function sameDayEvents(events: CalendarEvent[], target: CalendarEvent): C
     .filter((e) => e.id !== target.id && !e.completedAt && ACTIONABLE_KINDS.has(e.kind))
     .filter((e) => localDayKey(new Date(e.start)) === day)
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+}
+
+/** "that morning" / "that afternoon" / "that evening" — where a same-day
+ * collision actually sits, which is what turns "two things on Thursday" into
+ * something the student can reason about. */
+export function partOfDay(iso: string): string {
+  const hour = new Date(iso).getHours();
+  if (hour < 12) return "that morning";
+  if (hour < 17) return "that afternoon";
+  return "that evening";
+}
+
+/** When an event lands, said the way the student would say it. A deadline is
+ * "due Thursday"; an exam simply *is* Thursday. */
+export function eventWhenLine(event: CalendarEvent, now: Date): string {
+  const when = describeWhen(new Date(event.start), now);
+  const clock = clockTime(event.start, event.allDay);
+  const suffix = clock ? ` at ${clock}` : "";
+  if (event.kind === "deadline" || event.kind === "assignment") return `Due ${when}${suffix}`;
+  return `${when.charAt(0).toUpperCase()}${when.slice(1)}${suffix}`;
 }
 
 /**

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { SemesterPlanPayload } from "@mola/shared";
 import {
-  daysUntil, describeWhen, milestoneRemoveAmendment, milestoneRescheduleAmendment, parseDay, shortDate,
+  daysUntil, describeWhen, milestoneRemoveAmendment, milestoneRescheduleAmendment, shortDate,
   type PlanAmendment,
 } from "./plan-logic";
 import { badge, ghostButton, input, primaryButton, secondaryButton } from "./styles";
@@ -137,6 +137,8 @@ function MilestoneRow({
   const days = daysUntil(milestone.targetDate, now);
   const past = days < 0;
   const course = courseLabel(milestone.courseId);
+  const date = shortDate(milestone.targetDate);
+  const when = describeWhen(milestone.targetDate, now);
 
   function reset() {
     setTargetDate(milestone.targetDate);
@@ -159,8 +161,9 @@ function MilestoneRow({
             <span className={badge}>{MILESTONE_LABEL[milestone.kind]}</span>
           </div>
           <div className="text-xs text-fg-muted">
-            {parseDay(milestone.targetDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-            {" · "}{describeWhen(milestone.targetDate, now)}
+            {/* Beyond a week `describeWhen` is itself the short date, and
+                "Sep 17 · Sep 17" reads like a rendering bug. */}
+            {when === date ? date : `${date} · ${when}`}
             {course ? ` · ${course}` : ""}
           </div>
         </div>

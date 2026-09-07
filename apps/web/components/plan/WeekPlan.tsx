@@ -154,7 +154,8 @@ function DayRow({
   );
 }
 
-function AddBlockForm({
+/** Shared with the day plan, which is the same gate over one bucket. */
+export function AddBlockForm({
   date, busy, onAdd, onCancel,
 }: {
   date: string;
