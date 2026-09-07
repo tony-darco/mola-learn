@@ -6,12 +6,13 @@
  * stamped into the same request's context must not disagree about what
  * "Thursday 11:59pm" means, and two copies of a time formatter drift.
  *
- * Ownership (§9): every query carries `eq(userId, ctx.session.userId)` in its
- * own WHERE, which gives `requireOwned`'s property directly — a foreign id and
- * a missing id both come back as no row, so neither can be used to probe which
- * ids exist. Contract 2's `OwnedKind` has no `scheduleItem`/`plan`/`task`
- * member to call and that file is frozen; the one place it does apply — a
- * courseId handed in by the model — goes through it.
+ * Ownership (§9): every read carries `eq(userId, ctx.session.userId)` in its
+ * own WHERE, so a foreign id and a missing id both come back as no row and
+ * neither can be used to probe which ids exist. The two conversation-driven
+ * writes go through `requireOwned` on top of that — contract 2's own docstring
+ * names "a task on completion" among its callers, and a check that holds only
+ * because of how the caller happened to query is one refactor away from not
+ * holding at all. A tool is not exempt from §9 because a model was the caller.
  */
 import { z } from "zod";
 import { and, asc, desc, eq, gt, isNull, lte, ne, or, sql } from "drizzle-orm";
@@ -218,7 +219,7 @@ export const readScheduleTool: Tool<z.infer<typeof readScheduleInput>> = {
       return { error: "from and to must be calendar dates in YYYY-MM-DD form." };
     }
     if (input.courseId) {
-      const denied = await checkCourse(input.courseId, ctx);
+      const denied = await checkOwned("course", input.courseId, ctx);
       if (denied) return denied;
     }
 
@@ -352,7 +353,7 @@ export const addScheduleItemTool: Tool<z.infer<typeof addScheduleItemInput>> = {
     if (input.endTime && end === null) return { error: "endTime must be a 24-hour clock time in HH:MM form." };
 
     if (input.courseId) {
-      const denied = await checkCourse(input.courseId, ctx);
+      const denied = await checkOwned("course", input.courseId, ctx);
       if (denied) return denied;
     }
 
@@ -512,12 +513,20 @@ function rank(candidates: Candidate[], query: string): Candidate[] {
   const wanted = tokenize(query);
   if (wanted.length === 0) return [];
 
+  // One incidental word in common is not a match. Without a floor, "the quantum
+  // chromodynamics essay" scores 1 against "Essay draft", stands alone at the
+  // top of the ranking, and gets silently checked off — the exact failure the
+  // ambiguity branch exists to prevent, arriving through the door marked
+  // "unambiguous". Half the student's words, and never fewer than two, unless
+  // they only gave one.
+  const need = wanted.length === 1 ? 1 : Math.max(2, Math.ceil(wanted.length / 2));
+
   let best = 0;
   const scored = candidates.map((c) => {
     const haystack = `${c.course ?? ""} ${c.title}`.toLowerCase();
     const hits = wanted.filter((w) => haystack.includes(w)).length;
     // An exact title match beats a bag-of-words tie against a longer title.
-    const score = hits === 0 ? 0 : hits + (c.title.toLowerCase() === query.trim().toLowerCase() ? 100 : 0);
+    const score = hits < need ? 0 : hits + (c.title.toLowerCase() === query.trim().toLowerCase() ? 100 : 0);
     best = Math.max(best, score);
     return { c, score };
   });
@@ -537,6 +546,12 @@ function tokenize(s: string): string[] {
 
 async function complete(target: Candidate, ctx: ToolContext): Promise<unknown> {
   const now = new Date();
+
+  // Contract 2's front door, on the write itself. `target` came out of this
+  // user's own open work so this cannot fail today; it is here so that the
+  // §9 guarantee survives someone later changing how candidates are loaded.
+  const denied = await checkOwned(target.kind === "task" ? "task" : "scheduleItem", target.id, ctx);
+  if (denied) return denied;
 
   if (target.kind === "schedule_item") {
     await db.update(scheduleItems)
@@ -579,13 +594,26 @@ async function recordCompletedAmendment(
   });
 }
 
-/** The one ownership check with a contract-2 kind behind it. */
-async function checkCourse(courseId: string, ctx: ToolContext): Promise<{ error: string } | null> {
+const NOT_FOUND = {
+  course: "Course not found.",
+  task: "No open task or assignment with that id.",
+  scheduleItem: "No open task or assignment with that id.",
+} as const;
+
+/**
+ * `requireOwned`, translated into something a model can act on: a denial comes
+ * back as a tool result rather than a thrown 404, so the turn can say "I
+ * couldn't find that" instead of failing. Foreign and missing give the same
+ * message, which is the property §9 is actually about.
+ */
+async function checkOwned(
+  kind: keyof typeof NOT_FOUND, id: string, ctx: ToolContext,
+): Promise<{ error: string } | null> {
   try {
-    await requireOwned("course", courseId, ctx.session);
+    await requireOwned(kind, id, ctx.session);
     return null;
   } catch (e) {
-    if (e instanceof AuthzError) return { error: "Course not found." };
+    if (e instanceof AuthzError) return { error: NOT_FOUND[kind] };
     throw e;
   }
 }

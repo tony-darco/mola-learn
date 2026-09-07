@@ -112,7 +112,7 @@ async function buildLayer1(userId: string, courseId: string | null): Promise<str
  * colliding deadlines — so Semester picks up where This week ends and is
  * filtered to milestones instead.
  */
-async function buildLayer2(userId: string): Promise<string> {
+export async function buildLayer2(userId: string): Promise<string> {
   const now = new Date();
   const todayStart = startOfLocalDay(now);
   const tomorrow = addDays(todayStart, 1);
@@ -133,8 +133,9 @@ async function buildLayer2(userId: string): Promise<string> {
     )).limit(30),
   ]);
 
+  const noPlans = !dayPlan && !weekPlan && !semesterPlan;
   const lines = ["# Schedule", `Now: ${formatNow(now)}.`];
-  if (!dayPlan && !weekPlan && !semesterPlan) {
+  if (noPlans) {
     lines.push(
       today.length + rest.length + beyond.length === 0
         ? "No study plan has been proposed yet, and the calendar is empty."
@@ -154,7 +155,10 @@ async function buildLayer2(userId: string): Promise<string> {
     }
     const done = todayTasks.length - open.length;
     if (todayTasks.length) lines.push(`${done} of ${todayTasks.length} done.`);
-  } else {
+  } else if (!noPlans) {
+    // Suppressed when nothing is planned at any horizon: the line above already
+    // said so once, and three restatements of one fact is what makes a block
+    // stamped into every request read like nagging.
     lines.push("No day plan for today yet.");
   }
   lines.push(...todayLines(today));
@@ -163,7 +167,7 @@ async function buildLayer2(userId: string): Promise<string> {
   if (weekPlan) {
     const read = readPlanItems(weekPlan);
     lines.push(`Week plan (${weekPlan.status})${read?.summary ? `: ${read.summary}` : "."}`);
-  } else {
+  } else if (!noPlans) {
     lines.push("No week plan yet.");
   }
   lines.push(...weekLines(rest));
@@ -186,20 +190,23 @@ function todayLines(today: ScheduleRow[]): string[] {
   const rest = today.filter((r) => !isMilestone(r));
   return [
     due.length ? `Due today: ${due.map(describe).join("; ")}.` : "Nothing due today.",
-    ...(rest.length ? [`Also today: ${rest.slice(0, 4).map(describe).join("; ")}.`] : []),
+    ...(rest.length ? [`On the calendar: ${rest.slice(0, 4).map(describe).join("; ")}.`] : []),
   ];
 }
 
 function weekLines(rest: ScheduleRow[]): string[] {
-  const milestones = rest.filter((r) => isMilestone(r) && !r.completedAt);
-  if (milestones.length === 0 && rest.length === 0) return ["Nothing else on the calendar this week."];
+  if (rest.length === 0) return ["Nothing on the calendar for the rest of this week."];
 
+  const milestones = rest.filter((r) => isMilestone(r) && !r.completedAt);
   const out = groupByDay(milestones).map(([day, rows]) =>
     `${formatWeekday(day)}: ${rows.map(describe).join("; ")}.`);
   if (milestones.length === 0) out.push("No deadlines or exams left this week.");
 
   const classes = rest.filter((r) => r.kind === "class").length;
-  const other = rest.length - classes - milestones.length;
+  // Counted off the kinds rather than as `rest.length - classes - milestones`:
+  // an assignment already checked off is not a commitment still owed, and the
+  // subtraction quietly files it as one.
+  const other = rest.filter((r) => !isMilestone(r) && r.kind !== "class").length;
   const also = [
     classes ? `${classes} ${classes === 1 ? "class" : "classes"}` : null,
     other > 0 ? `${other} other ${other === 1 ? "commitment" : "commitments"}` : null,
@@ -241,7 +248,7 @@ function describe(r: ScheduleRow): string {
   const title = withCourse(r.title, r.courseNumber);
   if (!r.when || r.allDay === 1) return title;
   const time = formatTime(r.when);
-  return isMilestone(r) && r.kind !== "exam" ? `${title} due ${time}` : `${title} ${time}`;
+  return isMilestone(r) && r.kind !== "exam" ? `${title} due ${time}` : `${title} at ${time}`;
 }
 
 /** Feed titles already carry the course number; chat-added ones ("Essay draft")
