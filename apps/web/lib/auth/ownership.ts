@@ -9,11 +9,12 @@
  * No route hand-rolls this check.
  */
 import { and, eq } from "drizzle-orm";
-import { artifacts, chats, courses, db, documents, flashcards, messages } from "@mola/db";
+import { artifacts, chats, courses, db, documents, flashcards, messages, scheduleItems } from "@mola/db";
 import { getSession, type Session } from "./session";
 
 /** Every resource with a shareable id (§9). */
-export type OwnedKind = "chat" | "course" | "artifact" | "document" | "message" | "flashcard";
+export type OwnedKind =
+  | "chat" | "course" | "artifact" | "document" | "message" | "flashcard" | "scheduleItem";
 
 const TABLES = {
   chat: chats,
@@ -22,6 +23,9 @@ const TABLES = {
   document: documents,
   message: messages,
   flashcard: flashcards,
+  // Agent J: a calendar event is loaded by id from the events PATCH route
+  // (homework check-off), so it needs the same one-predicate check as the rest.
+  scheduleItem: scheduleItems,
 } as const;
 
 export class AuthzError extends Error {
