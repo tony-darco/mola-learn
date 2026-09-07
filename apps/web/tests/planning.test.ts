@@ -7,7 +7,7 @@
  * Requires the local stack, same as tests/contracts.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   courses, db, planAmendments, plans, tasks, users,
 } from "@mola/db";
@@ -39,7 +39,16 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Cascades to tasks (set null) and plan_amendments (cascade) via schema FKs.
+  // plan_amendments cascades on plan delete, but tasks.planId is
+  // onDelete:"set null" (schema.ts) — a plan-sourced task survives its plan
+  // being deleted, orphaned with planId=null, which is precisely the "task
+  // materialisation" behaviour under test here. Deleting tasks by planId
+  // first, before the plan itself is gone, is what actually cleans them up;
+  // relying on a cascade that doesn't exist left "Read chapter 4" and
+  // "Problem set" sitting in the real Plan tab as if a student had them.
+  if (cleanupPlanIds.length > 0) {
+    await db.delete(tasks).where(inArray(tasks.planId, cleanupPlanIds));
+  }
   for (const id of cleanupPlanIds) {
     await db.delete(plans).where(eq(plans.id, id));
   }
