@@ -14,8 +14,31 @@ import { PermanentJobFailure, type JobRow } from "./types";
 const MAX_ATTEMPTS = 5;
 /** Exponential, capped — a Google outage should not spin. */
 const BACKOFF_MS = (attempts: number) => Math.min(2 ** attempts * 30_000, 30 * 60_000);
+/**
+ * Above the slowest legitimate handler (a week-plan generation on a 27B
+ * model) with real margin. A "running" row this old was not a slow LLM call —
+ * it was a worker process that died mid-job (a `next dev` restart is the
+ * common case, and is exactly how these were first found: reclaimed by hand
+ * after killing a dev server left several stuck this way). Below this age a
+ * running row is left alone; claimOne only ever takes pending rows, so a
+ * still-live job can never be double-claimed regardless of this value.
+ */
+const STALE_RUNNING_MS = 10 * 60_000;
+
+/** Puts an abandoned "running" row back in the queue rather than losing it
+ * to a dead process forever — enqueueJob now treats "running" as claimed,
+ * so without this a crash mid-generation would permanently block that job
+ * kind for that user. */
+async function reclaimStaleJobs(): Promise<void> {
+  await db.execute(sql`
+    UPDATE jobs SET status = 'pending', locked_at = null
+    WHERE status = 'running'
+      AND locked_at < now() - ${sql.raw(`interval '${STALE_RUNNING_MS} milliseconds'`)}
+  `);
+}
 
 async function claimOne(): Promise<JobRow | null> {
+  await reclaimStaleJobs();
   const rows = await db.execute<{
     id: string; user_id: string; kind: string; payload: Record<string, unknown>; attempts: number;
   }>(sql`
@@ -85,12 +108,20 @@ export async function runDueJobs(limit = 25): Promise<number> {
   return processed;
 }
 
-/** Enqueue, skipping if an identical pending job is already queued. */
+/** Enqueue, skipping if an identical job is already pending OR running. */
 export async function enqueueJob(
   userId: string, kind: CalendarJobKind, payload: Record<string, unknown> = {}, runAfter?: Date,
 ): Promise<void> {
+  // "running" has to count as already-queued, not just "pending" — an LLM
+  // generation legitimately takes tens of seconds, and ensurePlansForToday is
+  // called from every page load via the app-open after() hook (contract 8).
+  // Checking pending alone let a second navigation, arriving before the first
+  // job finished, enqueue a duplicate — which on the next navigation enqueued
+  // another. Caught live as seven simultaneous plan_week_propose jobs all
+  // stuck "running", each one slowing every other down by sharing the one
+  // Ollama instance.
   const existing = await db.select({ id: jobs.id }).from(jobs).where(and(
-    eq(jobs.userId, userId), eq(jobs.kind, kind), eq(jobs.status, "pending"),
+    eq(jobs.userId, userId), eq(jobs.kind, kind), inArray(jobs.status, ["pending", "running"]),
   )).limit(1);
   if (existing.length > 0) return;
 
