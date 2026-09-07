@@ -8,13 +8,21 @@
  * planning workstreams all plug into the same spine. Phase 1 agents fill in
  * the layers marked STUB — the shape does not change.
  */
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt } from "drizzle-orm";
 import type { HintRung } from "@mola/shared";
 import {
-  chats, compactionBoundaries, courses, db, documents, messages, users,
+  chats, compactionBoundaries, courses, db, documents, messages, tasks, users,
 } from "@mola/db";
 import type { Message } from "../llm/types";
 import type { ToolRegistry } from "../agent/registry";
+// Layer 2 renders schedule rows the same way `read_schedule` reports them, so
+// both come from one place (lib/agent/tools/calendar.ts) rather than two
+// formatters that have to be kept in agreement by hand.
+import {
+  addDays, formatDayShort, formatNow, formatTime, formatWeekday, loadCurrentPlan,
+  loadScheduleWindow, localDateKey, readPlanItems, startOfLocalDay, startOfLocalWeek,
+  type ScheduleRow,
+} from "../agent/tools/calendar";
 import { buildLayer4 } from "./hint-ladder";
 
 export type AssembleInput = {
@@ -88,18 +96,168 @@ async function buildLayer1(userId: string, courseId: string | null): Promise<str
 
 /**
  * LAYER 2 — calendar, three horizons: today / this week / semester (§5).
- * STUB: Agent J fills these from schedule_items and the planning loop.
+ *
+ * This block is stamped into EVERY request, so it summarises rather than
+ * dumps. What earns a line is what would change the tutor's answer: what the
+ * student committed to today, what is due or sat before Sunday, and the
+ * milestones past it. Lectures and standing commitments collapse into a count
+ * — that Thursday is busy matters, the room number of each lecture does not.
+ *
+ * Nothing here is inferred. A horizon with no plan says it has no plan, and
+ * every date printed is a date that exists in `schedule_items`.
+ *
+ * Horizon boundaries: today, the rest of the calendar week, then everything
+ * after it. §5's semester horizon is "two weeks out and beyond", but cutting
+ * there would drop days 8–14 — in the fixture, exactly the week holding two
+ * colliding deadlines — so Semester picks up where This week ends and is
+ * filtered to milestones instead.
  */
-async function buildLayer2(_userId: string): Promise<string> {
+async function buildLayer2(userId: string): Promise<string> {
+  const now = new Date();
+  const todayStart = startOfLocalDay(now);
+  const tomorrow = addDays(todayStart, 1);
+  const weekEnd = addDays(startOfLocalWeek(now), 7);
+  const semesterEnd = addDays(todayStart, 120);
+
+  const [today, rest, beyond, dayPlan, weekPlan, semesterPlan, todayTasks] = await Promise.all([
+    loadScheduleWindow(userId, todayStart, tomorrow),
+    loadScheduleWindow(userId, tomorrow, weekEnd),
+    loadScheduleWindow(userId, weekEnd, semesterEnd),
+    loadCurrentPlan(userId, "day", todayStart),
+    loadCurrentPlan(userId, "week", todayStart),
+    loadCurrentPlan(userId, "semester", todayStart),
+    db.select().from(tasks).where(and(
+      eq(tasks.userId, userId),
+      gte(tasks.scheduledFor, todayStart),
+      lt(tasks.scheduledFor, tomorrow),
+    )).limit(30),
+  ]);
+
+  const lines = ["# Schedule", `Now: ${formatNow(now)}.`];
+  if (!dayPlan && !weekPlan && !semesterPlan) {
+    lines.push(
+      today.length + rest.length + beyond.length === 0
+        ? "No study plan has been proposed yet, and the calendar is empty."
+        : "No study plan has been proposed yet — what follows is the calendar only.",
+    );
+  }
+
+  lines.push("", "## Today");
+  if (dayPlan) {
+    const read = readPlanItems(dayPlan);
+    lines.push(read?.summary
+      ? `Day plan (${dayPlan.status}): ${read.summary}`
+      : `Day plan: ${dayPlan.status}.`);
+    const open = todayTasks.filter((t) => t.status === "todo");
+    if (open.length) {
+      lines.push(`To do: ${open.slice(0, 6).map(taskLine).join("; ")}.`);
+    }
+    const done = todayTasks.length - open.length;
+    if (todayTasks.length) lines.push(`${done} of ${todayTasks.length} done.`);
+  } else {
+    lines.push("No day plan for today yet.");
+  }
+  lines.push(...todayLines(today));
+
+  lines.push("", `## This week (through ${formatWeekday(addDays(weekEnd, -1))} ${monthDay(addDays(weekEnd, -1))})`);
+  if (weekPlan) {
+    const read = readPlanItems(weekPlan);
+    lines.push(`Week plan (${weekPlan.status})${read?.summary ? `: ${read.summary}` : "."}`);
+  } else {
+    lines.push("No week plan yet.");
+  }
+  lines.push(...weekLines(rest));
+
+  lines.push("", "## Semester");
+  if (semesterPlan) lines.push(`Semester plan: ${semesterPlan.status}.`);
+  lines.push(...semesterLines(beyond, now));
+
+  return lines.join("\n");
+}
+
+/** A schedule row is a milestone if missing it costs the student marks. */
+function isMilestone(r: ScheduleRow): boolean {
+  return r.kind === "exam" || r.kind === "assignment" || r.kind === "deadline";
+}
+
+function todayLines(today: ScheduleRow[]): string[] {
+  if (today.length === 0) return ["Nothing on the calendar today."];
+  const due = today.filter((r) => isMilestone(r) && !r.completedAt);
+  const rest = today.filter((r) => !isMilestone(r));
   return [
-    "# Schedule",
-    "## Today",
-    "(no plan yet)",
-    "## This week",
-    "(no plan yet)",
-    "## Semester",
-    "(no plan yet)",
-  ].join("\n");
+    due.length ? `Due today: ${due.map(describe).join("; ")}.` : "Nothing due today.",
+    ...(rest.length ? [`Also today: ${rest.slice(0, 4).map(describe).join("; ")}.`] : []),
+  ];
+}
+
+function weekLines(rest: ScheduleRow[]): string[] {
+  const milestones = rest.filter((r) => isMilestone(r) && !r.completedAt);
+  if (milestones.length === 0 && rest.length === 0) return ["Nothing else on the calendar this week."];
+
+  const out = groupByDay(milestones).map(([day, rows]) =>
+    `${formatWeekday(day)}: ${rows.map(describe).join("; ")}.`);
+  if (milestones.length === 0) out.push("No deadlines or exams left this week.");
+
+  const classes = rest.filter((r) => r.kind === "class").length;
+  const other = rest.length - classes - milestones.length;
+  const also = [
+    classes ? `${classes} ${classes === 1 ? "class" : "classes"}` : null,
+    other > 0 ? `${other} other ${other === 1 ? "commitment" : "commitments"}` : null,
+  ].filter(Boolean);
+  if (also.length) out.push(`Plus ${also.join(" and ")}.`);
+  return out;
+}
+
+function semesterLines(beyond: ScheduleRow[], now: Date): string[] {
+  const milestones = beyond.filter((r) => isMilestone(r) && !r.completedAt);
+  if (milestones.length === 0) return ["Nothing scheduled beyond this week."];
+
+  const days = groupByDay(milestones);
+  const shown = days.slice(0, 6).map(([day, rows]) =>
+    `${formatDayShort(day)}${day.getFullYear() === now.getFullYear() ? "" : ` ${day.getFullYear()}`}`
+    + `: ${rows.map(describe).join("; ")}.`);
+  const hidden = days.length - 6;
+  if (hidden > 0) shown.push(`Plus ${hidden} more dated ${hidden === 1 ? "item" : "items"} further out.`);
+  return shown;
+}
+
+/** Rows bucketed by local day, in date order — one line per day, so two
+ *  deadlines landing together read as the collision they are. */
+function groupByDay(rows: ScheduleRow[]): [Date, ScheduleRow[]][] {
+  const buckets = new Map<string, { day: Date; rows: ScheduleRow[] }>();
+  for (const r of rows) {
+    if (!r.when) continue;
+    const key = localDateKey(r.when);
+    const bucket = buckets.get(key) ?? { day: startOfLocalDay(r.when), rows: [] };
+    bucket.rows.push(r);
+    buckets.set(key, bucket);
+  }
+  return [...buckets.values()]
+    .sort((a, b) => a.day.getTime() - b.day.getTime())
+    .map((b) => [b.day, b.rows] as [Date, ScheduleRow[]]);
+}
+
+function describe(r: ScheduleRow): string {
+  const title = withCourse(r.title, r.courseNumber);
+  if (!r.when || r.allDay === 1) return title;
+  const time = formatTime(r.when);
+  return isMilestone(r) && r.kind !== "exam" ? `${title} due ${time}` : `${title} ${time}`;
+}
+
+/** Feed titles already carry the course number; chat-added ones ("Essay draft")
+ *  do not, and the tutor needs to know which course it belongs to. */
+function withCourse(title: string, courseNumber: string | null): string {
+  const trimmed = title.length > 70 ? `${title.slice(0, 69)}…` : title;
+  if (!courseNumber || trimmed.toLowerCase().includes(courseNumber.toLowerCase())) return trimmed;
+  return `${courseNumber} ${trimmed}`;
+}
+
+function taskLine(t: typeof tasks.$inferSelect): string {
+  return t.estimatedMinutes ? `${t.title} (${t.estimatedMinutes}m)` : t.title;
+}
+
+function monthDay(d: Date): string {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(d);
 }
 
 /**
