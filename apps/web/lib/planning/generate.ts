@@ -68,6 +68,9 @@ calendar and return a study plan as one JSON object.
 Rules you do not break:
 - Never place study time on top of a block tagged [BUSY]. A lecture, an exam, a \
 work shift and a standing appointment are time that is already spent.
+- Your own blocks may not overlap each other either. A block that starts at \
+10:00 and runs 120 minutes ends at 12:00, so the next one starts at 12:00 or \
+later. Add up the minutes before you choose the next start time.
 - Work backwards from the dates you were given. Preparation goes BEFORE a \
 deadline or an exam, never after it.
 - Never invent a course, a date, a deadline or an exam. Use only what is listed.
@@ -246,7 +249,12 @@ ${ITEM_SHAPE}
   planned still appears, with an empty "items" array.
 - "startAt" carries the offset ${offset}, e.g. "${keys[1]}T19:00:00${offset}".
 - "risks" is specific. "Might fall behind" is not a risk; "Quiz 3 and Project 1
-  both land Thursday and Wednesday evening is the only free block before them" is.`;
+  both land Thursday and Wednesday evening is the only free block before them" is.
+- Read the section on what comes AFTER this week as work, not as background.
+  Anything due or sat within about a week of ${keys[6]} needs its first block
+  inside this week — the lighter days and the weekend exist for exactly that.
+  And where two deadlines or exams land on the same day out there, say so in
+  "risks" now, while there is still room to spread the work.`;
 }
 
 function dayShape(date: string, day: Date): string {

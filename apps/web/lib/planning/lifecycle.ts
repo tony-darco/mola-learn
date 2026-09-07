@@ -14,7 +14,7 @@
  */
 import { and, asc, desc, eq, gte, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
-  courses, db, planAmendments, plans, scheduleItems, tasks,
+  courses, db, planAmendments, plans, scheduleItems, tasks, users,
 } from "@mola/db";
 import type { PlanPayload, TaskView } from "@mola/shared";
 import { planPayloadSchema } from "@mola/shared";
@@ -97,6 +97,47 @@ export async function getCurrentPlan(
   return row ? toPlanRecord(row) : null;
 }
 
+/**
+ * The plan the student actually agreed to, which is a different question from
+ * "the newest one". A pending proposal is what they should be *looking* at, so
+ * `getCurrentPlanRow` returns it; but nothing may be BUILT on a proposal the
+ * student has not answered. Decomposition reads this instead — otherwise the
+ * semester changes the review only proposed would reach this week's plan
+ * without anyone ever having accepted them, which is precisely the leak §5
+ * forbids.
+ */
+export async function getApprovedPlanRow(
+  userId: string,
+  horizon: PlanHorizon,
+  date?: string | null,
+): Promise<PlanRow | null> {
+  const conditions = [
+    eq(plans.userId, userId),
+    eq(plans.horizon, horizon),
+    or(eq(plans.status, "approved"), eq(plans.status, "amended"))!,
+  ];
+  if (horizon !== "semester") {
+    conditions.push(eq(plans.periodStart, periodOf(horizon, date).start));
+  }
+
+  const [row] = await db.select().from(plans)
+    .where(and(...conditions))
+    .orderBy(desc(plans.approvedAt), desc(plans.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * A `Session` for a background job, which has no cookie to build one from.
+ * Null when the user is gone — the caller decides what that means, but no
+ * planning function will run without one, which is the point of contract 2.
+ */
+export async function sessionForUser(userId: string): Promise<Session | null> {
+  const [row] = await db.select({ id: users.id, email: users.email })
+    .from(users).where(eq(users.id, userId)).limit(1);
+  return row?.email ? { userId: row.id, email: row.email } : null;
+}
+
 export function periodOf(horizon: PlanHorizon, date?: string | null): { start: Date; end: Date } {
   const anchor = date ? parseDateKey(date) : startOfDay(new Date());
   if (horizon === "day") return { start: startOfDay(anchor), end: endOfDay(anchor) };
@@ -145,9 +186,7 @@ export async function proposePlan(args: ProposeArgs): Promise<PlanRecord> {
   const existing = await getCurrentPlanRow(userId, horizon, args.date);
 
   // An unanswered proposal is edited in place: it keeps its id, so a link J4
-  // already handed the student does not rot on regeneration. Anything the
-  // student HAS answered — approved or amended — is superseded instead, so
-  // the decision they made stays on the record next to what replaced it.
+  // already handed the student does not rot on regeneration.
   if (existing && existing.status === "proposed") {
     const [row] = await db.update(plans).set({
       payload, periodEnd: period.end, parentPlanId: parent?.id ?? null, updatedAt: new Date(),
@@ -155,6 +194,11 @@ export async function proposePlan(args: ProposeArgs): Promise<PlanRecord> {
     return toPlanRecord(row!);
   }
 
+  // A plan the student HAS answered is left standing. Proposing a replacement
+  // is not the same act as adopting one: until they accept, the plan they
+  // agreed to is still the plan in force, still the parent of everything
+  // decomposed from it, and still what `getApprovedPlanRow` hands back.
+  // `acceptPlan` is the only thing that supersedes it.
   const [row] = await db.insert(plans).values({
     userId,
     horizon,
@@ -164,12 +208,6 @@ export async function proposePlan(args: ProposeArgs): Promise<PlanRecord> {
     payload,
     parentPlanId: parent?.id ?? null,
   }).returning();
-
-  if (existing) {
-    await db.update(plans)
-      .set({ status: "superseded", supersededByPlanId: row!.id, updatedAt: new Date() })
-      .where(eq(plans.id, existing.id));
-  }
 
   return toPlanRecord(row!);
 }
@@ -195,15 +233,19 @@ async function generateFor(
   );
 }
 
-/** A day's parent is its week; a week's is the semester (§5's decomposition). */
+/**
+ * A day's parent is its week; a week's is the semester (§5's decomposition).
+ * Approved only — a plan is decomposed from what the student agreed to, never
+ * from a proposal still waiting on them.
+ */
 async function parentPlanRow(
   userId: string,
   horizon: PlanHorizon,
   date?: string | null,
 ): Promise<PlanRow | null> {
   if (horizon === "semester") return null;
-  if (horizon === "week") return getCurrentPlanRow(userId, "semester");
-  return getCurrentPlanRow(userId, "week", date);
+  if (horizon === "week") return getApprovedPlanRow(userId, "semester");
+  return getApprovedPlanRow(userId, "week", date);
 }
 
 // ── Accepting ────────────────────────────────────────────────────────────────
@@ -384,7 +426,10 @@ export async function createTask(
 ): Promise<TaskView> {
   const title = body.title?.trim();
   if (!title) throw new TaskInputError("title is required");
+  // Both foreign keys are caller-supplied ids, so both get the §9 check. A task
+  // hung off someone else's deadline would leak that the deadline exists.
   if (body.courseId) await requireOwned("course", body.courseId, session);
+  if (body.scheduleItemId) await requireOwned("scheduleItem", body.scheduleItemId, session);
 
   const [row] = await db.insert(tasks).values({
     userId: session.userId,

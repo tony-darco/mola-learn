@@ -32,6 +32,15 @@ export function isCommitted(row: ScheduleRow): boolean {
 /** `coalesce(start_at, due_at)` — the render rule from contract A, as a sort/filter key. */
 const whenExpr = sql`coalesce(${scheduleItems.startAt}, ${scheduleItems.dueAt})`;
 
+/**
+ * A bound timestamp for a raw `sql` fragment. Interpolating a `Date` straight
+ * into one throws at bind time: outside a column comparison drizzle has no
+ * column mapper to reach for, so postgres.js is handed a JS Date it cannot
+ * serialise. The ISO string plus an explicit cast is what the mapper would
+ * have produced anyway.
+ */
+const ts = (at: Date) => sql`${at.toISOString()}::timestamptz`;
+
 export function whenOf(row: ScheduleRow): Date | null {
   return row.startAt ?? row.dueAt ?? null;
 }
@@ -60,8 +69,8 @@ export async function gatherInputs(
     db.select().from(courses).where(eq(courses.userId, userId)).orderBy(asc(courses.number)),
     db.select().from(scheduleItems).where(and(
       eq(scheduleItems.userId, userId),
-      sql`${whenExpr} >= ${from}`,
-      sql`${whenExpr} <= ${to}`,
+      sql`${whenExpr} >= ${ts(from)}`,
+      sql`${whenExpr} <= ${ts(to)}`,
     )).orderBy(sql`${whenExpr} asc`),
     // A fortnight back is enough to say "you already did PS3" without turning
     // the brief into a transcript of the semester.
