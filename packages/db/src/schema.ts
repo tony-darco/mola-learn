@@ -99,6 +99,14 @@ export const chats = pgTable("chats", {
 
 export const roleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool"]);
 
+/**
+ * Turn lifecycle, so a reload can distinguish "still generating" / "failed"
+ * from "done" instead of replaying a blank or stale row (resumable-chat-state
+ * fix). Defaults to "done" so every pre-existing row — all of which already
+ * finished before this column existed — reads correctly with no backfill.
+ */
+export const messageStatusEnum = pgEnum("message_status", ["streaming", "done", "error"]);
+
 export const messages = pgTable("messages", {
   id: id(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -108,6 +116,9 @@ export const messages = pgTable("messages", {
   toolCalls: jsonb("tool_calls"),
   /** Rung served on this turn, if any. Lets the ladder resume across reloads (§3). */
   hintRung: text("hint_rung"),
+  status: messageStatusEnum("status").notNull().default("done"),
+  /** Set only when status is "error" — the message shown in the failure banner. */
+  errorMessage: text("error_message"),
   createdAt: createdAt(),
 }, (t) => [
   index("messages_chat_idx").on(t.chatId, t.createdAt),

@@ -16,7 +16,8 @@ import {
   artifactRecordSchema, encodeSSE, isArtifactToolResult, type StreamEvent,
 } from "@mola/shared";
 import {
-  artifacts, cardSrsState, chats, compactionBoundaries, courses, db, flashcards, messages, users,
+  artifacts, cardSrsState, chats, compactionBoundaries, courses, db, flashcards, messages,
+  notifyMessageDone, users,
 } from "@mola/db";
 import { authzResponse, requireOwned, requireSession } from "@/lib/auth/ownership";
 import { getPublicApiKey } from "@/lib/auth/api-keys";
@@ -29,6 +30,7 @@ import { getChatProvider, CHAT_MODELS } from "@/lib/llm";
 import { generateChatTitle } from "@/lib/llm/title";
 import { logChatTurn } from "@/lib/debug/chat-log";
 import { beginTurn, finalizeTurn } from "@/lib/debug/agent-log";
+import { registerGeneration, unregisterGeneration } from "@/lib/chat/generation-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,6 +97,9 @@ export async function POST(
       role: "assistant",
       content: "",
       hintRung: rung,
+      // Generation starts synchronously below, in the same request — there is
+      // no separate "queued" phase, so this row goes straight to "streaming".
+      status: "streaming",
     }).returning();
 
     const stream = new ReadableStream<Uint8Array>({
@@ -105,14 +110,32 @@ export async function POST(
         // including inside a sub-agent spawned via the frozen subagent.ts.
         const turn = beginTurn({ chatId, userId: session.userId, userEmail: session.email });
         const enc = new TextEncoder();
-        const send = (ev: StreamEvent) => controller.enqueue(enc.encode(encodeSSE(ev)));
+        // Swallows a dead-controller error (client disconnected — tab closed,
+        // navigated away, network dropped) rather than letting it throw out of
+        // the try block below and get mistaken for a real generation failure:
+        // generation is deliberately decoupled from the client connection (see
+        // genController below), so nobody being able to receive an event must
+        // never itself end the turn.
+        const send = (ev: StreamEvent) => {
+          try {
+            controller.enqueue(enc.encode(encodeSSE(ev)));
+          } catch {
+            // No one is listening; the turn still runs to completion.
+          }
+        };
         let text = "";
         let errorMessage: string | null = null;
         const activity: ActivityEntry[] = [];
         const toolCallMeta = new Map<string, { name: string; label: string }>();
         const think = chat.thinkingEnabled === 1;
+        // Deliberately NOT req.signal: that fires on any loss of the client
+        // connection — a same-tab navigation away, a closed tab, a dropped
+        // network link — none of which should abort generation (see
+        // generation-registry.ts). Only an explicit call to the `stop` route
+        // aborts this controller.
+        const genController = registerGeneration(assistantRow!.id);
         const ctx: ToolContext = {
-          session, chatId, courseId: chat.courseId, signal: req.signal,
+          session, chatId, courseId: chat.courseId, signal: genController.signal,
           model: chat.model, think,
         };
 
@@ -156,9 +179,19 @@ export async function POST(
             send(ev);
           }
 
+          // Persisted (and NOTIFYd) here, BEFORE the optional post-processing
+          // below, so a title-generation or compaction failure afterward can
+          // never retroactively flip an already-succeeded turn's durable
+          // status back to "error" — see the inner try/catch below.
           await db.update(messages)
-            .set({ content: text, toolCalls: activity })
+            .set({
+              content: text,
+              toolCalls: activity,
+              status: loopErrored ? "error" : "done",
+              errorMessage: loopErrored ? errorMessage : null,
+            })
             .where(eq(messages.id, assistantRow!.id));
+          await notifyMessageDone(assistantRow!.id);
 
           // An "error" event already ended the turn client-side (case "error"
           // in ChatMain sets streaming: false) — a trailing success message_end
@@ -167,25 +200,32 @@ export async function POST(
           if (!loopErrored) {
             send({ type: "message_end", messageId: assistantRow!.id, stopReason: "end_turn" });
 
-            // Auto-titles once, right after the first exchange — "New chat"
-            // is the creation default and nothing else ever sets it back to
-            // that literal string, so it doubles as "not yet titled" without
-            // needing a new schema column. Always the small fast model
-            // (never whatever the student picked for the chat itself) and
-            // awaited here — by the time the client's post-stream
-            // refreshSidebar() call fires, the new title is already in the
-            // DB for it to pick up, not applied later in the background.
-            if (chat.title === "New chat" && text.trim()) {
-              const generatedTitle = await generateChatTitle(userText, text);
-              if (generatedTitle) {
-                await db.update(chats).set({ title: generatedTitle }).where(eq(chats.id, chatId));
+            try {
+              // Auto-titles once, right after the first exchange — "New chat"
+              // is the creation default and nothing else ever sets it back to
+              // that literal string, so it doubles as "not yet titled" without
+              // needing a new schema column. Always the small fast model
+              // (never whatever the student picked for the chat itself) and
+              // awaited here — by the time the client's post-stream
+              // refreshSidebar() call fires, the new title is already in the
+              // DB for it to pick up, not applied later in the background.
+              if (chat.title === "New chat" && text.trim()) {
+                const generatedTitle = await generateChatTitle(userText, text);
+                if (generatedTitle) {
+                  await db.update(chats).set({ title: generatedTitle }).where(eq(chats.id, chatId));
+                }
               }
-            }
 
-            const compacted = await maybeCompact(
-              chatId, session.userId, makeLlmSummarizer(session.userId, { model: chat.model, think }),
-            );
-            if (compacted) send({ type: "compacted", throughMessageId: compacted.throughMessageId });
+              const compacted = await maybeCompact(
+                chatId, session.userId, makeLlmSummarizer(session.userId, { model: chat.model, think }),
+              );
+              if (compacted) send({ type: "compacted", throughMessageId: compacted.throughMessageId });
+            } catch (postErr) {
+              // Best-effort extras — the turn itself already succeeded and is
+              // already durably persisted as "done" above; a failure here
+              // must not mask that or get reported as a turn failure.
+              console.error(`chat ${chatId} post-processing (title/compaction) failed:`, postErr);
+            }
           }
         } catch (err) {
           console.error(`chat ${chatId} stream failed mid-turn:`, err);
@@ -194,22 +234,28 @@ export async function POST(
           // already have rendered most of the answer via SSE deltas before the
           // throw, and a reload should show that partial progress rather than a
           // blank turn. Best-effort — a failure here must not mask the real error.
+          errorMessage = err instanceof Error ? err.message : String(err);
           try {
             await db.update(messages)
-              .set({ content: text, toolCalls: activity })
+              .set({ content: text, toolCalls: activity, status: "error", errorMessage })
               .where(eq(messages.id, assistantRow!.id));
+            await notifyMessageDone(assistantRow!.id);
           } catch {
             // Nothing more we can do; the error event below still reaches the client.
           }
-          errorMessage = err instanceof Error ? err.message : String(err);
           send({ type: "error", message: errorMessage });
         } finally {
+          unregisterGeneration(assistantRow!.id);
           void logChatTurn({
             direction: "output", chatId, userId: session.userId, userEmail: session.email,
             model: chat.model, text, error: errorMessage,
           });
           void finalizeTurn(turn.turnId, chatId, session.userId, session.email);
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // Already closed by a client disconnect — nothing to do.
+          }
         }
       },
     });

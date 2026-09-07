@@ -17,12 +17,15 @@ import { parseSSEChunk } from "./sse";
 import { useConfirm, useRefreshSidebar } from "./shell-context";
 import type { ActivityEntry, CompactionBoundary, Turn } from "./types";
 
+type MessageStatus = "streaming" | "done" | "error";
+
 type HistoryResponse = {
   chat: { id: string; title: string; courseId: string | null; model: string; thinkingEnabled: number };
   course: { id: string; name: string; number: string | null } | null;
   messages: {
     id: string; role: string; content: string;
     hintRung: HintRung | null; toolCalls: ActivityEntry[] | null; createdAt: string;
+    status: MessageStatus; errorMessage: string | null;
   }[];
   artifacts: ArtifactRecord[];
   compactionBoundary: CompactionBoundary | null;
@@ -57,8 +60,12 @@ function turnsFromHistory(data: HistoryResponse): Turn[] {
     activity: m.toolCalls ?? [],
     artifacts: artifactsByMessageId.get(m.id) ?? [],
     hintRung: m.hintRung,
-    error: null,
-    streaming: false,
+    // A reload replays whatever's durably persisted — including a turn that
+    // was still generating or that failed before this component ever existed
+    // (resumable-chat-state fix). A user row's status is always "done" (only
+    // assistant rows ever go through "streaming"/"error").
+    error: m.status === "error" ? (m.errorMessage ?? "Something went wrong.") : null,
+    streaming: m.status === "streaming",
     createdAt: m.createdAt,
   }));
 }
@@ -110,6 +117,72 @@ export function ChatMain({ chatId }: { chatId: string }) {
   const pendingDraftRef = useRef<string | null>(null);
   const [mathCategory, setMathCategory] = useState<string | null>(null);
   const mathInsertPoint = useRef({ start: 0, end: 0 });
+  // Message ids this component instance is already receiving live updates
+  // for — either send()'s own POST response is still being read, or a
+  // reconnect stream is already attached. Guards attachReconnect() against
+  // opening a second, redundant connection for a turn send() is already
+  // driving (ChatMain is never remounted between chats — see the loading
+  // useEffect below — so send()'s reader loop for chat A can still be alive
+  // while the user is looking at chat B and back at A again).
+  const liveTurnIdsRef = useRef<Set<string>>(new Set());
+  // The assistant message id `send()` is currently generating, if any — read
+  // by stop() to tell the server which generation to cancel (see the `stop`
+  // route). Explicit-cancel-only: nothing here ever aborts on disconnect.
+  const currentAssistantIdRef = useRef<string | null>(null);
+
+  /**
+   * Reattaches to a turn that's still "streaming" per the DB (started by this
+   * tab before a navigation/reload, another tab, or a prior server process
+   * that's since restarted). One GET to a held-open SSE endpoint — no
+   * interval, no repeated fetch; the server pushes the terminal event the
+   * moment Postgres NOTIFYs it (see the `stream` route and packages/db's
+   * notify.ts). The loading ellipsis is already showing because hydrate()
+   * set streaming: true from the message's persisted status.
+   */
+  async function attachReconnect(messageId: string) {
+    if (liveTurnIdsRef.current.has(messageId)) return;
+    liveTurnIdsRef.current.add(messageId);
+
+    try {
+      const res = await fetch(`/api/chat/${chatId}/messages/${messageId}/stream`);
+      if (!res.ok || !res.body) throw new Error(`reconnect failed (${res.status})`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const { events, rest } = parseSSEChunk(buffer);
+        buffer = rest;
+
+        for (const ev of events) {
+          switch (ev.type) {
+            case "text_delta":
+              patchTurn(messageId, (t) => ({ ...t, text: t.text + ev.text }));
+              break;
+            case "message_end":
+              patchTurn(messageId, (t) => ({ ...t, streaming: false }));
+              break;
+            case "error":
+              patchTurn(messageId, (t) => ({ ...t, error: ev.message, streaming: false }));
+              break;
+            default:
+              break;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`reconnect to message ${messageId} failed:`, err);
+      // Leaves the turn showing "streaming" rather than guessing at a result
+      // that was never actually confirmed — the next reload/navigation will
+      // reattach and try again, same as any other dropped connection.
+    } finally {
+      liveTurnIdsRef.current.delete(messageId);
+    }
+  }
 
   function hydrate(data: HistoryResponse) {
     const hydrated = turnsFromHistory(data);
@@ -122,6 +195,10 @@ export function ChatMain({ chatId }: { chatId: string }) {
     const r = lastRung(hydrated);
     setRung(r);
     setCanEscalate(computeCanEscalate(r));
+
+    for (const t of hydrated) {
+      if (t.role === "assistant" && t.streaming) void attachReconnect(t.id);
+    }
   }
 
   async function changeModel(next: { model: string; thinkingEnabled: boolean }) {
@@ -229,8 +306,12 @@ export function ChatMain({ chatId }: { chatId: string }) {
     const res = await fetch(`/api/chat/${chatId}`);
     if (!res.ok) return;
     const data = (await res.json()) as HistoryResponse;
-    setTurns(turnsFromHistory(data));
+    const refetched = turnsFromHistory(data);
+    setTurns(refetched);
     setBoundary(data.compactionBoundary);
+    for (const t of refetched) {
+      if (t.role === "assistant" && t.streaming) void attachReconnect(t.id);
+    }
   }
 
   async function send(pullHint: boolean, overrideText?: string) {
@@ -291,6 +372,8 @@ export function ChatMain({ chatId }: { chatId: string }) {
               const newId = ev.messageId;
               const oldId = assistantTurnId;
               assistantTurnId = newId;
+              currentAssistantIdRef.current = newId;
+              liveTurnIdsRef.current.add(newId);
               setTurns((ts) => ts.map((t) => (t.id === oldId ? { ...t, id: newId } : t)));
               break;
             }
@@ -368,12 +451,28 @@ export function ChatMain({ chatId }: { chatId: string }) {
       }
     } finally {
       abortControllerRef.current = null;
+      liveTurnIdsRef.current.delete(assistantTurnId);
+      currentAssistantIdRef.current = null;
       setBusy(false);
     }
   }
 
+  /**
+   * Stop generating. Aborts THIS tab's own reader loop immediately (same as
+   * before — no error banner, the turn just ends where it stands), but that
+   * alone no longer reaches the server: generation is deliberately decoupled
+   * from the client connection (see the chat route's genController), so a
+   * disconnect is never mistaken for an intentional stop. The explicit call
+   * to the `stop` route is what actually cancels generation server-side.
+   */
   function stop() {
     abortControllerRef.current?.abort();
+    const messageId = currentAssistantIdRef.current;
+    if (messageId) {
+      fetch(`/api/chat/${chatId}/messages/${messageId}/stop`, { method: "POST" }).catch(
+        (err: unknown) => console.error(`stop request failed for message ${messageId}:`, err),
+      );
+    }
   }
 
   /**

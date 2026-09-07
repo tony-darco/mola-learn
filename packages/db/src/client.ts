@@ -19,3 +19,7 @@ if (process.env.NODE_ENV !== "production") globalForDb.__molaPgClient = client;
 
 export const db = drizzle(client, { schema: { ...schema, ...authSchema } });
 export type DB = typeof db;
+
+// The raw postgres.js client, exported for LISTEN/NOTIFY (see notify.ts) —
+// drizzle's `db` wrapper has no pub/sub API of its own.
+export { client as pgClient };
