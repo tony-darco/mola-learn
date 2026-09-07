@@ -65,6 +65,24 @@ helper. Merge into `feat/agent-j-calendar`, verify, then one merge into `dev`.
 - [ ] **Consider e2e specs** for the two new surfaces, matching
       `apps/web/e2e/`'s existing style. Nobody was assigned these.
 
+## Codebase trap found during J2 verification — check every agent's UI for it
+
+**Do not use Tailwind's `dark:` variant in this codebase.** It keys off the OS
+`prefers-color-scheme`, but the default "Mola" theme is light-only and ignores
+that entirely (only the "inspired" theme responds to it — see `globals.css`).
+So on any machine set to dark mode, `dark:` utilities win while the page is
+still rendering the light palette. In J2's calendar this made every event chip
+nearly invisible.
+
+The fix pattern: let colour carry the CATEGORY (background wash, dot, border)
+and let the theme's own `text-fg` / `text-fg-muted` tokens carry the contrast.
+
+My own J-CONTRACTS.md told the agents "light and dark must both work", which
+pointed them straight at this. Grep each branch for `dark:` at integration and
+fix any text-colour pair the same way. Pre-existing `text-red-600
+dark:text-red-400` error text is left alone — it matches what the rest of the
+codebase already does.
+
 ## Verification discipline
 
 Do not trust an agent's "green" report. For each branch, independently run
