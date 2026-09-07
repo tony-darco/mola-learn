@@ -8,7 +8,7 @@ import { useRefreshSidebar } from "./shell-context";
 type PublicApiKey = { provider: string; lastFour: string };
 type Term = { id: string; label: string };
 type Course = { id: string; name: string; number: string | null; professor: string | null; termId: string | null };
-type Profile = { name: string; university: string | null; year: string | null };
+type Profile = { name: string; university: string | null; year: string | null; defaultQuizQuestionCount: number };
 
 const PROVIDER_LABEL: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic" };
 const YEAR_LABEL: Record<string, string> = {
@@ -33,6 +33,12 @@ const FONT_SCALES = [
 ] as const;
 const FONT_SCALE_STORAGE_KEY = "mola-font-scale";
 
+const THEMES = [
+  { value: "mola", label: "Mola" },
+  { value: "inspired", label: "Inspired" },
+] as const;
+const THEME_STORAGE_KEY = "mola-theme";
+
 export type SettingsSection = (typeof SECTIONS)[number]["key"];
 
 export function SettingsModal({
@@ -44,6 +50,7 @@ export function SettingsModal({
 
   // ── General ─────────────────────────────────────────────────────────────
   const [fontScale, setFontScale] = useState("87.5");
+  const [theme, setTheme] = useState("mola");
 
   // ── API keys ────────────────────────────────────────────────────────────
   const [apiKey, setApiKey] = useState<PublicApiKey | null>(null);
@@ -69,6 +76,9 @@ export function SettingsModal({
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [newTermLabel, setNewTermLabel] = useState("");
+  const [quizCount, setQuizCount] = useState("10");
+  const [quizCountBusy, setQuizCountBusy] = useState(false);
+  const [quizCountSaved, setQuizCountSaved] = useState(false);
 
   useEffect(() => {
     if (open) setSection(initialSection);
@@ -80,6 +90,7 @@ export function SettingsModal({
   useEffect(() => {
     if (!open) return;
     setFontScale(localStorage.getItem(FONT_SCALE_STORAGE_KEY) ?? "87.5");
+    setTheme(localStorage.getItem(THEME_STORAGE_KEY) ?? "mola");
   }, [open]);
 
   useEffect(() => {
@@ -131,6 +142,7 @@ export function SettingsModal({
         if (data) {
           setProfile(data.user);
           setProfileTerms(data.terms);
+          setQuizCount(String(data.user.defaultQuizQuestionCount ?? 10));
         }
       })
       .finally(() => setLoadingProfile(false));
@@ -142,6 +154,12 @@ export function SettingsModal({
     document.documentElement.style.fontSize = `${value}%`;
     localStorage.setItem(FONT_SCALE_STORAGE_KEY, value);
     setFontScale(value);
+  }
+
+  function handleSetTheme(value: string) {
+    document.documentElement.setAttribute("data-theme", value);
+    localStorage.setItem(THEME_STORAGE_KEY, value);
+    setTheme(value);
   }
 
   async function handleSaveKey() {
@@ -251,6 +269,26 @@ export function SettingsModal({
     }
   }
 
+  async function handleSaveQuizCount() {
+    const parsed = Math.min(Math.max(Number(quizCount) || 10, 1), 30);
+    setQuizCountBusy(true);
+    setQuizCountSaved(false);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ defaultQuizQuestionCount: parsed }),
+      });
+      if (!res.ok) throw new Error("failed to save");
+      setQuizCount(String(parsed));
+      setQuizCountSaved(true);
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "failed to save quiz default");
+    } finally {
+      setQuizCountBusy(false);
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -289,9 +327,30 @@ export function SettingsModal({
           {section === "general" && (
             <div className="max-w-md">
               <h2 className="mb-1 text-sm font-semibold text-fg">General</h2>
-              <p className="mb-4 text-xs text-fg-muted">Appearance settings — coming soon.</p>
+              <p className="mb-4 text-xs text-fg-muted">Appearance settings.</p>
 
-              <div className="border-t border-border pt-4">
+              <div>
+                <div className="mb-1 text-xs font-medium text-fg">Theme</div>
+                <p className="mb-3 text-xs text-fg-muted">Saved on this device only.</p>
+                <div className="flex gap-2">
+                  {THEMES.map((t) => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => handleSetTheme(t.value)}
+                      className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                        theme === t.value
+                          ? "border-accent bg-accent text-accent-fg"
+                          : "border-border text-fg-muted hover:bg-bg hover:text-fg"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4 mt-4">
                 <div className="mb-1 text-xs font-medium text-fg">App-wide font size</div>
                 <p className="mb-3 text-xs text-fg-muted">Dev tool — rescales all text in the app, saved on this device only.</p>
                 <div className="flex gap-2">
@@ -349,6 +408,33 @@ export function SettingsModal({
                       Save
                     </button>
                   </form>
+
+                  <div className="border-t border-border pt-4 mb-6">
+                    <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Quiz defaults</div>
+                    <p className="mb-3 text-xs text-fg-muted">
+                      How many questions a generated quiz has when you don&apos;t say a number.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={quizCount}
+                        onChange={(e) => { setQuizCount(e.target.value); setQuizCountSaved(false); }}
+                        className="w-20 rounded-lg border border-border bg-bg px-2.5 py-2 text-xs text-fg"
+                      />
+                      <span className="text-xs text-fg-muted">questions</span>
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveQuizCount()}
+                        disabled={quizCountBusy}
+                        className="rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-accent-fg disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      {quizCountSaved && <span className="text-xs text-fg-muted">Saved.</span>}
+                    </div>
+                  </div>
 
                   <div className="border-t border-border pt-4">
                     <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">Terms</div>

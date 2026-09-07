@@ -15,7 +15,9 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import {
   artifactRecordSchema, encodeSSE, isArtifactToolResult, type StreamEvent,
 } from "@mola/shared";
-import { artifacts, chats, compactionBoundaries, courses, db, messages, users } from "@mola/db";
+import {
+  artifacts, cardSrsState, chats, compactionBoundaries, courses, db, flashcards, messages, users,
+} from "@mola/db";
 import { authzResponse, requireOwned, requireSession } from "@/lib/auth/ownership";
 import { getPublicApiKey } from "@/lib/auth/api-keys";
 import { assembleContext } from "@/lib/context/assemble";
@@ -26,6 +28,7 @@ import { maybeCompact, makeLlmSummarizer } from "@/lib/agent/compaction";
 import { getChatProvider, CHAT_MODELS } from "@/lib/llm";
 import { generateChatTitle } from "@/lib/llm/title";
 import { logChatTurn } from "@/lib/debug/chat-log";
+import { beginTurn, finalizeTurn } from "@/lib/debug/agent-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,6 +99,11 @@ export async function POST(
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        // Ambient turn context for the debug logger (agent-log.ts) — a no-op
+        // unless its own two-switch gate is satisfied. Entered here, once per
+        // request, so it stays available through every await underneath,
+        // including inside a sub-agent spawned via the frozen subagent.ts.
+        const turn = beginTurn({ chatId, userId: session.userId, userEmail: session.email });
         const enc = new TextEncoder();
         const send = (ev: StreamEvent) => controller.enqueue(enc.encode(encodeSSE(ev)));
         let text = "";
@@ -200,6 +208,7 @@ export async function POST(
             direction: "output", chatId, userId: session.userId, userEmail: session.email,
             model: chat.model, text, error: errorMessage,
           });
+          void finalizeTurn(turn.turnId, chatId, session.userId, session.email);
           controller.close();
         }
       },
@@ -240,6 +249,9 @@ async function persistArtifact(result: unknown, ctx: ToolContext): Promise<Strea
       version: existing.version + 1,
       updatedAt: new Date(),
     }).where(eq(artifacts.id, existing.id)).returning();
+    if (result.payload.kind === "flashcard_deck") {
+      await syncFlashcardDeck(row!.id, ctx, result.payload.cards);
+    }
     return { type: "artifact", artifact: artifactRecordSchema.parse(row) };
   }
 
@@ -254,7 +266,50 @@ async function persistArtifact(result: unknown, ctx: ToolContext): Promise<Strea
     payload: result.payload,
   }).returning();
 
+  if (result.payload.kind === "flashcard_deck") {
+    await syncFlashcardDeck(row!.id, ctx, result.payload.cards);
+  }
+
   return { type: "artifact", artifact: artifactRecordSchema.parse(row) };
+}
+
+/**
+ * Denormalizes a flashcard_deck artifact's payload into `flashcards` +
+ * `card_srs_state` (§6: "denormalised out of the deck payload so SRS can
+ * query due cards directly" — schema.ts comment on cardSrsState). Every card
+ * keeps the same id in both the JSON payload and its `flashcards` row, so no
+ * id-mapping table is needed.
+ *
+ * An amendment fully replaces the card set — cascading deletes clear the old
+ * `card_srs_state` rows along with the old `flashcards` rows, so SRS progress
+ * resets on amendment rather than trying to diff/preserve it card-by-card.
+ * Not specified either way by the design doc; this is the simpler, honest
+ * default until real usage says otherwise.
+ */
+async function syncFlashcardDeck(
+  deckId: string,
+  ctx: ToolContext,
+  cards: { id: string; front: string; back: string; chapter: string | null; section: string | null; week: number | null }[],
+): Promise<void> {
+  await db.delete(flashcards).where(eq(flashcards.deckId, deckId));
+  if (cards.length === 0) return;
+
+  await db.insert(flashcards).values(cards.map((c) => ({
+    id: c.id,
+    userId: ctx.session.userId,
+    deckId,
+    courseId: ctx.courseId,
+    front: c.front,
+    back: c.back,
+    chapter: c.chapter,
+    section: c.section,
+    week: c.week,
+  })));
+
+  await db.insert(cardSrsState).values(cards.map((c) => ({
+    userId: ctx.session.userId,
+    cardId: c.id,
+  })));
 }
 
 /** PATCH: Update chat metadata (title, courseId, isPinned) */

@@ -35,6 +35,9 @@ export const users = pgTable("users", {
   /** What a newly created chat starts with. Updated whenever the user changes either on any chat. */
   defaultModel: text("default_model").notNull().default("qwen3.6:27b"),
   defaultThinkingEnabled: integer("default_thinking_enabled").notNull().default(1),
+  /** What create_quiz falls back to when the student's prompt doesn't say
+   * how many questions (§6, Agent G) — editable in Settings. */
+  defaultQuizQuestionCount: integer("default_quiz_question_count").notNull().default(10),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -261,6 +264,30 @@ export const cardSrsState = pgTable("card_srs_state", {
 }, (t) => [
   uniqueIndex("srs_card_idx").on(t.cardId),
   index("srs_due_idx").on(t.userId, t.dueAt),
+]);
+
+/**
+ * One row per completed (or in-progress) quiz attempt (Agent G). Additive
+ * table — nothing else references it, so it carries no risk to the frozen
+ * artifacts/flashcards/card_srs_state shapes. `quizId` points at the
+ * `artifacts` row (kind='quiz') that defines the questions; `answers` is
+ * keyed by question id, not ordinal, so it survives the quiz being edited
+ * (a question's id is stable across edits — see updateDeckCardsAction's
+ * flashcard analog).
+ */
+export const quizAttempts = pgTable("quiz_attempts", {
+  id: id(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  quizId: uuid("quiz_id").notNull().references(() => artifacts.id, { onDelete: "cascade" }),
+  score: integer("score").notNull().default(0),
+  totalQuestions: integer("total_questions").notNull(),
+  /** { [questionId]: selectedIndex } — multiple_choice only; short_answer isn't graded here. */
+  answers: jsonb("answers").notNull().default(sql`'{}'::jsonb`),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (t) => [
+  index("quiz_attempts_user_idx").on(t.userId),
+  index("quiz_attempts_quiz_idx").on(t.quizId),
 ]);
 
 // ── Schedule and planning ────────────────────────────────────────────────────

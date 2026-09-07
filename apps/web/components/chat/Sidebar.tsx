@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOutAction } from "@/lib/auth/actions";
 import { ChatLink } from "./ChatLink";
 import type { SettingsSection } from "./SettingsModal";
@@ -10,7 +10,9 @@ import type { ChatSummary, CourseSummary } from "./types";
 
 // Placeholders for features not built yet — styled like the Courses/Chats
 // section headers, sitting above Courses. Not wired to anything yet.
-const PLACEHOLDER_SECTIONS = ["Quizzes", "Flashcards", "Plan", "Schedule"] as const;
+// "Flashcards" and "Quizzes" now have real pages (rendered separately, each
+// in its old slot in this list) and aren't among these.
+const PLACEHOLDER_SECTIONS = ["Plan", "Schedule"] as const;
 
 const DEFAULT_WIDTH = 288;
 const MIN_WIDTH = 220;
@@ -43,6 +45,7 @@ export function Sidebar({
   onOpenSearch: () => void;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [collapsed, setCollapsed] = useState(false);
@@ -112,6 +115,30 @@ export function Sidebar({
           </button>
 
           <div className="mb-4 flex flex-col gap-2">
+            <Link
+              href="/artifacts"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/artifacts" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Artifacts
+            </Link>
+            <Link
+              href="/quizzes"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/quizzes" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Quizzes
+            </Link>
+            <Link
+              href="/flashcards"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/flashcards" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Flashcards
+            </Link>
             {PLACEHOLDER_SECTIONS.map((label) => (
               <div key={label} className="px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">
                 {label}

@@ -70,6 +70,8 @@ export const mindMapNodeSchema = z.object({
   label: z.string().min(1),
   parentId: z.string().nullable(),
   note: z.string().nullable(),
+  /** Escalated to Tony directly (§ header) — per-node attribution, additive. */
+  sources: z.array(sourceRefSchema).default([]),
 });
 
 export const mindMapPayloadSchema = z.object({

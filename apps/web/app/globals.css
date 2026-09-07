@@ -12,7 +12,25 @@
 math-field { color: var(--text); }
 math-field::part(content) { color: inherit; }
 
+/* Two named themes, picked in Settings > General and persisted as
+   `data-theme` on <html> (see layout.tsx's pre-paint script). "Mola" is the
+   default — its values live on the bare `:root` so an unset/unrecognized
+   attribute still resolves to it; "Inspired" is the original color scheme,
+   preserved as-is under its own attribute selector. Mola has no dark
+   variant yet, so it stays on its one (light) palette regardless of system
+   color scheme — only "Inspired" responds to prefers-color-scheme, as it
+   always has. */
 :root {
+  --bg: #f7f5ee;
+  --panel: #ffffff;
+  --border: #e5e1d3;
+  --text: #1c1b18;
+  --muted: #7a776e;
+  --accent: #481715;
+  --accent-fg: #f7f5ee;
+  --sidebar-bg: #f7f5ee;
+}
+html[data-theme="inspired"] {
   --bg: #faf9f5;
   --panel: #ffffff;
   --border: #e5e2d9;
@@ -23,7 +41,7 @@ math-field::part(content) { color: inherit; }
   --sidebar-bg: #f3f1ea;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  html[data-theme="inspired"] {
     --bg: #1c1b18;
     --panel: #24231f;
     --border: #35332d;
