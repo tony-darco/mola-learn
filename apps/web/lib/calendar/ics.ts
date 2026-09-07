@@ -163,6 +163,7 @@ export function parseIcsDate(value: string, params: Record<string, string> = {})
   const dateOnly = DATE_ONLY.exec(raw);
   if (dateOnly) {
     const [, y, m, d] = dateOnly;
+    if (y === undefined || m === undefined || d === undefined) return null;
     // Local midnight — see the all-day rule at the top of this file.
     return { date: new Date(Number(y), Number(m) - 1, Number(d)), allDay: true };
   }
@@ -170,6 +171,12 @@ export function parseIcsDate(value: string, params: Record<string, string> = {})
   const dateTime = DATE_TIME.exec(raw);
   if (!dateTime) return null;
   const [, y, mo, d, h, mi, s, utc] = dateTime;
+  // A group the pattern marks mandatory can still read back absent, and that is
+  // worth a branch rather than an assertion: the alternative is `Number(undefined)`
+  // silently becoming a Date of NaN, which is precisely the poisoned row this
+  // function's null return exists to avoid.
+  if (y === undefined || mo === undefined || d === undefined
+    || h === undefined || mi === undefined || s === undefined) return null;
   const n = (v: string) => Number(v);
 
   if (utc) {
