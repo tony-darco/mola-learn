@@ -253,8 +253,11 @@ ${ITEM_SHAPE}
 - Read the section on what comes AFTER this week as work, not as background.
   Anything due or sat within about a week of ${keys[6]} needs its first block
   inside this week — the lighter days and the weekend exist for exactly that.
-  And where two deadlines or exams land on the same day out there, say so in
-  "risks" now, while there is still room to spread the work.`;
+  And where two deadlines or exams land on the same day out there, that is not
+  only a line in "risks" — EACH of the colliding items needs its own block
+  inside this week, not just the one that feels more urgent. Naming the
+  collision in "risks" without giving both sides a block is not preparation,
+  it is noticing.`;
 }
 
 function dayShape(date: string, day: Date): string {
@@ -356,12 +359,21 @@ type NormaliseCtx = { courses: CourseRow[]; scheduleIds: Set<string> };
  * Fixes only what is mechanically fixable — an id we own, a naive timestamp, a
  * course named instead of referenced. Everything else is left exactly as the
  * model wrote it so zod still rejects it and the retry gets to see why.
+ *
+ * The one exception is `resolveOverlaps` below: the prompt telling the model
+ * not to overlap its own blocks is necessary but not sufficient (confirmed
+ * live — an otherwise-sound plan placed two Tuesday blocks on top of each
+ * other, a minutes-arithmetic slip, not a shape the model was confused
+ * about). That is worth repairing here rather than rejecting the whole
+ * payload over — the retry burns a generation to fix one number, and this
+ * scope (one calendar day, called per-bucket) is exactly where a "does this
+ * conflict with the block before it" check belongs.
  */
 function normaliseItems(raw: unknown, scope: string, ctx: NormaliseCtx): unknown {
   if (!Array.isArray(raw)) return raw;
   const seen = new Map<string, number>();
 
-  return raw.map((item) => {
+  const items = raw.map((item) => {
     if (!isObj(item)) return item;
     const courseId = resolveCourseId(item.courseId, ctx.courses);
     const title = typeof item.title === "string" ? item.title.trim().toLowerCase() : "";
@@ -383,6 +395,42 @@ function normaliseItems(raw: unknown, scope: string, ctx: NormaliseCtx): unknown
           : null,
     };
   });
+
+  resolveOverlaps(items);
+  return items;
+}
+
+/**
+ * Pushes a same-day block's start forward past whatever it would otherwise
+ * collide with. Only items with both a pinned `startAt` and a positive
+ * `estimatedMinutes` participate — an untimed block was never a clock-slot
+ * conflict to begin with. Mutates in place; safe because every item here is
+ * already a fresh object built above, not a reference into the model's raw
+ * output.
+ */
+function resolveOverlaps(items: unknown[]): void {
+  const timed = items.filter(
+    (i): i is Json & { startAt: string; estimatedMinutes: number } =>
+      isObj(i) && typeof i.startAt === "string" && typeof i.estimatedMinutes === "number",
+  );
+  timed.sort((a, b) => a.startAt.localeCompare(b.startAt));
+
+  let cursorEnd: number | null = null;
+  for (const item of timed) {
+    let start = new Date(item.startAt).getTime();
+    if (cursorEnd !== null && start < cursorEnd) {
+      start = cursorEnd;
+      item.startAt = toOffsetIso(new Date(start));
+    }
+    cursorEnd = start + item.estimatedMinutes * 60_000;
+  }
+}
+
+/** Same local-offset format `normaliseTimestamp` produces, for a computed instant. */
+function toOffsetIso(at: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T`
+    + `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}${offsetSuffix(at)}`;
 }
 
 function normaliseDay(raw: unknown, ctx: NormaliseCtx & { date: string }): unknown {
