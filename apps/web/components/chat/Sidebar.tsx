@@ -8,12 +8,6 @@ import { ChatLink } from "./ChatLink";
 import type { SettingsSection } from "./SettingsModal";
 import type { ChatSummary, CourseSummary } from "./types";
 
-// Placeholders for features not built yet — styled like the Courses/Chats
-// section headers, sitting above Courses. Not wired to anything yet.
-// "Flashcards" and "Quizzes" now have real pages (rendered separately, each
-// in its old slot in this list) and aren't among these.
-const PLACEHOLDER_SECTIONS = ["Plan", "Schedule"] as const;
-
 const DEFAULT_WIDTH = 288;
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 440;
@@ -139,11 +133,22 @@ export function Sidebar({
             >
               Flashcards
             </Link>
-            {PLACEHOLDER_SECTIONS.map((label) => (
-              <div key={label} className="px-1 py-0.5 text-sm font-medium uppercase tracking-wide text-fg-muted">
-                {label}
-              </div>
-            ))}
+            <Link
+              href="/plan"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/plan" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Plan
+            </Link>
+            <Link
+              href="/calendar"
+              className={`rounded-md px-1 py-0.5 text-sm font-medium uppercase tracking-wide no-underline hover:text-fg ${
+                pathname === "/calendar" ? "text-fg" : "text-fg-muted"
+              }`}
+            >
+              Schedule
+            </Link>
           </div>
 
           {courses.length > 0 && (
