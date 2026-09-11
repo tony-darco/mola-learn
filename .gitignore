@@ -37,3 +37,6 @@ apps/web/blob-report/
 
 # local-only dev-server launch config for the Browser preview tool
 .claude/
+
+# planning/handoff notes and other docs — not needed to run the app
+*.md
