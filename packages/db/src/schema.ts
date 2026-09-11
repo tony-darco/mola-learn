@@ -32,6 +32,9 @@ export const users = pgTable("users", {
    * response; only compared server-side in the Auth.js authorize() callback.
    */
   passwordHash: text("password_hash"),
+  /** Collected at signup (Tab 1) — month/year granularity, stored as the 1st of that month. */
+  expectedGradDate: timestamp("expected_grad_date", { withTimezone: true }),
+  phoneNumber: text("phone_number"),
   /** What a newly created chat starts with. Updated whenever the user changes either on any chat. */
   defaultModel: text("default_model").notNull().default("qwen3.6:27b"),
   defaultThinkingEnabled: integer("default_thinking_enabled").notNull().default(1),

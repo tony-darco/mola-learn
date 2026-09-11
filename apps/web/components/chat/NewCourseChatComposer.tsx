@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ModelPicker } from "./ModelPicker";
 import { MathInputBar } from "./MathInputBar";
@@ -17,6 +17,7 @@ import { MATH_CATEGORIES, wrapMathForInsertion } from "./math-symbols";
  */
 export function NewCourseChatComposer({
   courseId, placeholder, defaultModel = "qwen3.6:27b", defaultThinkingEnabled = true, hasOwnKey = false,
+  prefillText, prefillToken,
 }: {
   courseId?: string;
   placeholder?: string;
@@ -25,6 +26,14 @@ export function NewCourseChatComposer({
   defaultThinkingEnabled?: boolean;
   /** A BYOK user's model/thinking choice has no effect (resolveProvider ignores it for OpenAI/Anthropic) — hide the picker rather than show one that silently does nothing. */
   hasOwnKey?: boolean;
+  /**
+   * External text insertion (e.g. the landing page's suggestion pills).
+   * `prefillToken` must change on every insert — including re-picking the
+   * same suggestion twice — since the effect below keys off it, not
+   * `prefillText`, so a repeat pick still overwrites anything the user typed.
+   */
+  prefillText?: string;
+  prefillToken?: number;
 }) {
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -34,6 +43,13 @@ export function NewCourseChatComposer({
   const [thinkingEnabled, setThinkingEnabled] = useState(defaultThinkingEnabled);
   const [mathCategory, setMathCategory] = useState<string | null>(null);
   const mathInsertPoint = useRef({ start: 0, end: 0 });
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (prefillToken === undefined) return;
+    setText(prefillText ?? "");
+    textareaRef.current?.focus();
+  }, [prefillToken]);
 
   async function start() {
     if (busy) return;

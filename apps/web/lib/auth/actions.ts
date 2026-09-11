@@ -4,21 +4,33 @@ import { redirect } from "next/navigation";
 import { AuthError, signIn, signOut } from "./next-auth";
 import { registerUser } from "./register";
 
-export async function signUpAction(formData: FormData) {
-  const result = await registerUser({
-    name: String(formData.get("name") ?? ""),
-    email: String(formData.get("email") ?? ""),
-    password: String(formData.get("password") ?? ""),
-  });
-  if (!result.ok) {
-    redirect(`/sign-up?error=${encodeURIComponent(result.error)}`);
+/**
+ * Creates the account and signs it straight in, for the sign-up wizard
+ * (SignUpWizard) — which stays on one page across all its steps, so this
+ * returns a result instead of throwing a redirect like signInAction does.
+ */
+export async function completeSignupAction(input: {
+  name: string;
+  email: string;
+  password: string;
+  expectedGradDate?: string;
+  phoneNumber?: string;
+  university?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await registerUser(input);
+  if (!result.ok) return result;
+
+  try {
+    // redirect: false — signIn() would otherwise throw Next's NEXT_REDIRECT
+    // digest on success, same as the plain sign-in form's default.
+    await signIn("credentials", { email: input.email, password: input.password, redirect: false });
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return { ok: false, error: "account created, but sign-in failed — try signing in manually" };
+    }
+    throw err;
   }
-  // Sign the new account straight in — signIn() throws NEXT_REDIRECT on success.
-  await signIn("credentials", {
-    email: formData.get("email"),
-    password: formData.get("password"),
-    redirectTo: "/",
-  });
+  return { ok: true };
 }
 
 export async function signInAction(formData: FormData) {

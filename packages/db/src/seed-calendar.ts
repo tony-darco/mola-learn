@@ -89,7 +89,7 @@ const rows: Row[] = [];
 
 function push(r: Omit<Row, "userId" | "externalId"> & { key: string }) {
   const { key, ...rest } = r;
-  rows.push({ ...rest, userId: alice.id, externalId: `mock-${key}` });
+  rows.push({ ...rest, userId: alice!.id, externalId: `mock-${key}` });
 }
 
 // Recurring lectures — CMSC 421 Mon/Wed/Fri 10:00, MATH 221 Tue/Thu 13:00.

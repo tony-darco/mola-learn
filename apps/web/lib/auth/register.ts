@@ -12,10 +12,17 @@ export async function registerUser(input: {
   name?: string;
   email?: string;
   password?: string;
+  expectedGradDate?: string;
+  phoneNumber?: string;
+  university?: string;
 }): Promise<RegisterResult> {
   const name = input.name?.trim();
   const email = input.email?.trim().toLowerCase();
   const password = input.password;
+  const phoneNumber = input.phoneNumber?.trim() || null;
+  const university = input.university?.trim() || null;
+  // <input type="month"> gives "YYYY-MM" — store as the 1st of that month.
+  const expectedGradDate = input.expectedGradDate ? new Date(`${input.expectedGradDate}-01`) : null;
 
   if (!name || !email || !password) {
     return { ok: false, error: "name, email and password are required" };
@@ -30,6 +37,9 @@ export async function registerUser(input: {
   }
 
   const passwordHash = await hashPassword(password);
-  const [row] = await db.insert(users).values({ email, name, passwordHash }).returning({ id: users.id });
+  const [row] = await db
+    .insert(users)
+    .values({ email, name, passwordHash, expectedGradDate, phoneNumber, university })
+    .returning({ id: users.id });
   return { ok: true, userId: row!.id };
 }

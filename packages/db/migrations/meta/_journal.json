@@ -64,6 +64,13 @@
       "when": 1788762807110,
       "tag": "0008_public_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788879292617,
+      "tag": "0009_smooth_jubilee",
+      "breakpoints": true
     }
   ]
 }
