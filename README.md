@@ -10,7 +10,9 @@ handing you a solution. Along the way it can build quizzes, flashcard decks and
 mind maps out of your own material, and keep a study plan that reacts to your
 real calendar.
 
-<!-- DEMO -->
+![A walkthrough of Mola: the landing page, signing in, a tutoring chat on virtual memory, a flashcard deck, a graded quiz, a concept mind map, the study plan and the calendar](docs/demo.gif)
+
+<sub>The landing page → signing in → a chat on page tables and TLBs (with a flashcard deck generated inline) → flipping through that deck → taking and grading a practice quiz → a mind map of the same topic → the week's plan → the semester calendar.</sub>
 
 ---
 
@@ -179,14 +181,20 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
+On a system Postgres, `pgvector` is a separate package — e.g.
+`apt install postgresql-16-pgvector` on Debian/Ubuntu, `brew install pgvector`
+on macOS. The compose image (`pgvector/pgvector:pg16`) already has it.
+
 > `pnpm docker:up` / `pnpm docker:down` wrap `infra/docker-remote.sh`, which
 > drives Docker on a **specific remote LAN host** over SSH. Use plain
 > `docker compose` locally unless you are on that network.
 
 ### 3. Configure
 
+Next.js auto-loads `apps/web/.env.local` and nothing else, so start there:
+
 ```bash
-cp .env.example .env
+cp .env.example apps/web/.env.local
 ```
 
 At minimum, set:
@@ -204,26 +212,22 @@ as "not configured" rather than a broken button. `.env.example` documents the
 rest, including the two testing-only debug loggers (both off by default, and
 never to be enabled in production).
 
-Next.js loads `apps/web/.env.local` automatically, so point that at your `.env`:
-
-```bash
-ln -s ../../.env apps/web/.env.local
-```
-
-The `db:*` and `worker` scripts run as plain Node processes and do **not** load
-a dotenv file — export the variables into your shell for those:
-
-```bash
-set -a && source .env && set +a
-```
+The `db:*` and `worker` scripts run as plain Node processes and read
+`process.env` directly — they load **no** dotenv file, whatever you name it.
+Export the variables into your shell for those.
 
 ### 4. Migrate and seed
 
 ```bash
+export DATABASE_URL=postgres://mola:...@localhost:5432/mola
+
 pnpm db:migrate
 pnpm db:seed                      # Alice + Bob, a term, and a course
 pnpm --filter @mola/db seed:calendar   # optional: schedule fixtures
 ```
+
+> Re-running `db:migrate` against an already-migrated database prints a raw
+> Postgres error object and *then* `migrations applied`. It is harmless.
 
 The seed creates two users so cross-user authorization is testable. Both sign in
 with `mola-dev-password` (override with `SEED_PASSWORD`):
