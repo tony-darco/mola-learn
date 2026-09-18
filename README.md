@@ -16,134 +16,14 @@ real calendar.
 
 ---
 
-## The goal
+## The name
 
-Most "AI for studying" tools are a chat box with a textbook stapled to it. They
-answer the question you asked, which is usually the one thing that does not help
-you learn. Mola is built around three ideas instead:
+Mola is named for **Lady Kofoworola Ademola**, the first Black African woman to
+obtain a degree from the University of Oxford.
 
-1. **Productive struggle beats a correct answer.** Assistance is delivered on a
-   ladder — *pointing* → *teaching* → *bottom-out* — and the student pulls the
-   next rung. Nothing auto-escalates on a timer or a wrong-answer count,
-   because rapid skipping to the full solution correlates with worse outcomes.
-   (`apps/web/lib/context/hint-ladder.ts`)
-2. **Grounding in your material, not a generic corpus.** Every quiz question,
-   flashcard and mind-map node is retrieved from documents you uploaded to that
-   specific course, through one shared tiered-retrieval path.
-3. **Studying is a schedule problem too.** Knowing the material is half of it;
-   knowing what to do on Tuesday is the other half. Plans are proposed,
-   amended and accepted — never silently rewritten behind your back.
-
----
-
-## What it does
-
-| Surface | What you get |
-| --- | --- |
-| **Chat** | An agentic tutor with a read → think → act loop, per-course context, and a Socratic hint ladder you control |
-| **Quizzes** | Multiple-choice and short-answer sets generated from your uploaded material, graded with explanations |
-| **Flashcards** | Decks built on demand, scheduled by an FSRS-shaped spaced-repetition scheduler |
-| **Mind maps** | Interactive D3 maps of how the concepts in a topic connect |
-| **Plan** | Today / this-week / semester study plans, generated and re-proposed as your term moves |
-| **Calendar** | Deadlines and exams, with optional Google Calendar and ICS feed sync |
-| **Courses** | Per-course summary, instructions, memory, and document uploads |
-| **Artifacts** | Everything the tutor generates is saved, browsable and re-openable |
-
-Bring your own key (OpenAI or Anthropic, AES-256-encrypted at rest), or point it
-at a self-hosted Ollama box.
-
----
-
-## How it works
-
-### The agent loop
-
-`apps/web/lib/agent/loop.ts` is deliberately small: a message array and a
-read–think–act cycle that streams tool calls and text deltas to the client over
-SSE. Everything else is a layer bolted onto it.
-
-Tools are registered in a `ToolRegistry` (`lib/agent/registry.ts`), which can
-hand a **restricted subset** to a sub-agent — so the mind-map generator, the
-quiz generator and the chat-history searcher each run with their own allowlist
-rather than the full toolbox.
-
-Current tools: `grep_search`, `bm25_search`, `vector_search`,
-`grep_chat_search`, `bm25_chat_search`, `read_course_fact`, `calculator`,
-`read_schedule`, `read_plan`, `add_schedule_item`, `complete_task`,
-`get_due_flashcards`, `record_flashcard_review`, plus the artifact emitters
-(`emit_quiz`, `emit_flashcard_deck`, `emit_mind_map`) and their creators.
-
-### Five context layers
-
-`lib/context/assemble.ts` builds the system prompt from five ordered layers.
-Layers 1–4 are deterministic and always loaded; only layer 5 and retrieval
-results are judged for relevance:
-
-1. **Identity** — who the student is, which course this chat belongs to
-2. **Calendar** — what is due, rendered by the same formatter `read_schedule` uses
-3. **Catalog** — one line per available tool; full instructions load on demand
-4. **Rules** — the Socratic rulebook and the current hint rung, plus per-course instruction overrides
-5. **History** — recent raw turns, with older ones replaced by compaction summaries
-
-### Tiered retrieval
-
-One fallback strategy, shared by every consumer
-(`lib/agent/retrieval/tiered-search.ts`):
-
-```
-textbook chapter tree  →  raw document chunks  →  pgvector semantic search
-```
-
-Chat, quizzes, flashcards and mind maps all reach it through the *same*
-`grep_search` / `bm25_search` tool objects, so improving retrieval is one change
-rather than four prompt edits.
-
-### Document ingestion
-
-`apps/ingest` is a separate Python worker with a strict security walk
-(`§12` invariants are enforced in `ingest/pipeline.py`, not by convention):
-
-```
-upload → ClamAV scan + MIME sniff → extract → chapter/TOC detect → chunk → embed
-status: scanning → extracting → indexing → ready   (or failed / quarantined)
-```
-
-Bytes are read from the RAW bucket exactly once; nothing downstream re-reads it,
-and only two call sites may move an object between the raw / safe / quarantine
-buckets.
-
-### Stack
-
-- **Web** — Next.js 15 (App Router, RSC), React 19, Tailwind CSS 4, Auth.js v5
-- **Data** — PostgreSQL 16 + `pgvector` + `pg_trgm`, Drizzle ORM
-- **Storage** — S3 (LocalStack in dev), three buckets: raw / safe / quarantine
-- **Models** — Ollama (self-hosted) by default; OpenAI or Anthropic via BYOK
-- **Ingest** — Python 3.11, PyMuPDF, python-docx, ClamAV
-- **Testing** — Vitest (unit), Playwright (e2e), pytest (ingest), a 20-question golden retrieval eval
-
----
-
-## Repository layout
-
-```
-apps/
-  web/                 Next.js app — UI, API routes, agent loop, tools, planning
-    app/(marketing)/   Public landing, feature and pricing pages
-    app/(auth)/        Sign-in and the multi-step sign-up wizard
-    app/(shell)/       The signed-in product: chat, quizzes, flashcards,
-                       mindmaps, plan, calendar, courses, artifacts
-    app/api/           Route handlers (chat SSE, plan, calendar, tasks, settings)
-    lib/agent/         Loop, tool registry, retrieval, sub-agents, SRS
-    lib/context/       The five-layer context assembler and hint ladder
-    lib/llm/           Ollama + BYOK providers, model catalog, embeddings
-    e2e/               Playwright specs
-  ingest/              Python ingestion worker (scan → extract → chunk → embed)
-packages/
-  db/                  Drizzle schema, migrations, seeds
-  shared/              Frozen cross-boundary contracts (artifacts, stream, planning)
-evals/                 Golden retrieval eval set
-infra/                 docker-compose, Postgres init SQL, LocalStack bucket init
-```
+The icon is a mola fish, drawn in the style of a **mola** — the traditional
+textile and folk art of the indigenous Guna (or Kuna) people of Panama and
+parts of Colombia.
 
 ---
 
@@ -222,12 +102,9 @@ Export the variables into your shell for those.
 export DATABASE_URL=postgres://mola:...@localhost:5432/mola
 
 pnpm db:migrate
-pnpm db:seed                      # Alice + Bob, a term, and a course
+pnpm db:seed                           # Alice + Bob, a term, and a course
 pnpm --filter @mola/db seed:calendar   # optional: schedule fixtures
 ```
-
-> Re-running `db:migrate` against an already-migrated database prints a raw
-> Postgres error object and *then* `migrations applied`. It is harmless.
 
 The seed creates two users so cross-user authorization is testable. Both sign in
 with `mola-dev-password` (override with `SEED_PASSWORD`):
@@ -262,8 +139,8 @@ on page load. The standalone worker is what makes the time-driven behaviours
    graduation date and phone, or sign in with a seeded account.
 2. **Create a course** and open it. Give it a summary and, optionally,
    *instructions* — a free-text note like *"Prefers precise notation. Tests
-   derivations, not definitions."* that is injected into layer 4 of every chat
-   scoped to that course.
+   derivations, not definitions."* that is injected into every chat scoped to
+   that course.
 3. **Upload material** — syllabus, notes, a textbook PDF — from the course page.
    The ingest worker scans, extracts, chunks and embeds it; the document's
    status walks `scanning → extracting → indexing → ready`. Once ready it is
@@ -278,8 +155,8 @@ on page load. The standalone worker is what makes the time-driven behaviours
    the sidebar.
 6. **Review** a deck from its own page. *Flashcards* mode flips and autoplays;
    *Learn* mode has you self-grade, requeues the ones you missed, and advances
-   the card's real FSRS schedule — the same `card_srs_state` row that
-   chat-driven review (*"quiz me on my due cards"*) writes.
+   the card's real FSRS schedule — the same state that chat-driven review
+   (*"quiz me on my due cards"*) writes.
 7. **Plan your week** at `/plan`. Mola proposes today, the week and the
    semester; you amend and accept. Amendments accumulate rather than silently
    rewriting the semester — the end-of-week review reads that pattern and
@@ -287,6 +164,79 @@ on page load. The standalone worker is what makes the time-driven behaviours
 8. **Bring your own key** in Settings → paste an OpenAI or Anthropic key and
    chat switches providers. Keys are encrypted with `MOLA_ENCRYPTION_KEY` and
    never returned to the client in plaintext.
+
+---
+
+## Where it stands
+
+A working pilot. The plumbing is real and covered by tests, but this is not a
+finished product, and the list below is meant to be read literally.
+
+### Working today
+
+| | |
+| --- | --- |
+| **Chat** | Agentic tutor with a read → think → act loop, per-course context, streamed tool calls, and a Socratic hint ladder the student controls |
+| **Retrieval** | Grep, BM25 and pgvector search over your uploaded material, behind one shared fallback path |
+| **Quizzes** | Multiple-choice and short-answer sets generated from your own documents, graded with explanations |
+| **Flashcards** | Decks built on demand; Flashcards / Learn modes, scheduled by an FSRS-shaped spaced-repetition scheduler |
+| **Mind maps** | Interactive pan/zoom concept maps built from course material |
+| **Plan** | Today / week / semester plans on a propose → amend → accept gate |
+| **Calendar** | Month, week and day views; Google Calendar OAuth sync and ICS feed subscriptions |
+| **Courses** | Per-course summary, instructions and memory; document upload into the ingest pipeline |
+| **Ingestion** | Malware scan → MIME sniff → extract → chapter/TOC detection → chunk → embed, with raw/safe/quarantine bucket separation |
+| **Accounts** | Email/password auth, a multi-step sign-up wizard, and per-user ownership checks on every resource |
+| **Models** | Self-hosted Ollama, or bring-your-own OpenAI / Anthropic key, encrypted at rest |
+| **Long chats** | Automatic compaction with summarised boundaries, plus search across your own chat history |
+
+### Not there yet
+
+- **Pricing and Resources** are placeholder marketing pages.
+- **No standalone Agents surface** — the agent loop powers chat, but there is no
+  page for it.
+- **Model choice is Ollama-only.** BYOK providers ignore the per-chat model and
+  thinking toggles.
+- **The SRS scheduler is FSRS-*shaped*, not FSRS-4.5.** The state matches, so a
+  real per-user optimizer can slot in without a schema change — but it has not
+  been fitted against review history.
+- **Ingestion needs Docker** for S3 and ClamAV; there is no Docker-free path.
+- **The golden retrieval eval is scoped to a single syllabus corpus** (20
+  questions), so it guards regressions rather than proving general quality.
+- **Desktop-shaped.** No mobile layout work has been done.
+
+### Next
+
+- Fit the SRS optimizer against real review history.
+- Honour per-chat model and thinking selection for BYOK providers.
+- Broaden the golden eval past one corpus, and keep it in CI.
+- Fill in Resources with real usage guides, and decide pricing.
+
+---
+
+## Repository layout
+
+```
+apps/
+  web/                 Next.js app — UI, API routes, agent loop, tools, planning
+    app/(marketing)/   Public landing, feature and pricing pages
+    app/(auth)/        Sign-in and the multi-step sign-up wizard
+    app/(shell)/       The signed-in product: chat, quizzes, flashcards,
+                       mindmaps, plan, calendar, courses, artifacts
+    app/api/           Route handlers (chat SSE, plan, calendar, tasks, settings)
+    lib/agent/         Loop, tool registry, retrieval, sub-agents, SRS
+    lib/context/       The context assembler and the hint ladder
+    lib/llm/           Ollama + BYOK providers, model catalog, embeddings
+    e2e/               Playwright specs
+  ingest/              Python ingestion worker (scan → extract → chunk → embed)
+packages/
+  db/                  Drizzle schema, migrations, seeds
+  shared/              Frozen cross-boundary contracts (artifacts, stream, planning)
+evals/                 Golden retrieval eval set
+infra/                 docker-compose, Postgres init SQL, LocalStack bucket init
+```
+
+Next.js 15 (App Router) · React 19 · Tailwind CSS 4 · Auth.js v5 · Drizzle ORM ·
+PostgreSQL 16 + pgvector · S3 · Ollama / OpenAI / Anthropic · Python 3.11
 
 ---
 
@@ -299,34 +249,17 @@ pnpm build                            # build every package
 
 pnpm --filter @mola/web e2e           # Playwright suite (own DB, port 3020)
 pnpm --filter @mola/evals golden -- --pdf /path/to/syllabus.pdf
+
+cd apps/ingest && pip install -e ".[dev]" && pytest
 ```
 
 The e2e suite boots a real `next dev` against a dedicated `mola_e2e` database on
 port 3020 so it never collides with your own session on 3000. Seed that database
 first (`DATABASE_URL=<mola_e2e url> pnpm db:seed`); `e2e/global-setup.ts` then
-inserts the multi-turn chat and compaction fixtures the specs need. Override
-`E2E_PORT` to run several suites against one checkout concurrently — `distDir`
-keys off the same variable, so builds do not corrupt each other.
-
-Ingest tests:
-
-```bash
-cd apps/ingest && pip install -e ".[dev]" && pytest
-```
-
-### Contracts
+inserts the multi-turn chat and compaction fixtures the specs need.
 
 `packages/shared` holds the schemas that cross four or more boundaries —
 artifacts, stream events, planning payloads — and they are **frozen**. Extend
 the union there first; never widen a payload to `any`. The same applies to the
 tool registry, the agent loop and the context assembler, which are marked
 `FROZEN` in-file so parallel workstreams can build against them without drift.
-
----
-
-## Status
-
-A working pilot, not a finished product. Pricing is a placeholder, there is no
-standalone agents surface yet, and the golden eval is scoped to a single
-syllabus corpus. The plumbing — retrieval, ingestion, the agent loop, planning,
-auth and authorization — is real and covered by tests.
