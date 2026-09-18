@@ -40,3 +40,4 @@ apps/web/blob-report/
 
 # planning/handoff notes and other docs — not needed to run the app
 *.md
+!README.md
