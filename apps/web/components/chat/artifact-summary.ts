@@ -13,6 +13,8 @@ export function summarizeArtifact(payload: ArtifactPayload): string {
       return `${payload.questions.length} question${payload.questions.length === 1 ? "" : "s"} · ${payload.difficulty}`;
     case "mind_map":
       return `${payload.nodes.length} node${payload.nodes.length === 1 ? "" : "s"}`;
+    case "canvas":
+      return `${payload.elements.length} element${payload.elements.length === 1 ? "" : "s"}`;
     default: {
       const _exhaustive: never = payload;
       return _exhaustive;
@@ -29,6 +31,8 @@ export function artifactIcon(kind: ArtifactPayload["kind"]): string {
       return "?";
     case "mind_map":
       return "◈";
+    case "canvas":
+      return "⬚";
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;

@@ -19,7 +19,7 @@ export const sourceRefSchema = z.object({
 });
 export type SourceRef = z.infer<typeof sourceRefSchema>;
 
-export const ARTIFACT_KINDS = ["flashcard_deck", "quiz", "mind_map"] as const;
+export const ARTIFACT_KINDS = ["flashcard_deck", "quiz", "mind_map", "canvas"] as const;
 export const artifactKindSchema = z.enum(ARTIFACT_KINDS);
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
@@ -84,10 +84,75 @@ export const mindMapPayloadSchema = z.object({
     .default([]),
 });
 
+// ── Canvas — an infinite whiteboard ──────────────────────────────────────────
+//
+// Elements sit at real (x, y) — deliberately no spatial grid/hex-tiling.
+// "Addressable regions" (for a later phase where a model reads/annotates the
+// canvas) are explicit `frame` elements other elements belong to via
+// `parentId`, not a coordinate-derived index. `index` is a fractional-indexing
+// key (see lib/canvas/order.ts) — sort with plain `<`, never localeCompare.
+
+export const canvasElementBaseSchema = z.object({
+  id: z.string().min(1),
+  /** A frame element's id, or null — the only addressable-region mechanism. */
+  parentId: z.string().nullable(),
+  index: z.string().min(1),
+  x: z.number(), y: z.number(),
+  width: z.number().nonnegative(), height: z.number().nonnegative(),
+  /** Always 0 in v1 — no rotate UI. Kept for forward compat. */
+  rotation: z.number().default(0),
+  /** Nothing writes "ai" yet — reserved for a later phase. */
+  createdBy: z.enum(["user", "ai"]).default("user"),
+});
+
+export const canvasDrawElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("draw"),
+  props: z.object({
+    /** Relative to the element's own (x, y) — moving it never rewrites these. */
+    points: z.array(z.object({
+      x: z.number(), y: z.number(),
+      pressure: z.number().min(0).max(1).optional(),
+    })).min(2),
+    color: z.string().min(1),
+    strokeWidth: z.number().positive(),
+  }),
+});
+
+export const canvasTextElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("text"),
+  props: z.object({
+    text: z.string(),
+    color: z.string().min(1),
+    fontSize: z.number().positive(),
+  }),
+});
+
+export const canvasFrameElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("frame"),
+  props: z.object({ name: z.string() }),
+});
+
+export const canvasElementSchema = z.discriminatedUnion("type", [
+  canvasDrawElementSchema,
+  canvasTextElementSchema,
+  canvasFrameElementSchema,
+]);
+export type CanvasElement = z.infer<typeof canvasElementSchema>;
+export type CanvasDrawElement = z.infer<typeof canvasDrawElementSchema>;
+export type CanvasTextElement = z.infer<typeof canvasTextElementSchema>;
+export type CanvasFrameElement = z.infer<typeof canvasFrameElementSchema>;
+
+export const canvasPayloadSchema = z.object({
+  kind: z.literal("canvas"),
+  elements: z.array(canvasElementSchema),
+  viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number().positive() }),
+});
+
 export const artifactPayloadSchema = z.discriminatedUnion("kind", [
   flashcardDeckPayloadSchema,
   quizPayloadSchema,
   mindMapPayloadSchema,
+  canvasPayloadSchema,
 ]);
 export type ArtifactPayload = z.infer<typeof artifactPayloadSchema>;
 

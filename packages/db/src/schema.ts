@@ -317,7 +317,7 @@ export const textbookSections = pgTable("textbook_sections", {
 
 // ── Artifacts (mirrors contract 6) ───────────────────────────────────────────
 
-export const artifactKindEnum = pgEnum("artifact_kind", ["flashcard_deck", "quiz", "mind_map"]);
+export const artifactKindEnum = pgEnum("artifact_kind", ["flashcard_deck", "quiz", "mind_map", "canvas"]);
 
 export const artifacts = pgTable("artifacts", {
   id: id(),
