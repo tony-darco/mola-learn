@@ -7,8 +7,9 @@
 import { and, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import type { z } from "zod";
 import { artifacts, db } from "@mola/db";
-import { canvasPayloadSchema, type CanvasElement } from "@mola/shared";
+import { canvasBackgroundPatternSchema, canvasPayloadSchema, type CanvasElement } from "@mola/shared";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
 
 async function requireOwnCanvas(canvasId: string, userId: string) {
@@ -35,6 +36,7 @@ export async function saveCanvasAction(
   canvasId: string,
   elements: CanvasElement[],
   viewport: { x: number; y: number; zoom: number },
+  background: { pattern: z.infer<typeof canvasBackgroundPatternSchema>; color: string },
   expectedVersion: number,
 ): Promise<SaveCanvasResult> {
   const session = await requireSession();
@@ -44,7 +46,7 @@ export async function saveCanvasAction(
     return { ok: false, currentVersion: row.version };
   }
 
-  const payload = canvasPayloadSchema.parse({ kind: "canvas", elements, viewport });
+  const payload = canvasPayloadSchema.parse({ kind: "canvas", elements, viewport, background });
 
   const result = await db
     .update(artifacts)
@@ -67,13 +69,20 @@ export async function saveCanvasAction(
 }
 
 /** Insert-then-redirect, same shape as uploadCourseDocumentAction in lib/courses/actions.ts. */
-export async function createCanvasAction(): Promise<void> {
+export async function createCanvasAction(formData: FormData): Promise<void> {
   const session = await requireSession();
+
+  const rawName = formData.get("name");
+  const title = typeof rawName === "string" && rawName.trim().length > 0 ? rawName.trim() : "Untitled canvas";
+  const pattern = canvasBackgroundPatternSchema.catch("dots").parse(formData.get("backgroundPattern"));
+  const rawColor = formData.get("backgroundColor");
+  const color = typeof rawColor === "string" && rawColor.length > 0 ? rawColor : "#ffffff";
 
   const payload = canvasPayloadSchema.parse({
     kind: "canvas",
     elements: [],
     viewport: { x: 0, y: 0, zoom: 1 },
+    background: { pattern, color },
   });
 
   const [row] = await db
@@ -83,7 +92,7 @@ export async function createCanvasAction(): Promise<void> {
       courseId: null,
       originChatId: null,
       kind: "canvas",
-      title: "Untitled canvas",
+      title,
       topics: [],
       sources: [],
       payload,

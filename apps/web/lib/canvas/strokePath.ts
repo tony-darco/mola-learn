@@ -9,12 +9,16 @@ import type { CanvasDrawElement } from "@mola/shared";
  */
 export function strokeToSvgPath(props: CanvasDrawElement["props"]): string {
   const hasPressure = props.points.some((p) => p.pressure !== undefined);
+  const isHighlighter = props.variant === "highlighter";
   const outline = getStroke(props.points, {
-    size: props.strokeWidth * 2,
-    thinning: 0.6,
+    // A highlighter is a flat, uniform-width marker, not a tapered pen —
+    // thinning:0 (no pressure-driven width change) and simulatePressure
+    // off keeps every point the same width regardless of input device.
+    size: props.strokeWidth * (isHighlighter ? 3 : 2),
+    thinning: isHighlighter ? 0 : 0.6,
     smoothing: 0.5,
     streamline: 0.5,
-    simulatePressure: !hasPressure,
+    simulatePressure: !isHighlighter && !hasPressure,
   });
   return getSvgPathFromStroke(outline);
 }

@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { ArtifactRecord, ArtifactKind } from "@mola/shared";
 import type { CourseOption, TermOption } from "@/lib/artifacts/filters";
 import { artifactIcon, summarizeArtifact } from "./artifact-summary";
-import { createCanvasAction } from "@/lib/canvas/actions";
+import { NewCanvasDialog } from "./canvas/NewCanvasDialog";
 
 type ClientArtifact = Omit<ArtifactRecord, "createdAt" | "updatedAt"> & { createdAt: string; updatedAt: string };
 
@@ -68,6 +68,7 @@ export function ArtifactsGallery({
   const [textbookFilter, setTextbookFilter] = useState("all");
   const [termFilter, setTermFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("modified");
+  const [newCanvasOpen, setNewCanvasOpen] = useState(false);
 
   const courseMap = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses]);
 
@@ -126,15 +127,16 @@ export function ArtifactsGallery({
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-3xl font-semibold text-fg">Artifacts</h1>
-        <form action={createCanvasAction}>
-          <button
-            type="submit"
-            className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-fg hover:border-accent"
-          >
-            + New Canvas
-          </button>
-        </form>
+        <button
+          type="button"
+          onClick={() => setNewCanvasOpen(true)}
+          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-fg hover:border-accent"
+        >
+          + New Canvas
+        </button>
       </div>
+
+      {newCanvasOpen && <NewCanvasDialog onClose={() => setNewCanvasOpen(false)} />}
 
       <div className="mb-4 flex gap-4 border-b border-border">
         {(["all", "flashcard_deck", "quiz", "mind_map", "canvas"] as const).map((k) => (

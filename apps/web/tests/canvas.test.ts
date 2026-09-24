@@ -6,16 +6,16 @@ import { finalizeStroke } from "../lib/canvas/stroke";
 
 function draw(over: Partial<CanvasElement> & { id: string; index: string }): CanvasElement {
   return {
-    parentId: null, x: 0, y: 0, width: 10, height: 10, rotation: 0, createdBy: "user",
+    parentId: null, x: 0, y: 0, width: 10, height: 10, rotation: 0, opacity: 1, createdBy: "user",
     type: "draw",
-    props: { points: [{ x: 0, y: 0 }, { x: 5, y: 5 }], color: "#000", strokeWidth: 2 },
+    props: { points: [{ x: 0, y: 0 }, { x: 5, y: 5 }], color: "#000", strokeWidth: 2, variant: "pen" },
     ...over,
   } as CanvasElement;
 }
 
 function frame(over: Partial<CanvasElement> & { id: string; index: string }): CanvasElement {
   return {
-    parentId: null, x: 0, y: 0, width: 100, height: 100, rotation: 0, createdBy: "user",
+    parentId: null, x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1, createdBy: "user",
     type: "frame",
     props: { name: "Untitled frame" },
     ...over,
@@ -89,7 +89,7 @@ describe("canvasPayloadSchema", () => {
   it("relative draw points reconstruct to the correct absolute points", () => {
     const el = draw({
       id: "d1", index: "a0", x: 100, y: 200,
-      props: { points: [{ x: 0, y: 0 }, { x: 5, y: 7 }], color: "#000", strokeWidth: 2 },
+      props: { points: [{ x: 0, y: 0 }, { x: 5, y: 7 }], color: "#000", strokeWidth: 2, variant: "pen" },
     });
     const parsed = canvasPayloadSchema.parse({ kind: "canvas", elements: [el], viewport: { x: 0, y: 0, zoom: 1 } });
     const parsedEl = parsed.elements[0]!;
