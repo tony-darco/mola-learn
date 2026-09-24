@@ -139,8 +139,6 @@ export const canvasElementSchema = z.discriminatedUnion("type", [
 ]);
 export type CanvasElement = z.infer<typeof canvasElementSchema>;
 export type CanvasDrawElement = z.infer<typeof canvasDrawElementSchema>;
-export type CanvasTextElement = z.infer<typeof canvasTextElementSchema>;
-export type CanvasFrameElement = z.infer<typeof canvasFrameElementSchema>;
 
 export const canvasPayloadSchema = z.object({
   kind: z.literal("canvas"),
