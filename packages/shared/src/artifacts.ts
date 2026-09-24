@@ -19,7 +19,7 @@ export const sourceRefSchema = z.object({
 });
 export type SourceRef = z.infer<typeof sourceRefSchema>;
 
-export const ARTIFACT_KINDS = ["flashcard_deck", "quiz", "mind_map"] as const;
+export const ARTIFACT_KINDS = ["flashcard_deck", "quiz", "mind_map", "walkthrough"] as const;
 export const artifactKindSchema = z.enum(ARTIFACT_KINDS);
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
@@ -84,10 +84,123 @@ export const mindMapPayloadSchema = z.object({
     .default([]),
 });
 
+// ── Walkthroughs — parametrized, interactive step-by-step explanations ──────
+//
+// A step's numbers are never baked in as static text — every "quantity" is a
+// mathjs expression over the walkthrough's global, slider-driven parameters,
+// re-evaluated client-side on every change. A step MAY also carry a "scene":
+// one general motion primitive (bodies whose position is a function of time
+// and the parameters, optional trails/vectors/scale bar) rather than a
+// per-topic hardcoded diagram — the same scene renderer draws an orbit, a
+// collision, or anything else "a quantity that moves". Expressions elsewhere
+// (quantities, chart curves outside their independent var) may only
+// reference declared parameters; expressions inside a scene may additionally
+// reference the reserved symbol "t" — enforced server-side in the producing
+// tool, not just shape-checked here.
+
+export const walkthroughParameterSchema = z.object({
+  name: z.string().min(1),
+  label: z.string().min(1),
+  unit: z.string().nullable(),
+  default: z.number(),
+  min: z.number(),
+  max: z.number(),
+  step: z.number().positive(),
+});
+
+export const walkthroughQuantitySchema = z.object({
+  label: z.string().min(1),
+  /** LaTeX for display, e.g. "\\tau = RC". Not evaluated — display only. */
+  latex: z.string().min(1),
+  /** mathjs expression over parameter names only, e.g. "R * C". */
+  expression: z.string().min(1),
+  unit: z.string().nullable(),
+  /** e.g. "fixed:2" — decimal places to round the evaluated value to. */
+  format: z.string().nullable(),
+});
+
+export const walkthroughSceneBodySchema = z.object({
+  id: z.string().min(1),
+  label: z.string().nullable(),
+  /** mathjs expression over parameters only — fixed radius, doesn't animate. */
+  radius: z.string().min(1),
+  /** mathjs expressions over parameters ∪ {t}. */
+  x: z.string().min(1),
+  y: z.string().min(1),
+  trail: z.boolean().default(false),
+});
+
+export const walkthroughSceneVectorSchema = z.object({
+  /** Must match a body's id in the same scene. */
+  fromBodyId: z.string().min(1),
+  label: z.string().nullable(),
+  /** mathjs expressions over parameters ∪ {t}. */
+  dx: z.string().min(1),
+  dy: z.string().min(1),
+});
+
+export const walkthroughSceneSchema = z.object({
+  bodies: z.array(walkthroughSceneBodySchema).min(1),
+  vectors: z.array(walkthroughSceneVectorSchema).default([]),
+  scaleBar: z
+    .object({
+      /** mathjs expression over parameters only. */
+      lengthWorldUnits: z.string().min(1),
+      label: z.string().min(1),
+    })
+    .nullable(),
+  /** mathjs expression over parameters only — one playback loop's length, seconds. */
+  duration: z.string().min(1),
+});
+
+export const walkthroughChartCurveSchema = z.object({
+  label: z.string().min(1),
+  /** mathjs expression over parameters ∪ {[independentVar]}. */
+  expression: z.string().min(1),
+  colorRole: z.enum(["primary", "secondary"]),
+});
+
+export const walkthroughChartSchema = z.object({
+  independentVar: z.string().min(1),
+  /** [start, end] mathjs expressions over parameters only. */
+  domain: z.tuple([z.string().min(1), z.string().min(1)]),
+  curves: z.array(walkthroughChartCurveSchema).min(1),
+  /** mathjs expression (parameters only) marking a point of interest on "static" charts. */
+  markerAt: z.string().nullable(),
+  /** "static": sample once across domain. "timeseries": scrolling window driven by scene playback. */
+  mode: z.enum(["static", "timeseries"]),
+});
+
+export const walkthroughStepSchema = z.object({
+  title: z.string().min(1),
+  /** Markdown/KaTeX prose, rendered through the same pipeline as chat text. */
+  body: z.string().min(1),
+  quantities: z.array(walkthroughQuantitySchema).default([]),
+  scene: walkthroughSceneSchema.nullable(),
+  chart: walkthroughChartSchema.nullable(),
+  /**
+   * false (default): "t" resets to 0 when this step becomes active — a
+   * fresh, standalone scenario. true: this step continues the same event as
+   * the previous step (e.g. "watch it launch" -> "watch it reach apogee"),
+   * so playback time carries over instead of restarting.
+   */
+  continuesFromPreviousStep: z.boolean().default(false),
+});
+
+export const walkthroughPayloadSchema = z.object({
+  kind: z.literal("walkthrough"),
+  /** Breadcrumb, e.g. "Physics / Orbital Mechanics". */
+  subject: z.string().min(1),
+  title: z.string().min(1),
+  parameters: z.array(walkthroughParameterSchema).min(1),
+  steps: z.array(walkthroughStepSchema).min(1),
+});
+
 export const artifactPayloadSchema = z.discriminatedUnion("kind", [
   flashcardDeckPayloadSchema,
   quizPayloadSchema,
   mindMapPayloadSchema,
+  walkthroughPayloadSchema,
 ]);
 export type ArtifactPayload = z.infer<typeof artifactPayloadSchema>;
 

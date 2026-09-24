@@ -5,6 +5,7 @@ import { artifactIcon, summarizeArtifact } from "../artifact-summary";
 import { FlashcardDeck } from "./FlashcardDeck";
 import { Quiz } from "./Quiz";
 import { MindMap } from "./MindMap";
+import { Walkthrough } from "./Walkthrough";
 
 /**
  * Renders a real interface per artifact kind — never a JSON dump. Dispatches
@@ -32,6 +33,8 @@ function renderPayload(artifact: ArtifactRecord) {
       return <Quiz payload={artifact.payload} title={artifact.title} />;
     case "mind_map":
       return <MindMap payload={artifact.payload} title={artifact.title} />;
+    case "walkthrough":
+      return <Walkthrough payload={artifact.payload} title={artifact.title} id={artifact.id} />;
     default: {
       const _exhaustive: never = artifact.payload;
       return _exhaustive;

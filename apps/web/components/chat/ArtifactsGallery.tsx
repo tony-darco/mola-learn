@@ -19,12 +19,14 @@ const KIND_LABEL: Record<ArtifactKind, string> = {
   flashcard_deck: "Flashcards",
   quiz: "Quiz",
   mind_map: "Mind map",
+  walkthrough: "Walkthrough",
 };
 
 const KIND_ROUTE: Record<ArtifactKind, string> = {
   flashcard_deck: "/flashcards",
   quiz: "/quizzes",
   mind_map: "/mindmaps",
+  walkthrough: "/walkthroughs",
 };
 
 function relativeDate(iso: string): string {
@@ -44,6 +46,8 @@ function previewLines(a: ClientArtifact): string[] {
       return a.payload.questions.slice(0, 3).map((q) => q.prompt);
     case "mind_map":
       return a.payload.nodes.slice(0, 3).map((n) => n.label);
+    case "walkthrough":
+      return a.payload.steps.slice(0, 3).map((s) => s.title);
     default:
       return [];
   }
@@ -122,7 +126,7 @@ export function ArtifactsGallery({
       <h1 className="mb-4 text-3xl font-semibold text-fg">Artifacts</h1>
 
       <div className="mb-4 flex gap-4 border-b border-border">
-        {(["all", "flashcard_deck", "quiz", "mind_map"] as const).map((k) => (
+        {(["all", "flashcard_deck", "quiz", "mind_map", "walkthrough"] as const).map((k) => (
           <button
             key={k}
             type="button"

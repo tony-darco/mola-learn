@@ -11,6 +11,7 @@ import { createFlashcardDeckTool } from "./flashcards";
 import { getDueFlashcardsTool, recordFlashcardReviewTool } from "./flashcard-review";
 import { createQuizTool } from "./quizzes";
 import { createMindMapTool } from "./mindmaps";
+import { createWalkthroughTool } from "./walkthroughs";
 import {
   addScheduleItemTool, completeTaskTool, readPlanTool, readScheduleTool,
 } from "./calendar";
@@ -40,6 +41,7 @@ export function buildRegistry(): ToolRegistry {
     .register(withCallLogging(recordFlashcardReviewTool))
     .register(withCallLogging(createQuizTool))
     .register(withCallLogging(createMindMapTool))
+    .register(withCallLogging(createWalkthroughTool))
     .register(withCallLogging(readScheduleTool))
     .register(withCallLogging(readPlanTool))
     .register(withCallLogging(addScheduleItemTool))

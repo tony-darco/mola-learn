@@ -14,6 +14,7 @@ const TABS = [
   { key: "flashcard_deck", label: "Flashcards" },
   { key: "quiz", label: "Quiz" },
   { key: "mind_map", label: "Overview" },
+  { key: "walkthrough", label: "Walkthrough" },
 ] as const;
 
 const DEFAULT_WIDTH = 384;

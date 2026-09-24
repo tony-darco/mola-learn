@@ -71,6 +71,13 @@
       "when": 1788879292617,
       "tag": "0009_smooth_jubilee",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790068691780,
+      "tag": "0010_cloudy_fallen_one",
+      "breakpoints": true
     }
   ]
 }

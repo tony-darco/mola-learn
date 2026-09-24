@@ -113,8 +113,82 @@ const mindMapFixture: ArtifactRecord = artifactRecordSchema.parse({
   updatedAt: now(),
 });
 
+const walkthroughFixture: ArtifactRecord = artifactRecordSchema.parse({
+  id: "11111111-1111-4111-8111-111111111144",
+  userId: "00000000-0000-4000-8000-000000000000",
+  courseId: null,
+  originChatId: null,
+  kind: "walkthrough",
+  title: "Circular Orbits",
+  topics: ["orbital mechanics"],
+  sources: [],
+  payload: {
+    kind: "walkthrough",
+    subject: "Physics / Orbital Mechanics",
+    title: "Circular Orbits",
+    parameters: [
+      { name: "orbitRadius", label: "Orbit radius", unit: null, default: 60, min: 20, max: 100, step: 5 },
+      { name: "period", label: "Orbital period", unit: "s", default: 8, min: 2, max: 20, step: 1 },
+    ],
+    steps: [
+      {
+        title: "A planet in circular orbit",
+        body: "A planet at distance $r$ from its star, completing one orbit every $T$ seconds, traces a circle. Drag the sliders to see the orbit and its trail respond.",
+        quantities: [
+          { label: "Angular velocity", latex: "\\omega = 2\\pi/T", expression: "2*pi/period", unit: "rad/s", format: "fixed:2" },
+          { label: "Orbital speed", latex: "v = 2\\pi r/T", expression: "2*pi*orbitRadius/period", unit: "units/s", format: "fixed:2" },
+        ],
+        scene: {
+          bodies: [
+            { id: "star", label: "Star", radius: "6", x: "0", y: "0", trail: false },
+            { id: "planet", label: "Planet", radius: "3", x: "orbitRadius*cos(2*pi*t/period)", y: "orbitRadius*sin(2*pi*t/period)", trail: true },
+          ],
+          vectors: [
+            {
+              fromBodyId: "planet",
+              label: "velocity",
+              dx: "-orbitRadius*(2*pi/period)*sin(2*pi*t/period)",
+              dy: "orbitRadius*(2*pi/period)*cos(2*pi*t/period)",
+            },
+          ],
+          scaleBar: { lengthWorldUnits: "orbitRadius", label: "orbit radius" },
+          duration: "period",
+        },
+        chart: null,
+        continuesFromPreviousStep: false,
+      },
+      {
+        title: "Watching height oscillate",
+        body: "Play the scene and watch the planet's height ($y$-position) trace out a sine wave over one full orbit.",
+        quantities: [],
+        scene: {
+          bodies: [
+            { id: "star", label: "Star", radius: "6", x: "0", y: "0", trail: false },
+            { id: "planet", label: "Planet", radius: "3", x: "orbitRadius*cos(2*pi*t/period)", y: "orbitRadius*sin(2*pi*t/period)", trail: true },
+          ],
+          vectors: [],
+          scaleBar: { lengthWorldUnits: "orbitRadius", label: "orbit radius" },
+          duration: "period",
+        },
+        chart: {
+          independentVar: "t",
+          domain: ["0", "period"],
+          curves: [{ label: "height (y)", expression: "orbitRadius*sin(2*pi*t/period)", colorRole: "primary" }],
+          markerAt: null,
+          mode: "timeseries",
+        },
+        continuesFromPreviousStep: true,
+      },
+    ],
+  },
+  version: 1,
+  createdAt: now(),
+  updatedAt: now(),
+});
+
 export const ARTIFACT_FIXTURES: ArtifactRecord[] = [
   flashcardDeckFixture,
   quizFixture,
   mindMapFixture,
+  walkthroughFixture,
 ];
