@@ -15,11 +15,12 @@ import { uploadCanvasImageAction } from "@/lib/canvas/imageUpload";
 import { emptyHistory, pushHistory, redo as historyRedo, undo as historyUndo, type History } from "@/lib/canvas/history";
 import { eraseWholeObjects, erasePartial } from "@/lib/canvas/eraser";
 import { resizeBox, type ResizeCorner } from "@/lib/canvas/resize";
+import { cursorForTool } from "@/lib/canvas/cursors";
 import { COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
 import { Toolbar, type EraserMode, type ShapeKind, type Tool } from "./canvas/Toolbar";
 import { BottomPill } from "./canvas/BottomPill";
 import { StylePanel, type StyleContext } from "./canvas/StylePanel";
-import { ElementShape } from "./canvas/ElementRenderer";
+import { ElementShape, ShapeOutline } from "./canvas/ElementRenderer";
 import { useConfirm } from "./shell-context";
 
 type Payload = z.infer<typeof canvasPayloadSchema>;
@@ -52,7 +53,10 @@ export function CanvasView({
   const [dash, setDash] = useState<DashStyle>("solid");
   const [fillStyle, setFillStyle] = useState<FillStyle>("none");
   const [opacity, setOpacity] = useState(1);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Single-selection UI (resize handles, the edit badge, the text style
+  // panel) only makes sense for exactly one selected element.
+  const selectedId = selectedIds.size === 1 ? [...selectedIds][0]! : null;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ points: DraftPoint[] } | null>(null);
   const [lineDraft, setLineDraft] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -80,7 +84,7 @@ export function CanvasView({
 
   const draftPointsRef = useRef<DraftPoint[]>([]);
   const draftRafRef = useRef<number | null>(null);
-  const dragRef = useRef<{ id: string; startWorld: { x: number; y: number }; startX: number; startY: number } | null>(null);
+  const dragRef = useRef<{ ids: string[]; startWorld: { x: number; y: number }; startPositions: Map<string, { x: number; y: number }> } | null>(null);
   const boxStartRef = useRef<{ x: number; y: number } | null>(null);
   const lineStartRef = useRef<{ x: number; y: number } | null>(null);
   const eraserDraggingRef = useRef(false);
@@ -160,7 +164,7 @@ export function CanvasView({
     historyRef.current = result.history;
     setHistoryVersion((v) => v + 1);
     applyMutation(() => result.value);
-    setSelectedId(null);
+    setSelectedIds(new Set());
   }
   function handleRedo() {
     const result = historyRedo(historyRef.current, elementsRef.current);
@@ -168,7 +172,7 @@ export function CanvasView({
     historyRef.current = result.history;
     setHistoryVersion((v) => v + 1);
     applyMutation(() => result.value);
-    setSelectedId(null);
+    setSelectedIds(new Set());
   }
 
   useEffect(() => {
@@ -190,10 +194,10 @@ export function CanvasView({
         if (e.shiftKey) handleRedo(); else handleUndo();
         return;
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId && !inInput) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0 && !inInput) {
         e.preventDefault();
-        mutate((prev) => deleteElement(prev, selectedId));
-        setSelectedId(null);
+        mutate((prev) => [...selectedIds].reduce((acc, id) => deleteElement(acc, id), prev));
+        setSelectedIds(new Set());
       }
     }
     function onKeyUp(e: KeyboardEvent) { if (e.code === "Space") spaceHeldRef.current = false; }
@@ -201,7 +205,7 @@ export function CanvasView({
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  }, [selectedIds]);
 
   // Laser trail fade — keeps re-rendering while any point is still visible, pruning old ones.
   useEffect(() => {
@@ -267,14 +271,34 @@ export function CanvasView({
       }
 
       const id = elementIdFromTarget(e.target);
-      if (!id) { setSelectedId(null); return; }
+      if (!id) { if (!e.shiftKey) setSelectedIds(new Set()); return; }
       if (id === editingIdRef.current) return;
-      setSelectedId(id);
-      const el = elementsRef.current.find((x) => x.id === id);
-      if (!el) return;
+
+      // Shift-click toggles membership; clicking a member of an existing
+      // multi-selection keeps the whole group selected (so the drag below
+      // moves all of them); a plain click on anything else re-selects just
+      // that one element.
+      let nextSelected: Set<string>;
+      if (e.shiftKey) {
+        nextSelected = new Set(selectedIds);
+        if (nextSelected.has(id)) nextSelected.delete(id); else nextSelected.add(id);
+      } else if (selectedIds.has(id) && selectedIds.size > 1) {
+        nextSelected = selectedIds;
+      } else {
+        nextSelected = new Set([id]);
+      }
+      setSelectedIds(nextSelected);
+
+      const dragIds = nextSelected.has(id) ? [...nextSelected] : [id];
+      const startPositions = new Map(
+        dragIds.map((dragId) => {
+          const el = elementsRef.current.find((x) => x.id === dragId)!;
+          return [dragId, { x: el.x, y: el.y }] as const;
+        }),
+      );
       target.setPointerCapture(e.pointerId);
       snapshotHistory();
-      dragRef.current = { id, startWorld: worldFromEvent(e), startX: el.x, startY: el.y };
+      dragRef.current = { ids: dragIds, startWorld: worldFromEvent(e), startPositions };
       return;
     }
 
@@ -333,10 +357,15 @@ export function CanvasView({
     }
 
     if (dragRef.current) {
-      const { id, startWorld, startX, startY } = dragRef.current;
+      const { startWorld, startPositions } = dragRef.current;
       const p = worldFromEvent(e);
       const dx = p.x - startWorld.x, dy = p.y - startWorld.y;
-      applyMutation((prev) => prev.map((el) => (el.id === id ? { ...el, x: startX + dx, y: startY + dy } : el)));
+      applyMutation((prev) =>
+        prev.map((el) => {
+          const start = startPositions.get(el.id);
+          return start ? { ...el, x: start.x + dx, y: start.y + dy } : el;
+        }),
+      );
       return;
     }
 
@@ -506,7 +535,7 @@ export function CanvasView({
       return recomputeParentIds([...prev, el]);
     });
     setEditingId(newId);
-    setSelectedId(newId);
+    setSelectedIds(new Set([newId]));
     if (!lockedRef.current) setTool("select");
   }
 
@@ -522,7 +551,7 @@ export function CanvasView({
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       mutate((prev) => deleteElement(prev, id));
-      if (selectedId === id) setSelectedId(null);
+      setSelectedIds((prev) => { if (!prev.has(id)) return prev; const next = new Set(prev); next.delete(id); return next; });
       return;
     }
     mutate((prev) =>
@@ -540,7 +569,7 @@ export function CanvasView({
     const trimmed = latex.trim();
     if (trimmed.length === 0) {
       mutate((prev) => deleteElement(prev, id));
-      if (selectedId === id) setSelectedId(null);
+      setSelectedIds((prev) => { if (!prev.has(id)) return prev; const next = new Set(prev); next.delete(id); return next; });
       return;
     }
     mutate((prev) => prev.map((e) => (e.id === id && e.type === "math" ? { ...e, props: { ...e.props, latex } } : e)));
@@ -552,7 +581,7 @@ export function CanvasView({
 
   function startEdit(id: string) {
     setEditingId(id);
-    setSelectedId(id);
+    setSelectedIds(new Set([id]));
   }
 
   /** A placed text/note box's own live properties — edited directly, not
@@ -651,7 +680,7 @@ export function CanvasView({
     const ok = await confirm("Clear the whole canvas? This removes every element — you can undo it with Ctrl/Cmd+Z right after.");
     if (!ok) return;
     mutate(() => []);
-    setSelectedId(null);
+    setSelectedIds(new Set());
   }
 
   const canUndo = useMemo(() => historyRef.current.past.length > 0, [historyVersion]);
@@ -731,7 +760,8 @@ export function CanvasView({
       <svg
         ref={svgRef}
         width="100%" height="100%"
-        className="flex-1 cursor-crosshair touch-none"
+        className="flex-1 touch-none"
+        style={{ cursor: cursorForTool(tool) }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -745,7 +775,8 @@ export function CanvasView({
             <ElementShape
               key={el.id}
               element={el}
-              selected={el.id === selectedId}
+              selected={selectedIds.has(el.id)}
+              soleSelected={el.id === selectedId}
               editing={el.id === editingId}
               onCommitText={commitText}
               onCommitMath={commitMath}
@@ -762,7 +793,8 @@ export function CanvasView({
             <line x1={lineDraft.x1} y1={lineDraft.y1} x2={lineDraft.x2} y2={lineDraft.y2} stroke={color} strokeWidth={STROKE_WIDTHS[widthCategory]} strokeDasharray="4 3" />
           )}
 
-          {boxDraft && (tool === "shape" || tool === "frame") && (
+          {boxDraft && tool === "shape" && <ShapeOutline shapeKind={shapeKind} {...boxDraft} />}
+          {boxDraft && tool === "frame" && (
             <rect x={boxDraft.x} y={boxDraft.y} width={boxDraft.width} height={boxDraft.height} fill="none" className="stroke-accent" strokeWidth={1.5} strokeDasharray="4 3" />
           )}
 

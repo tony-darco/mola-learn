@@ -44,7 +44,7 @@ export function BottomPill({
   const ActivePatternIcon = PATTERN_OPTIONS.find((o) => o.value === backgroundPattern)?.Icon ?? Grid3x3;
 
   return (
-    <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2">
+    <div className="pointer-events-none absolute bottom-4 left-4 z-30">
       <div className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-surface px-2 py-1.5 shadow-lg">
         <button
           type="button"

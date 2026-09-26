@@ -164,7 +164,7 @@ export function Toolbar({
           className={`flex shrink-0 items-center justify-center gap-0.5 rounded-full py-2 pl-2 pr-1 ${tool === "shape" ? "bg-accent text-accent-fg" : "text-fg-muted hover:bg-bg hover:text-fg"}`}
         >
           <ShapeTriggerIcon size={18} />
-          <ChevronDown size={16} />
+          <ChevronDown size={20} strokeWidth={2.5} />
         </button>
         {openMenu === "shape" && (
           <ToolbarPopover anchorRef={shapeTriggerRef} onClose={() => setOpenMenu(null)}>
@@ -200,7 +200,7 @@ export function Toolbar({
           className={`flex shrink-0 items-center justify-center gap-0.5 rounded-full py-2 pl-2 pr-1 ${tool === "eraser" ? "bg-accent text-accent-fg" : "text-fg-muted hover:bg-bg hover:text-fg"}`}
         >
           <Eraser size={18} />
-          <ChevronDown size={16} />
+          <ChevronDown size={20} strokeWidth={2.5} />
         </button>
         {openMenu === "eraser" && (
           <ToolbarPopover anchorRef={eraserTriggerRef} onClose={() => setOpenMenu(null)}>

@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
-import { Pencil } from "lucide-react";
+import { Move, Pencil } from "lucide-react";
 import type { MathfieldElement } from "mathlive";
-import type { CanvasElement } from "@mola/shared";
+import type { z } from "zod";
+import type { canvasShapeKindSchema, CanvasElement } from "@mola/shared";
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
 import type { ResizeCorner } from "@/lib/canvas/resize";
 
@@ -61,6 +62,24 @@ function EditBadge({ element, onStartEdit }: { element: { id: string; x: number;
   );
 }
 
+/** An explicit drag affordance on a selected box — carries data-element-id
+ * so the same pointerdown hit-testing in CanvasView treats grabbing it
+ * exactly like grabbing the box's body (select + drag), just with a
+ * discoverable handle instead of relying on clicking the text itself. */
+function DragHandle({ element }: { element: { id: string; x: number; y: number } }) {
+  return (
+    <foreignObject x={element.x - 12} y={element.y - 12} width={24} height={24}>
+      <div
+        data-element-id={element.id}
+        title="Drag to move"
+        className="flex h-6 w-6 cursor-grab items-center justify-center rounded-full border border-border bg-surface text-fg-muted shadow active:cursor-grabbing"
+      >
+        <Move size={12} />
+      </div>
+    </foreignObject>
+  );
+}
+
 function dashArray(dash: "solid" | "dashed" | "dotted", strokeWidth: number): string | undefined {
   if (dash === "solid") return undefined;
   if (dash === "dashed") return `${strokeWidth * 3} ${strokeWidth * 2}`;
@@ -85,10 +104,27 @@ function arrowHeadPoints(tipX: number, tipY: number, dirX: number, dirY: number,
   return `${tipX},${tipY} ${tipX + size * Math.cos(a1)},${tipY + size * Math.sin(a1)} ${tipX + size * Math.cos(a2)},${tipY + size * Math.sin(a2)}`;
 }
 
+type ShapeKind = z.infer<typeof canvasShapeKindSchema>;
+
+/** The shape tool's live drag preview — same outline geometry as the
+ * committed shape, unfilled and dashed. Reused here so the preview always
+ * matches the currently-selected shape kind instead of defaulting to a
+ * rectangle regardless of what's actually about to be placed. */
+export function ShapeOutline({
+  shapeKind, x, y, width, height,
+}: { shapeKind: ShapeKind; x: number; y: number; width: number; height: number }) {
+  const cx = x + width / 2, cy = y + height / 2;
+  const common = { fill: "none", className: "stroke-accent", strokeWidth: 1.5, strokeDasharray: "4 3" };
+  if (shapeKind === "rectangle") return <rect x={x} y={y} width={width} height={height} {...common} />;
+  if (shapeKind === "ellipse") return <ellipse cx={cx} cy={cy} rx={width / 2} ry={height / 2} {...common} />;
+  if (shapeKind === "triangle") return <polygon points={`${cx},${y} ${x},${y + height} ${x + width},${y + height}`} {...common} />;
+  return <polygon points={starPoints(cx, cy, Math.min(width, height) / 2, Math.min(width, height) / 4.5)} {...common} />;
+}
+
 export function ElementShape({
-  element, selected, editing, onCommitText, onCommitMath, onRenameFrame, onStartEdit,
+  element, selected, soleSelected, editing, onCommitText, onCommitMath, onRenameFrame, onStartEdit,
 }: {
-  element: CanvasElement; selected: boolean; editing: boolean;
+  element: CanvasElement; selected: boolean; soleSelected: boolean; editing: boolean;
   onCommitText: (id: string, text: string) => void;
   onCommitMath: (id: string, latex: string) => void;
   onRenameFrame: (id: string, name: string) => void;
@@ -103,6 +139,10 @@ export function ElementShape({
     const headSize = Math.max(element.props.strokeWidth * 2.5, 8);
     return (
       <g data-element-id={element.id} opacity={element.opacity}>
+        {/* A thin line is a hard target to click precisely — this invisible,
+            wider stroke gives it a generous hit area without affecting how
+            it looks. */}
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={Math.max(element.props.strokeWidth, 16)} strokeLinecap="round" />
         <line
           x1={x1} y1={y1} x2={x2} y2={y2}
           stroke={element.props.color} strokeWidth={element.props.strokeWidth}
@@ -131,6 +171,10 @@ export function ElementShape({
 
     return (
       <g data-element-id={element.id} opacity={element.opacity}>
+        {/* An unfilled shape (fill="none") only catches pointer events on
+            its stroke, not its interior — this invisible full-bbox rect
+            makes the whole shape clickable/draggable regardless of fill. */}
+        <rect x={x} y={y} width={width} height={height} fill="transparent" />
         {hasPattern && (
           <defs>
             <pattern id={fillId} width={6} height={6} patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
@@ -181,7 +225,8 @@ export function ElementShape({
           />
         </foreignObject>
         {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
-        {selected && !editing && <ResizeHandles element={element} />}
+        {soleSelected && !editing && <ResizeHandles element={element} />}
+        {soleSelected && !editing && <DragHandle element={element} />}
       </g>
     );
   }
@@ -224,7 +269,8 @@ export function ElementShape({
         />
       </foreignObject>
       {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
-      {selected && !editing && <ResizeHandles element={element} />}
+      {soleSelected && !editing && <ResizeHandles element={element} />}
+      {soleSelected && !editing && <DragHandle element={element} />}
     </g>
   );
 }
