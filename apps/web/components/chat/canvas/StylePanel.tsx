@@ -148,13 +148,13 @@ export function StylePanel({
       {context.fill && (
         <div>
           <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Fill</div>
-          <div className="flex gap-1">
+          <div className="grid grid-cols-2 gap-1">
             {(["none", "solid", "hachure", "crosshatch"] as const).map((f) => (
               <button
                 key={f}
                 type="button"
                 onClick={() => onFillStyleChange(f)}
-                className={`flex-1 rounded-md border px-1.5 py-1 text-[11px] capitalize ${
+                className={`rounded-md border px-1.5 py-1 text-[11px] capitalize ${
                   fillStyle === f ? "border-accent bg-accent text-accent-fg" : "border-border text-fg-muted hover:bg-bg"
                 }`}
               >

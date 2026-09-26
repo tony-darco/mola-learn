@@ -546,7 +546,7 @@ export function CanvasView({
     if (el?.type === "text" || el?.type === "note" || el?.type === "math") setEditingId(id);
   }
 
-  function commitText(id: string, text: string) {
+  function commitText(id: string, text: string, contentHeight: number) {
     setEditingId(null);
     const trimmed = text.trim();
     if (trimmed.length === 0) {
@@ -554,11 +554,18 @@ export function CanvasView({
       setSelectedIds((prev) => { if (!prev.has(id)) return prev; const next = new Set(prev); next.delete(id); return next; });
       return;
     }
+    // contentHeight is measured in screen pixels; the box lives in world
+    // coordinates, so it has to come back through the current zoom. Grows
+    // the box to fit what was actually typed (more text, more lines, a
+    // bigger font) — never shrinks a manually-enlarged box, since this
+    // only ever raises the floor.
+    const neededHeight = contentHeight / transform.k;
     mutate((prev) =>
       prev.map((e) => {
         if (e.id !== id) return e;
-        if (e.type === "text") return { ...e, props: { ...e.props, text } };
-        if (e.type === "note") return { ...e, props: { ...e.props, text } };
+        const height = Math.max(e.height, neededHeight);
+        if (e.type === "text") return { ...e, height, props: { ...e.props, text } };
+        if (e.type === "note") return { ...e, height, props: { ...e.props, text } };
         return e;
       }),
     );

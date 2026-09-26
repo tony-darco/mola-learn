@@ -83,7 +83,12 @@ function DragHandle({ element }: { element: { id: string; x: number; y: number }
 function dashArray(dash: "solid" | "dashed" | "dotted", strokeWidth: number): string | undefined {
   if (dash === "solid") return undefined;
   if (dash === "dashed") return `${strokeWidth * 3} ${strokeWidth * 2}`;
-  return `${strokeWidth} ${strokeWidth * 1.5}`;
+  // A near-zero dash length collapses each mark to a point — combined with
+  // the round linecap every dashed/dotted element sets, that point renders
+  // as a filled circle. A dash length equal to strokeWidth (the old value)
+  // instead drew an elongated rounded-rectangle segment indistinguishable
+  // from a short dash — dotted and dashed looked identical.
+  return `0.1 ${strokeWidth * 2}`;
 }
 
 function starPoints(cx: number, cy: number, outerR: number, innerR: number): string {
@@ -99,8 +104,8 @@ function starPoints(cx: number, cy: number, outerR: number, innerR: number): str
 /** Arrowhead geometry shared by the line tool's optional start/end arrows. */
 function arrowHeadPoints(tipX: number, tipY: number, dirX: number, dirY: number, size: number): string {
   const angle = Math.atan2(dirY, dirX);
-  const a1 = angle + Math.PI - Math.PI / 7;
-  const a2 = angle + Math.PI + Math.PI / 7;
+  const a1 = angle + Math.PI - Math.PI / 6;
+  const a2 = angle + Math.PI + Math.PI / 6;
   return `${tipX},${tipY} ${tipX + size * Math.cos(a1)},${tipY + size * Math.sin(a1)} ${tipX + size * Math.cos(a2)},${tipY + size * Math.sin(a2)}`;
 }
 
@@ -125,7 +130,7 @@ export function ElementShape({
   element, selected, soleSelected, editing, onCommitText, onCommitMath, onRenameFrame, onStartEdit,
 }: {
   element: CanvasElement; selected: boolean; soleSelected: boolean; editing: boolean;
-  onCommitText: (id: string, text: string) => void;
+  onCommitText: (id: string, text: string, contentHeight: number) => void;
   onCommitMath: (id: string, latex: string) => void;
   onRenameFrame: (id: string, name: string) => void;
   onStartEdit: (id: string) => void;
@@ -136,7 +141,11 @@ export function ElementShape({
     const x1 = element.x, y1 = element.y;
     const x2 = element.x + element.props.endX, y2 = element.y + element.props.endY;
     const dx = x2 - x1, dy = y2 - y1;
-    const headSize = Math.max(element.props.strokeWidth * 2.5, 8);
+    // A head only ~2.5x the shaft width read as thin/undersized next to a
+    // thicker line — bumped so the arrowhead stays visually bold at every
+    // stroke width, not just the thinnest ones (where the 8px floor used
+    // to do most of the work anyway).
+    const headSize = Math.max(element.props.strokeWidth * 4, 12);
     return (
       <g data-element-id={element.id} opacity={element.opacity}>
         {/* A thin line is a hard target to click precisely — this invisible,
@@ -186,16 +195,16 @@ export function ElementShape({
           </defs>
         )}
         {element.props.shapeKind === "rectangle" && (
-          <rect x={x} y={y} width={width} height={height} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} />
+          <rect x={x} y={y} width={width} height={height} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} strokeLinecap="round" strokeLinejoin="round" />
         )}
         {element.props.shapeKind === "ellipse" && (
-          <ellipse cx={cx} cy={cy} rx={width / 2} ry={height / 2} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} />
+          <ellipse cx={cx} cy={cy} rx={width / 2} ry={height / 2} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} strokeLinecap="round" />
         )}
         {element.props.shapeKind === "triangle" && (
-          <polygon points={`${cx},${y} ${x},${y + height} ${x + width},${y + height}`} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} />
+          <polygon points={`${cx},${y} ${x},${y + height} ${x + width},${y + height}`} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} strokeLinecap="round" strokeLinejoin="round" />
         )}
         {element.props.shapeKind === "star" && (
-          <polygon points={starPoints(cx, cy, Math.min(width, height) / 2, Math.min(width, height) / 4.5)} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} />
+          <polygon points={starPoints(cx, cy, Math.min(width, height) / 2, Math.min(width, height) / 4.5)} fill={fill} stroke={element.props.color} strokeWidth={element.props.strokeWidth} strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)} strokeLinecap="round" strokeLinejoin="round" />
         )}
       </g>
     );
@@ -221,7 +230,7 @@ export function ElementShape({
           <InlineText
             text={element.props.text} color={element.props.textColor} editing={editing}
             bold={element.props.bold} italic={element.props.italic} fontSize={element.props.fontSize}
-            onCommit={(t) => onCommitText(element.id, t)} padded
+            onCommit={(t, h) => onCommitText(element.id, t, h)} padded
           />
         </foreignObject>
         {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
@@ -265,7 +274,7 @@ export function ElementShape({
           text={element.props.text} color={element.props.color} editing={editing}
           backgroundColor={element.props.backgroundColor} bold={element.props.bold} italic={element.props.italic}
           fontSize={element.props.fontSize}
-          onCommit={(t) => onCommitText(element.id, t)}
+          onCommit={(t, h) => onCommitText(element.id, t, h)}
         />
       </foreignObject>
       {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
@@ -391,7 +400,13 @@ function MathShape({
 function InlineText({
   text, color, editing, onCommit, padded, backgroundColor, bold, italic, fontSize,
 }: {
-  text: string; color: string; editing: boolean; onCommit: (text: string) => void; padded?: boolean;
+  text: string; color: string; editing: boolean;
+  /** contentHeight is the textarea's own scrollHeight in *screen* pixels at
+   * commit time — the caller converts it to world units (divide by the
+   * current zoom) before persisting, since this component has no notion of
+   * pan/zoom. */
+  onCommit: (text: string, contentHeight: number) => void;
+  padded?: boolean;
   backgroundColor?: string | null; bold?: boolean; italic?: boolean; fontSize?: number;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -428,7 +443,7 @@ function InlineText({
       style={textStyle}
       className={`w-full resize-none overflow-hidden border border-accent bg-surface text-sm outline-none ${padded ? "rounded-md p-2" : "rounded px-1.5 py-1"}`}
       onInput={(e) => autoGrow(e.currentTarget)}
-      onBlur={(e) => onCommit(e.currentTarget.value)}
+      onBlur={(e) => onCommit(e.currentTarget.value, e.currentTarget.scrollHeight)}
       onKeyDown={(e) => { if (e.key === "Escape") e.currentTarget.blur(); }}
     />
   );
