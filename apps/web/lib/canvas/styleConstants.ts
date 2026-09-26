@@ -2,6 +2,7 @@ export type WidthCategory = "S" | "M" | "L" | "XL";
 
 export const STROKE_WIDTHS: Record<WidthCategory, number> = { S: 2, M: 4, L: 8, XL: 16 };
 export const ERASER_SIZES: Record<WidthCategory, number> = { S: 8, M: 16, L: 28, XL: 44 };
+export const FONT_SIZES: Record<WidthCategory, number> = { S: 12, M: 16, L: 24, XL: 32 };
 
 /** 12-color grid, matching the reference style panel — 3 rows of 4. */
 export const COLOR_PALETTE = [

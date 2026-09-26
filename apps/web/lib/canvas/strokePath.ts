@@ -23,6 +23,18 @@ export function strokeToSvgPath(props: CanvasDrawElement["props"]): string {
   return getSvgPathFromStroke(outline);
 }
 
+/**
+ * A plain point-to-point path (no perfect-freehand outline) for the
+ * dashed/dotted draw variants — those render as a stroked line via
+ * stroke-dasharray, and dashing a variable-width filled outline doesn't
+ * read as a dashed line, so they skip the tapered-ink path entirely.
+ */
+export function strokeToPolylinePath(points: { x: number; y: number }[]): string {
+  if (points.length === 0) return "";
+  const [first, ...rest] = points;
+  return `M ${first!.x} ${first!.y} ` + rest.map((p) => `L ${p.x} ${p.y}`).join(" ");
+}
+
 function getSvgPathFromStroke(stroke: number[][]): string {
   if (stroke.length === 0) return "";
   const first = stroke[0]!;

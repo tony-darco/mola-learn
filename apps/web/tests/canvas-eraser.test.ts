@@ -12,7 +12,7 @@ function draw(id: string, absPoints: { x: number; y: number }[]): CanvasElement 
     type: "draw",
     props: {
       points: absPoints.map((p) => ({ x: p.x - minX, y: p.y - minY })),
-      color: "#000", strokeWidth: 2, variant: "pen",
+      color: "#000", strokeWidth: 2, variant: "pen", dash: "solid",
     },
   };
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { Bold, Italic } from "lucide-react";
 import type { z } from "zod";
 import type { canvasDashStyleSchema, canvasFillStyleSchema } from "@mola/shared";
 import { COLOR_PALETTE, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
@@ -11,23 +12,37 @@ type FillStyle = z.infer<typeof canvasFillStyleSchema>;
 export type StyleContext = {
   dash: boolean;
   fill: boolean;
+  /** Swaps the "Width" (stroke width) row's label to "Text size" — the
+   * caller still supplies widthCategory/onWidthChange, just routes the
+   * category to a font-size table instead of a stroke-width one. */
+  fontSize: boolean;
+  /** Shows the Background swatch row and Bold/Italic toggles. */
+  text: boolean;
 };
 
 export function StylePanel({
-  context, color, onColorChange, widthCategory, onWidthChange, opacity, onOpacityChange,
+  context, color, onColorChange, widthCategory, onWidthChange, opacity, onOpacityChange, onOpacityDragStart,
   dash, onDashChange, fillStyle, onFillStyleChange,
+  backgroundColor, onBackgroundColorChange, allowNoBackground,
+  bold, onBoldChange, italic, onItalicChange,
 }: {
   context: StyleContext;
   color: string; onColorChange: (c: string) => void;
   widthCategory: WidthCategory; onWidthChange: (w: WidthCategory) => void;
   opacity: number; onOpacityChange: (o: number) => void;
+  /** Called on pointerdown of the opacity slider — lets the caller snapshot
+   * undo history once per drag instead of once per slider tick. */
+  onOpacityDragStart?: () => void;
   dash: DashStyle; onDashChange: (d: DashStyle) => void;
   fillStyle: FillStyle; onFillStyleChange: (f: FillStyle) => void;
+  backgroundColor?: string | null; onBackgroundColorChange?: (c: string | null) => void; allowNoBackground?: boolean;
+  bold?: boolean; onBoldChange?: (b: boolean) => void;
+  italic?: boolean; onItalicChange?: (b: boolean) => void;
 }) {
   return (
-    <div className="absolute left-3 top-16 z-10 flex w-52 flex-col gap-3 rounded-xl border border-border bg-surface p-3 shadow-lg">
+    <div className="absolute left-4 top-20 z-20 flex w-52 flex-col gap-3 rounded-xl border border-border bg-surface p-3 shadow-lg">
       <div>
-        <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Color</div>
+        <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">{context.text ? "Font color" : "Color"}</div>
         <div className="grid grid-cols-4 gap-1.5">
           {COLOR_PALETTE.map((c) => (
             <button
@@ -42,8 +57,58 @@ export function StylePanel({
         </div>
       </div>
 
+      {context.text && (
+        <div>
+          <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Background</div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {allowNoBackground && (
+              <button
+                type="button"
+                aria-label="No background"
+                onClick={() => onBackgroundColorChange?.(null)}
+                className="relative h-6 w-6 rounded-full bg-[repeating-conic-gradient(#ccc_0_25%,transparent_0_50%)] bg-[length:6px_6px]"
+                style={{ outline: backgroundColor === null ? "2px solid var(--accent)" : "1px solid var(--border)", outlineOffset: 1 }}
+              />
+            )}
+            {COLOR_PALETTE.map((c) => (
+              <button
+                key={c}
+                type="button"
+                aria-label={`Background ${c}`}
+                onClick={() => onBackgroundColorChange?.(c)}
+                className="h-6 w-6 rounded-full"
+                style={{ backgroundColor: c, outline: backgroundColor === c ? "2px solid var(--accent)" : "1px solid var(--border)", outlineOffset: 1 }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {context.text && (
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => onBoldChange?.(!bold)}
+            aria-pressed={bold}
+            title="Bold"
+            className={`flex flex-1 items-center justify-center rounded-md border py-1 ${bold ? "border-accent bg-accent text-accent-fg" : "border-border text-fg-muted hover:bg-bg"}`}
+          >
+            <Bold size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onItalicChange?.(!italic)}
+            aria-pressed={italic}
+            title="Italic"
+            className={`flex flex-1 items-center justify-center rounded-md border py-1 ${italic ? "border-accent bg-accent text-accent-fg" : "border-border text-fg-muted hover:bg-bg"}`}
+          >
+            <Italic size={15} />
+          </button>
+        </div>
+      )}
+
       <div>
-        <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Width</div>
+        <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">{context.fontSize ? "Text size" : "Width"}</div>
         <div className="flex gap-1">
           {(Object.keys(STROKE_WIDTHS) as WidthCategory[]).map((w) => (
             <button
@@ -107,6 +172,7 @@ export function StylePanel({
         </div>
         <input
           type="range" min={0.1} max={1} step={0.05} value={opacity}
+          onPointerDown={onOpacityDragStart}
           onChange={(e) => onOpacityChange(Number(e.target.value))}
           style={{ accentColor: "var(--accent)" }}
           className="w-full"

@@ -89,7 +89,7 @@ describe("canvasPayloadSchema", () => {
   it("relative draw points reconstruct to the correct absolute points", () => {
     const el = draw({
       id: "d1", index: "a0", x: 100, y: 200,
-      props: { points: [{ x: 0, y: 0 }, { x: 5, y: 7 }], color: "#000", strokeWidth: 2, variant: "pen" },
+      props: { points: [{ x: 0, y: 0 }, { x: 5, y: 7 }], color: "#000", strokeWidth: 2, variant: "pen", dash: "solid" },
     });
     const parsed = canvasPayloadSchema.parse({ kind: "canvas", elements: [el], viewport: { x: 0, y: 0, zoom: 1 } });
     const parsedEl = parsed.elements[0]!;

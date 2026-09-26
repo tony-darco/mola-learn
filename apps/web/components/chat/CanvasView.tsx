@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { zoomIdentity } from "d3-zoom";
 import type { z } from "zod";
 import type { canvasDashStyleSchema, canvasFillStyleSchema, canvasPayloadSchema, CanvasElement } from "@mola/shared";
-import { strokeToSvgPath } from "@/lib/canvas/strokePath";
+import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
 import { usePanZoom } from "@/lib/canvas/usePanZoom";
 import { nextIndexAfterAll } from "@/lib/canvas/order";
 import { recomputeParentIds, deleteElement } from "@/lib/canvas/membership";
@@ -14,8 +14,10 @@ import { saveCanvasAction } from "@/lib/canvas/actions";
 import { uploadCanvasImageAction } from "@/lib/canvas/imageUpload";
 import { emptyHistory, pushHistory, redo as historyRedo, undo as historyUndo, type History } from "@/lib/canvas/history";
 import { eraseWholeObjects, erasePartial } from "@/lib/canvas/eraser";
-import { COLOR_PALETTE, ERASER_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
+import { resizeBox, type ResizeCorner } from "@/lib/canvas/resize";
+import { COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
 import { Toolbar, type EraserMode, type ShapeKind, type Tool } from "./canvas/Toolbar";
+import { BottomPill } from "./canvas/BottomPill";
 import { StylePanel, type StyleContext } from "./canvas/StylePanel";
 import { ElementShape } from "./canvas/ElementRenderer";
 import { useConfirm } from "./shell-context";
@@ -59,14 +61,17 @@ export function CanvasView({
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [background, setBackground] = useState(payload.background);
 
   const elementsRef = useRef(elements);
   elementsRef.current = elements;
   const viewportRef = useRef(payload.viewport);
-  const backgroundRef = useRef(payload.background);
+  const backgroundRef = useRef(background);
+  backgroundRef.current = background;
   const versionRef = useRef(initialVersion);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRef = useRef<History<CanvasElement[]>>(emptyHistory());
+  const resizeRef = useRef<{ id: string; corner: ResizeCorner } | null>(null);
 
   const toolRef = useRef(tool); toolRef.current = tool;
   const editingIdRef = useRef(editingId); editingIdRef.current = editingId;
@@ -136,6 +141,17 @@ export function CanvasView({
   function mutate(updater: (prev: CanvasElement[]) => CanvasElement[]) {
     snapshotHistory();
     applyMutation(updater);
+  }
+
+  /** Background isn't part of element history — a pattern/color swap isn't
+   * something you'd expect Ctrl+Z to undo one element at a time. */
+  function updateBackgroundPattern(pattern: Payload["background"]["pattern"]) {
+    setBackground((prev) => {
+      const next = { ...prev, pattern };
+      backgroundRef.current = next;
+      return next;
+    });
+    scheduleSave();
   }
 
   function handleUndo() {
@@ -210,7 +226,7 @@ export function CanvasView({
     return !target.closest?.("[data-element-id]");
   }
 
-  const { svgRef, transform, zoomBy, toWorld } = usePanZoom({
+  const { svgRef, transform, zoomBy, toWorld, setTransform } = usePanZoom({
     filter: panFilter,
     initialTransform: zoomIdentity.translate(payload.viewport.x, payload.viewport.y).scale(payload.viewport.zoom),
   });
@@ -239,13 +255,24 @@ export function CanvasView({
     if (spaceHeldRef.current || e.button === 1 || tool === "pan") return;
 
     if (tool === "select") {
+      const target = e.target as Element;
+      const handleEl = target.closest?.("[data-resize-handle]");
+      if (handleEl) {
+        const id = handleEl.getAttribute("data-element-id")!;
+        const corner = handleEl.getAttribute("data-resize-handle") as ResizeCorner;
+        target.setPointerCapture(e.pointerId);
+        snapshotHistory();
+        resizeRef.current = { id, corner };
+        return;
+      }
+
       const id = elementIdFromTarget(e.target);
       if (!id) { setSelectedId(null); return; }
       if (id === editingIdRef.current) return;
       setSelectedId(id);
       const el = elementsRef.current.find((x) => x.id === id);
       if (!el) return;
-      (e.target as Element).setPointerCapture(e.pointerId);
+      target.setPointerCapture(e.pointerId);
       snapshotHistory();
       dragRef.current = { id, startWorld: worldFromEvent(e), startX: el.x, startY: el.y };
       return;
@@ -298,6 +325,13 @@ export function CanvasView({
   }
 
   function handlePointerMove(e: React.PointerEvent<SVGSVGElement>) {
+    if (resizeRef.current) {
+      const { id, corner } = resizeRef.current;
+      const p = worldFromEvent(e);
+      applyMutation((prev) => prev.map((el) => (el.id === id ? { ...el, ...resizeBox(el, corner, p) } : el)));
+      return;
+    }
+
     if (dragRef.current) {
       const { id, startWorld, startX, startY } = dragRef.current;
       const p = worldFromEvent(e);
@@ -344,6 +378,12 @@ export function CanvasView({
   }
 
   function handlePointerUp() {
+    if (resizeRef.current) {
+      resizeRef.current = null;
+      applyMutation((prev) => recomputeParentIds(prev));
+      return;
+    }
+
     if (dragRef.current) {
       dragRef.current = null;
       applyMutation((prev) => recomputeParentIds(prev));
@@ -360,7 +400,7 @@ export function CanvasView({
             id: crypto.randomUUID(), parentId: null, index: nextIndexAfterAll(prev),
             x: finalized.x, y: finalized.y, width: finalized.width, height: finalized.height,
             rotation: 0, opacity, createdBy: "user", type: "draw",
-            props: { points: finalized.points, color, strokeWidth: STROKE_WIDTHS[widthCategory], variant: tool === "highlighter" ? "highlighter" : "pen" },
+            props: { points: finalized.points, color, strokeWidth: STROKE_WIDTHS[widthCategory], variant: tool === "highlighter" ? "highlighter" : "pen", dash },
           };
           return recomputeParentIds([...prev, el]);
         });
@@ -446,21 +486,21 @@ export function CanvasView({
           id: newId, parentId: null, index: nextIndexAfterAll(prev),
           x: p.x, y: p.y, width: TEXT_DEFAULT_WIDTH, height: TEXT_DEFAULT_HEIGHT,
           rotation: 0, opacity: 1, createdBy: "user", type: "text",
-          props: { text: "", color, fontSize: 14 },
+          props: { text: "", color, fontSize: FONT_SIZES[widthCategory], backgroundColor: null, bold: false, italic: false },
         };
       } else if (tool === "note") {
         el = {
           id: newId, parentId: null, index: nextIndexAfterAll(prev),
           x: p.x, y: p.y, width: NOTE_DEFAULT_SIZE, height: NOTE_DEFAULT_SIZE,
           rotation: 0, opacity: 1, createdBy: "user", type: "note",
-          props: { text: "", color: NOTE_DEFAULT_COLOR, textColor: color, fontSize: 14 },
+          props: { text: "", color: NOTE_DEFAULT_COLOR, textColor: color, fontSize: FONT_SIZES[widthCategory], bold: false, italic: false },
         };
       } else {
         el = {
           id: newId, parentId: null, index: nextIndexAfterAll(prev),
           x: p.x, y: p.y, width: MATH_DEFAULT_WIDTH, height: MATH_DEFAULT_HEIGHT,
           rotation: 0, opacity: 1, createdBy: "user", type: "math",
-          props: { latex: "", color, fontSize: 20 },
+          props: { latex: "", color, fontSize: FONT_SIZES[widthCategory] },
         };
       }
       return recomputeParentIds([...prev, el]);
@@ -510,6 +550,77 @@ export function CanvasView({
     mutate((prev) => prev.map((e) => (e.id === id && e.type === "frame" ? { ...e, props: { ...e.props, name } } : e)));
   }
 
+  function startEdit(id: string) {
+    setEditingId(id);
+    setSelectedId(id);
+  }
+
+  /** A placed text/note box's own live properties — edited directly, not
+   * routed through the ambient "next new element" defaults above. */
+  function updateSelectedElement(updater: (el: CanvasElement) => CanvasElement) {
+    if (!selectedId) return;
+    mutate((prev) => prev.map((e) => (e.id === selectedId ? updater(e) : e)));
+  }
+  function setSelectedFontColor(c: string) {
+    updateSelectedElement((e) => {
+      if (e.type === "text") return { ...e, props: { ...e.props, color: c } };
+      if (e.type === "note") return { ...e, props: { ...e.props, textColor: c } };
+      return e;
+    });
+  }
+  function setSelectedBackgroundColor(c: string | null) {
+    updateSelectedElement((e) => {
+      if (e.type === "text") return { ...e, props: { ...e.props, backgroundColor: c } };
+      if (e.type === "note" && c !== null) return { ...e, props: { ...e.props, color: c } };
+      return e;
+    });
+  }
+  function setSelectedFontSize(category: WidthCategory) {
+    const fontSize = FONT_SIZES[category];
+    updateSelectedElement((e) => {
+      if (e.type === "text") return { ...e, props: { ...e.props, fontSize } };
+      if (e.type === "note") return { ...e, props: { ...e.props, fontSize } };
+      return e;
+    });
+  }
+  function setSelectedBold(b: boolean) {
+    updateSelectedElement((e) => {
+      if (e.type === "text") return { ...e, props: { ...e.props, bold: b } };
+      if (e.type === "note") return { ...e, props: { ...e.props, bold: b } };
+      return e;
+    });
+  }
+  function setSelectedItalic(b: boolean) {
+    updateSelectedElement((e) => {
+      if (e.type === "text") return { ...e, props: { ...e.props, italic: b } };
+      if (e.type === "note") return { ...e, props: { ...e.props, italic: b } };
+      return e;
+    });
+  }
+  function setSelectedOpacity(o: number) {
+    if (!selectedId) return;
+    applyMutation((prev) => prev.map((e) => (e.id === selectedId ? { ...e, opacity: o } : e)));
+  }
+
+  function handleFitToContent() {
+    if (elementsRef.current.length === 0 || !svgRef.current) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const el of elementsRef.current) {
+      minX = Math.min(minX, el.x); minY = Math.min(minY, el.y);
+      maxX = Math.max(maxX, el.x + el.width); maxY = Math.max(maxY, el.y + el.height);
+    }
+    const rect = svgRef.current.getBoundingClientRect();
+    const pad = 60;
+    const contentW = maxX - minX + pad * 2, contentH = maxY - minY + pad * 2;
+    const scale = Math.min(2.5, Math.max(0.2, Math.min(rect.width / contentW, rect.height / contentH)));
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    setTransform(zoomIdentity.translate(rect.width / 2 - cx * scale, rect.height / 2 - cy * scale).scale(scale), 300);
+  }
+
+  function handleResetView() {
+    setTransform(zoomIdentity, 300);
+  }
+
   async function handleUploadImage(file: File) {
     const formData = new FormData();
     formData.append("file", file);
@@ -546,13 +657,35 @@ export function CanvasView({
   const canUndo = useMemo(() => historyRef.current.past.length > 0, [historyVersion]);
   const canRedo = useMemo(() => historyRef.current.future.length > 0, [historyVersion]);
   const sorted = useMemo(() => [...elements].sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : 0)), [elements]);
-  const styleContext: StyleContext = { dash: tool === "line" || tool === "arrow" || tool === "shape", fill: tool === "shape" };
-  const showStylePanel = ["draw", "highlighter", "line", "arrow", "shape", "text", "note", "math"].includes(tool);
+
+  const selectedElement = selectedId ? elements.find((e) => e.id === selectedId) ?? null : null;
+  const isTextLikeSelected = selectedElement?.type === "text" || selectedElement?.type === "note";
+
+  const styleContext: StyleContext = {
+    dash: !isTextLikeSelected && (tool === "line" || tool === "arrow" || tool === "shape" || tool === "draw" || tool === "highlighter"),
+    fill: !isTextLikeSelected && tool === "shape",
+    fontSize: isTextLikeSelected || tool === "text" || tool === "note" || tool === "math",
+    text: isTextLikeSelected,
+  };
+  const showAmbientStylePanel = ["draw", "highlighter", "line", "arrow", "shape", "text", "note", "math"].includes(tool);
+  const showStylePanel = showAmbientStylePanel || isTextLikeSelected;
   const now = Date.now();
   const visibleLaser = laserPoints.filter((p) => now - p.t < LASER_FADE_MS);
 
+  const panelColor = isTextLikeSelected ? getInkColor(selectedElement!) : color;
+  const panelOnColorChange = isTextLikeSelected ? setSelectedFontColor : setColor;
+  const panelWidthCategory = isTextLikeSelected ? categoryForFontSize(getFontSize(selectedElement!)) : widthCategory;
+  const panelOnWidthChange = isTextLikeSelected ? setSelectedFontSize : setWidthCategory;
+  const panelOpacity = isTextLikeSelected ? selectedElement!.opacity : opacity;
+  const panelOnOpacityChange = isTextLikeSelected ? setSelectedOpacity : setOpacity;
+  const panelOnOpacityDragStart = isTextLikeSelected ? snapshotHistory : undefined;
+  const panelBackground = isTextLikeSelected ? getBgColor(selectedElement!) : null;
+  const panelBold = isTextLikeSelected ? getBold(selectedElement!) : false;
+  const panelItalic = isTextLikeSelected ? getItalic(selectedElement!) : false;
+  const allowNoBackground = isTextLikeSelected && selectedElement!.type === "text";
+
   return (
-    <div className="relative flex h-[calc(100vh-140px)] flex-col overflow-hidden rounded-xl border border-border bg-bg">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg">
       <Toolbar
         tool={tool} onToolChange={setTool}
         locked={locked} onLockedChange={setLocked}
@@ -561,27 +694,38 @@ export function CanvasView({
         eraserSize={eraserSize} onEraserSizeChange={setEraserSize}
         canUndo={canUndo} canRedo={canRedo}
         onUndo={handleUndo} onRedo={handleRedo}
-        onUploadImage={handleUploadImage} onClearCanvas={handleClearCanvas} onZoomBy={zoomBy}
+        onUploadImage={handleUploadImage} onClearCanvas={handleClearCanvas}
+      />
+
+      <BottomPill
+        zoomPercent={Math.round(transform.k * 100)}
+        onZoomBy={zoomBy}
+        onFitToContent={handleFitToContent}
+        onResetView={handleResetView}
+        backgroundPattern={background.pattern}
+        onBackgroundPatternChange={updateBackgroundPattern}
       />
 
       {showStylePanel && (
         <StylePanel
           context={styleContext}
-          color={color} onColorChange={setColor}
-          widthCategory={widthCategory} onWidthChange={setWidthCategory}
-          opacity={opacity} onOpacityChange={setOpacity}
+          color={panelColor} onColorChange={panelOnColorChange}
+          widthCategory={panelWidthCategory} onWidthChange={panelOnWidthChange}
+          opacity={panelOpacity} onOpacityChange={panelOnOpacityChange} onOpacityDragStart={panelOnOpacityDragStart}
           dash={dash} onDashChange={setDash}
           fillStyle={fillStyle} onFillStyleChange={setFillStyle}
+          backgroundColor={panelBackground} onBackgroundColorChange={setSelectedBackgroundColor} allowNoBackground={allowNoBackground}
+          bold={panelBold} onBoldChange={setSelectedBold} italic={panelItalic} onItalicChange={setSelectedItalic}
         />
       )}
 
       {conflict && (
-        <div className="absolute right-3 top-16 z-10 rounded-md border border-red-300 bg-surface px-3 py-1.5 text-xs text-red-600 shadow dark:border-red-900 dark:text-red-400">
+        <div className="absolute right-3 top-20 z-10 rounded-md border border-red-300 bg-surface px-3 py-1.5 text-xs text-red-600 shadow dark:border-red-900 dark:text-red-400">
           This canvas changed elsewhere — reload to see the newest version.
         </div>
       )}
       {!conflict && saving && (
-        <div className="absolute right-3 top-16 z-10 text-xs text-fg-muted">Saving…</div>
+        <div className="absolute right-3 top-20 z-10 text-xs text-fg-muted">Saving…</div>
       )}
 
       <svg
@@ -595,7 +739,7 @@ export function CanvasView({
         onDoubleClick={handleDoubleClick}
       >
         <g transform={`translate(${transform.x},${transform.y}) scale(${transform.k})`}>
-          <BackgroundLayer background={payload.background} />
+          <BackgroundLayer background={background} />
 
           {sorted.map((el) => (
             <ElementShape
@@ -606,10 +750,13 @@ export function CanvasView({
               onCommitText={commitText}
               onCommitMath={commitMath}
               onRenameFrame={renameFrame}
+              onStartEdit={startEdit}
             />
           ))}
 
-          {draft && draft.points.length > 1 && <DraftStroke points={draft.points} color={color} highlighter={tool === "highlighter"} />}
+          {draft && draft.points.length > 1 && (
+            <DraftStroke points={draft.points} color={color} highlighter={tool === "highlighter"} dash={dash} strokeWidth={STROKE_WIDTHS[widthCategory]} />
+          )}
 
           {lineDraft && (
             <line x1={lineDraft.x1} y1={lineDraft.y1} x2={lineDraft.x2} y2={lineDraft.y2} stroke={color} strokeWidth={STROKE_WIDTHS[widthCategory]} strokeDasharray="4 3" />
@@ -634,9 +781,54 @@ export function CanvasView({
   );
 }
 
-function DraftStroke({ points, color, highlighter }: { points: DraftPoint[]; color: string; highlighter: boolean }) {
+/** Text/note prop accessors — the two element types put ink/paper on
+ * differently-named fields (text: color=ink, backgroundColor=paper; note:
+ * color=paper, textColor=ink), so the StylePanel wiring reads through these
+ * rather than branching on element.type at every call site. */
+function getInkColor(el: CanvasElement): string {
+  if (el.type === "note") return el.props.textColor;
+  if (el.type === "text") return el.props.color;
+  return "#1c1b18";
+}
+function getBgColor(el: CanvasElement): string | null {
+  if (el.type === "note") return el.props.color;
+  if (el.type === "text") return el.props.backgroundColor;
+  return null;
+}
+function getFontSize(el: CanvasElement): number {
+  return el.type === "note" || el.type === "text" ? el.props.fontSize : 16;
+}
+function getBold(el: CanvasElement): boolean {
+  return el.type === "note" || el.type === "text" ? el.props.bold : false;
+}
+function getItalic(el: CanvasElement): boolean {
+  return el.type === "note" || el.type === "text" ? el.props.italic : false;
+}
+function categoryForFontSize(size: number): WidthCategory {
+  let best: WidthCategory = "M";
+  let bestDiff = Infinity;
+  for (const [cat, val] of Object.entries(FONT_SIZES) as [WidthCategory, number][]) {
+    const diff = Math.abs(val - size);
+    if (diff < bestDiff) { bestDiff = diff; best = cat; }
+  }
+  return best;
+}
+
+function DraftStroke({
+  points, color, highlighter, dash, strokeWidth,
+}: { points: DraftPoint[]; color: string; highlighter: boolean; dash: DashStyle; strokeWidth: number }) {
   // Local, live preview only — never persisted, so no SSR/hydration concern; safe to compute directly every render.
-  const d = strokeToSvgPath({ points, color, strokeWidth: STROKE_WIDTHS.M, variant: highlighter ? "highlighter" : "pen" });
+  if (dash !== "solid") {
+    const d = strokeToPolylinePath(points);
+    return (
+      <path
+        d={d} fill="none" stroke={color} strokeWidth={strokeWidth}
+        strokeDasharray={dash === "dashed" ? `${strokeWidth * 3} ${strokeWidth * 2}` : `${strokeWidth} ${strokeWidth * 1.5}`}
+        strokeLinecap="round" strokeLinejoin="round" opacity={highlighter ? 0.4 : 1}
+      />
+    );
+  }
+  const d = strokeToSvgPath({ points, color, strokeWidth, variant: highlighter ? "highlighter" : "pen", dash });
   return <path d={d} fill={color} opacity={highlighter ? 0.4 : 1} />;
 }
 

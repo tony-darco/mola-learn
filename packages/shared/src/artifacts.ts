@@ -123,6 +123,11 @@ export const canvasDrawElementSchema = canvasElementBaseSchema.extend({
     strokeWidth: z.number().positive(),
     /** Highlighter renders translucent, flat-capped, and wider — same points/color/strokeWidth fields, different rendering. */
     variant: z.enum(["pen", "highlighter"]).default("pen"),
+    /** "solid" renders the tapered perfect-freehand ink; dashed/dotted fall
+     * back to a plain stroked polyline (dashing a variable-width filled
+     * outline doesn't read as a dashed line) — same visual language as the
+     * line/shape tools' dash option. */
+    dash: canvasDashStyleSchema.default("solid"),
   }),
 });
 
@@ -130,8 +135,13 @@ export const canvasTextElementSchema = canvasElementBaseSchema.extend({
   type: z.literal("text"),
   props: z.object({
     text: z.string(),
+    /** Font color. */
     color: z.string().min(1),
     fontSize: z.number().positive(),
+    /** null = transparent (the original, paper-less look). */
+    backgroundColor: z.string().nullable().default(null),
+    bold: z.boolean().default(false),
+    italic: z.boolean().default(false),
   }),
 });
 
@@ -170,9 +180,12 @@ export const canvasNoteElementSchema = canvasElementBaseSchema.extend({
   type: z.literal("note"),
   props: z.object({
     text: z.string(),
+    /** Paper color. */
     color: z.string().min(1),
     textColor: z.string().default("#1c1b18"),
     fontSize: z.number().positive(),
+    bold: z.boolean().default(false),
+    italic: z.boolean().default(false),
   }),
 });
 
