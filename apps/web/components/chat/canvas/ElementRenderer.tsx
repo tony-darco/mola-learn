@@ -2,41 +2,30 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
-import { Move, Pencil } from "lucide-react";
+import { Move, MoveDiagonal2, Pencil } from "lucide-react";
 import type { MathfieldElement } from "mathlive";
 import type { z } from "zod";
 import type { canvasShapeKindSchema, CanvasElement } from "@mola/shared";
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
-import type { ResizeCorner } from "@/lib/canvas/resize";
 
-const RESIZE_CORNERS: ResizeCorner[] = ["nw", "ne", "sw", "se"];
-
-/** Small drag handles at each corner of a selected, non-editing text/note
- * box — the "Scale (drag edges to scale the text box)" feature. */
-function ResizeHandles({ element }: { element: { id: string; x: number; y: number; width: number; height: number } }) {
-  const { x, y, width, height } = element;
-  const positions: Record<ResizeCorner, { cx: number; cy: number }> = {
-    nw: { cx: x, cy: y },
-    ne: { cx: x + width, cy: y },
-    sw: { cx: x, cy: y + height },
-    se: { cx: x + width, cy: y + height },
-  };
-  const cursor: Record<ResizeCorner, string> = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
+/** A single resize handle at the bottom-right corner — deliberately not one
+ * per corner; a single, always-in-the-same-place handle is a simpler,
+ * steadier target than four. It stays visible even while typing (rendered
+ * regardless of `editing`), so the moment you stop and move the mouse
+ * there's already something to grab, instead of the affordance appearing
+ * only after you click away first. */
+function ResizeHandle({ element }: { element: { id: string; x: number; y: number; width: number; height: number } }) {
   return (
-    <>
-      {RESIZE_CORNERS.map((corner) => (
-        <rect
-          key={corner}
-          data-resize-handle={corner}
-          data-element-id={element.id}
-          x={positions[corner].cx - 5} y={positions[corner].cy - 5}
-          width={10} height={10} rx={2}
-          className="fill-surface stroke-accent"
-          strokeWidth={1.5}
-          style={{ cursor: cursor[corner] }}
-        />
-      ))}
-    </>
+    <foreignObject x={element.x + element.width - 12} y={element.y + element.height - 12} width={24} height={24}>
+      <div
+        data-resize-handle="se"
+        data-element-id={element.id}
+        title="Drag to resize"
+        className="flex h-6 w-6 cursor-nwse-resize items-center justify-center rounded-full border border-border bg-surface text-fg-muted shadow active:cursor-nwse-resize"
+      >
+        <MoveDiagonal2 size={12} />
+      </div>
+    </foreignObject>
   );
 }
 
@@ -230,11 +219,12 @@ export function ElementShape({
           <InlineText
             text={element.props.text} color={element.props.textColor} editing={editing}
             bold={element.props.bold} italic={element.props.italic} fontSize={element.props.fontSize}
+            textAlign={element.props.textAlign}
             onCommit={(t, h) => onCommitText(element.id, t, h)} padded
           />
         </foreignObject>
         {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
-        {soleSelected && !editing && <ResizeHandles element={element} />}
+        {soleSelected && <ResizeHandle element={element} />}
         {soleSelected && !editing && <DragHandle element={element} />}
       </g>
     );
@@ -273,12 +263,12 @@ export function ElementShape({
         <InlineText
           text={element.props.text} color={element.props.color} editing={editing}
           backgroundColor={element.props.backgroundColor} bold={element.props.bold} italic={element.props.italic}
-          fontSize={element.props.fontSize}
+          fontSize={element.props.fontSize} textAlign={element.props.textAlign}
           onCommit={(t, h) => onCommitText(element.id, t, h)}
         />
       </foreignObject>
       {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
-      {soleSelected && !editing && <ResizeHandles element={element} />}
+      {soleSelected && <ResizeHandle element={element} />}
       {soleSelected && !editing && <DragHandle element={element} />}
     </g>
   );
@@ -398,7 +388,7 @@ function MathShape({
 }
 
 function InlineText({
-  text, color, editing, onCommit, padded, backgroundColor, bold, italic, fontSize,
+  text, color, editing, onCommit, padded, backgroundColor, bold, italic, fontSize, textAlign,
 }: {
   text: string; color: string; editing: boolean;
   /** contentHeight is the textarea's own scrollHeight in *screen* pixels at
@@ -408,6 +398,7 @@ function InlineText({
   onCommit: (text: string, contentHeight: number) => void;
   padded?: boolean;
   backgroundColor?: string | null; bold?: boolean; italic?: boolean; fontSize?: number;
+  textAlign?: "left" | "center" | "right";
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
@@ -426,6 +417,7 @@ function InlineText({
     fontWeight: bold ? 700 : 400,
     fontStyle: italic ? "italic" : "normal",
     fontSize,
+    textAlign,
   };
 
   if (!editing) {

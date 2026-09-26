@@ -33,6 +33,7 @@ const NOTE_DEFAULT_SIZE = 140;
 const MATH_DEFAULT_WIDTH = 160;
 const MATH_DEFAULT_HEIGHT = 40;
 const FRAME_MIN_SIZE = 20;
+const MIN_AUTO_FIT_FONT_SIZE = 8;
 const SAVE_DEBOUNCE_MS = 900;
 const LASER_FADE_MS = 700;
 const BG_PATTERN_ID = "canvas-bg-pattern";
@@ -515,14 +516,14 @@ export function CanvasView({
           id: newId, parentId: null, index: nextIndexAfterAll(prev),
           x: p.x, y: p.y, width: TEXT_DEFAULT_WIDTH, height: TEXT_DEFAULT_HEIGHT,
           rotation: 0, opacity: 1, createdBy: "user", type: "text",
-          props: { text: "", color, fontSize: FONT_SIZES[widthCategory], backgroundColor: null, bold: false, italic: false },
+          props: { text: "", color, fontSize: FONT_SIZES[widthCategory], backgroundColor: null, bold: false, italic: false, textAlign: "left", autoFit: "grow" },
         };
       } else if (tool === "note") {
         el = {
           id: newId, parentId: null, index: nextIndexAfterAll(prev),
           x: p.x, y: p.y, width: NOTE_DEFAULT_SIZE, height: NOTE_DEFAULT_SIZE,
           rotation: 0, opacity: 1, createdBy: "user", type: "note",
-          props: { text: "", color: NOTE_DEFAULT_COLOR, textColor: color, fontSize: FONT_SIZES[widthCategory], bold: false, italic: false },
+          props: { text: "", color: NOTE_DEFAULT_COLOR, textColor: color, fontSize: FONT_SIZES[widthCategory], bold: false, italic: false, textAlign: "left", autoFit: "grow" },
         };
       } else {
         el = {
@@ -555,17 +556,19 @@ export function CanvasView({
       return;
     }
     // contentHeight is measured in screen pixels; the box lives in world
-    // coordinates, so it has to come back through the current zoom. Grows
-    // the box to fit what was actually typed (more text, more lines, a
-    // bigger font) — never shrinks a manually-enlarged box, since this
-    // only ever raises the floor.
+    // coordinates, so it has to come back through the current zoom.
     const neededHeight = contentHeight / transform.k;
     mutate((prev) =>
       prev.map((e) => {
         if (e.id !== id) return e;
-        const height = Math.max(e.height, neededHeight);
-        if (e.type === "text") return { ...e, height, props: { ...e.props, text } };
-        if (e.type === "note") return { ...e, height, props: { ...e.props, text } };
+        if (e.type === "text") {
+          const fit = applyAutoFit(e.props.autoFit, e.height, e.props.fontSize, neededHeight);
+          return { ...e, height: fit.height, props: { ...e.props, text, fontSize: fit.fontSize } };
+        }
+        if (e.type === "note") {
+          const fit = applyAutoFit(e.props.autoFit, e.height, e.props.fontSize, neededHeight);
+          return { ...e, height: fit.height, props: { ...e.props, text, fontSize: fit.fontSize } };
+        }
         return e;
       }),
     );
@@ -636,6 +639,20 @@ export function CanvasView({
   function setSelectedOpacity(o: number) {
     if (!selectedId) return;
     applyMutation((prev) => prev.map((e) => (e.id === selectedId ? { ...e, opacity: o } : e)));
+  }
+  function setSelectedTextAlign(align: "left" | "center" | "right") {
+    updateSelectedElement((e) => {
+      if (e.type === "text") return { ...e, props: { ...e.props, textAlign: align } };
+      if (e.type === "note") return { ...e, props: { ...e.props, textAlign: align } };
+      return e;
+    });
+  }
+  function setSelectedAutoFit(autoFit: "fixed" | "shrink" | "grow") {
+    updateSelectedElement((e) => {
+      if (e.type === "text") return { ...e, props: { ...e.props, autoFit } };
+      if (e.type === "note") return { ...e, props: { ...e.props, autoFit } };
+      return e;
+    });
   }
 
   function handleFitToContent() {
@@ -718,6 +735,8 @@ export function CanvasView({
   const panelBackground = isTextLikeSelected ? getBgColor(selectedElement!) : null;
   const panelBold = isTextLikeSelected ? getBold(selectedElement!) : false;
   const panelItalic = isTextLikeSelected ? getItalic(selectedElement!) : false;
+  const panelTextAlign = isTextLikeSelected ? getTextAlign(selectedElement!) : "left";
+  const panelAutoFit = isTextLikeSelected ? getAutoFit(selectedElement!) : "grow";
   const allowNoBackground = isTextLikeSelected && selectedElement!.type === "text";
 
   return (
@@ -752,6 +771,8 @@ export function CanvasView({
           fillStyle={fillStyle} onFillStyleChange={setFillStyle}
           backgroundColor={panelBackground} onBackgroundColorChange={setSelectedBackgroundColor} allowNoBackground={allowNoBackground}
           bold={panelBold} onBoldChange={setSelectedBold} italic={panelItalic} onItalicChange={setSelectedItalic}
+          textAlign={panelTextAlign} onTextAlignChange={setSelectedTextAlign}
+          autoFit={panelAutoFit} onAutoFitChange={setSelectedAutoFit}
         />
       )}
 
@@ -843,6 +864,12 @@ function getBold(el: CanvasElement): boolean {
 function getItalic(el: CanvasElement): boolean {
   return el.type === "note" || el.type === "text" ? el.props.italic : false;
 }
+function getTextAlign(el: CanvasElement): "left" | "center" | "right" {
+  return el.type === "note" || el.type === "text" ? el.props.textAlign : "left";
+}
+function getAutoFit(el: CanvasElement): "fixed" | "shrink" | "grow" {
+  return el.type === "note" || el.type === "text" ? el.props.autoFit : "grow";
+}
 function categoryForFontSize(size: number): WidthCategory {
   let best: WidthCategory = "M";
   let bestDiff = Infinity;
@@ -851,6 +878,28 @@ function categoryForFontSize(size: number): WidthCategory {
     if (diff < bestDiff) { bestDiff = diff; best = cat; }
   }
   return best;
+}
+
+/**
+ * Reconciles a text/note box's stored size against what was actually typed:
+ * "fixed" never touches either (text may clip — the deliberate escape
+ * hatch); "grow" raises the box's height to fit (never shrinks a
+ * manually-enlarged box); "shrink" keeps the box's own height and instead
+ * scales the font down by how much the content overflowed, floored so text
+ * never becomes unreadably small. The font-size scale-down is a one-pass
+ * proportional estimate, not an iterative fit — wrapping is non-linear in
+ * font size, so this can slightly over/undershoot, but gets close in one
+ * step without re-measuring the DOM in a loop.
+ */
+function applyAutoFit(
+  autoFit: "fixed" | "shrink" | "grow", currentHeight: number, currentFontSize: number, neededHeight: number,
+): { height: number; fontSize: number } {
+  if (autoFit === "grow") return { height: Math.max(currentHeight, neededHeight), fontSize: currentFontSize };
+  if (autoFit === "shrink" && neededHeight > currentHeight && currentHeight > 0) {
+    const ratio = currentHeight / neededHeight;
+    return { height: currentHeight, fontSize: Math.max(MIN_AUTO_FIT_FONT_SIZE, Math.floor(currentFontSize * ratio)) };
+  }
+  return { height: currentHeight, fontSize: currentFontSize };
 }
 
 function DraftStroke({

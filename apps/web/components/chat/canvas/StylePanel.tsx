@@ -1,12 +1,17 @@
 "use client";
 
-import { Bold, Italic } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Bold, Italic } from "lucide-react";
 import type { z } from "zod";
 import type { canvasDashStyleSchema, canvasFillStyleSchema } from "@mola/shared";
 import { COLOR_PALETTE, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
 
 type DashStyle = z.infer<typeof canvasDashStyleSchema>;
 type FillStyle = z.infer<typeof canvasFillStyleSchema>;
+type TextAlign = "left" | "center" | "right";
+type AutoFit = "fixed" | "shrink" | "grow";
+
+const ALIGN_ICON: Record<TextAlign, typeof AlignLeft> = { left: AlignLeft, center: AlignCenter, right: AlignRight };
+const AUTO_FIT_LABEL: Record<AutoFit, string> = { fixed: "Fixed", shrink: "Shrink text", grow: "Grow box" };
 
 /** Which optional sections apply to the current tool/selection. */
 export type StyleContext = {
@@ -25,6 +30,7 @@ export function StylePanel({
   dash, onDashChange, fillStyle, onFillStyleChange,
   backgroundColor, onBackgroundColorChange, allowNoBackground,
   bold, onBoldChange, italic, onItalicChange,
+  textAlign, onTextAlignChange, autoFit, onAutoFitChange,
 }: {
   context: StyleContext;
   color: string; onColorChange: (c: string) => void;
@@ -38,6 +44,8 @@ export function StylePanel({
   backgroundColor?: string | null; onBackgroundColorChange?: (c: string | null) => void; allowNoBackground?: boolean;
   bold?: boolean; onBoldChange?: (b: boolean) => void;
   italic?: boolean; onItalicChange?: (b: boolean) => void;
+  textAlign?: TextAlign; onTextAlignChange?: (a: TextAlign) => void;
+  autoFit?: AutoFit; onAutoFitChange?: (f: AutoFit) => void;
 }) {
   return (
     <div className="absolute left-4 top-20 z-20 flex w-52 flex-col gap-3 rounded-xl border border-border bg-surface p-3 shadow-lg">
@@ -104,6 +112,52 @@ export function StylePanel({
           >
             <Italic size={15} />
           </button>
+        </div>
+      )}
+
+      {context.text && (
+        <div>
+          <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Align</div>
+          <div className="flex gap-1">
+            {(["left", "center", "right"] as const).map((a) => {
+              const Icon = ALIGN_ICON[a];
+              return (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => onTextAlignChange?.(a)}
+                  aria-pressed={textAlign === a}
+                  title={`Align ${a}`}
+                  className={`flex flex-1 items-center justify-center rounded-md border py-1 ${
+                    textAlign === a ? "border-accent bg-accent text-accent-fg" : "border-border text-fg-muted hover:bg-bg"
+                  }`}
+                >
+                  <Icon size={15} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {context.text && (
+        <div>
+          <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">Text fit</div>
+          <div className="flex flex-col gap-1">
+            {(["fixed", "shrink", "grow"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => onAutoFitChange?.(f)}
+                aria-pressed={autoFit === f}
+                className={`rounded-md border px-2 py-1 text-left text-xs ${
+                  autoFit === f ? "border-accent bg-accent text-accent-fg" : "border-border text-fg-muted hover:bg-bg"
+                }`}
+              >
+                {AUTO_FIT_LABEL[f]}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

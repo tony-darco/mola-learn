@@ -96,6 +96,12 @@ export const canvasDashStyleSchema = z.enum(["solid", "dashed", "dotted"]);
 export const canvasFillStyleSchema = z.enum(["solid", "hachure", "crosshatch", "none"]);
 export const canvasShapeKindSchema = z.enum(["rectangle", "ellipse", "triangle", "star"]);
 export const canvasBackgroundPatternSchema = z.enum(["dots", "grid", "lines", "blank"]);
+export const canvasTextAlignSchema = z.enum(["left", "center", "right"]);
+/** How a text/note box reconciles its stored size against what's actually
+ * typed: "fixed" never auto-adjusts (text may clip); "shrink" reduces the
+ * font size to keep the box's own size; "grow" enlarges the box to keep
+ * the font size. */
+export const canvasAutoFitSchema = z.enum(["fixed", "shrink", "grow"]);
 
 export const canvasElementBaseSchema = z.object({
   id: z.string().min(1),
@@ -142,6 +148,8 @@ export const canvasTextElementSchema = canvasElementBaseSchema.extend({
     backgroundColor: z.string().nullable().default(null),
     bold: z.boolean().default(false),
     italic: z.boolean().default(false),
+    textAlign: canvasTextAlignSchema.default("left"),
+    autoFit: canvasAutoFitSchema.default("grow"),
   }),
 });
 
@@ -186,6 +194,8 @@ export const canvasNoteElementSchema = canvasElementBaseSchema.extend({
     fontSize: z.number().positive(),
     bold: z.boolean().default(false),
     italic: z.boolean().default(false),
+    textAlign: canvasTextAlignSchema.default("left"),
+    autoFit: canvasAutoFitSchema.default("grow"),
   }),
 });
 
