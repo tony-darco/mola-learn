@@ -116,13 +116,16 @@ export function ShapeOutline({
 }
 
 export function ElementShape({
-  element, selected, soleSelected, editing, onCommitText, onCommitMath, onRenameFrame, onStartEdit,
+  element, selected, soleSelected, editing, onCommitText, onCommitMath, onRenameFrame, onStartEdit, zoom,
 }: {
   element: CanvasElement; selected: boolean; soleSelected: boolean; editing: boolean;
   onCommitText: (id: string, text: string, contentHeight: number) => void;
   onCommitMath: (id: string, latex: string) => void;
   onRenameFrame: (id: string, name: string) => void;
   onStartEdit: (id: string) => void;
+  /** Current pan/zoom scale — text/note boxes need it to convert a live,
+   * screen-pixel content-height reading into world units while typing. */
+  zoom: number;
 }) {
   if (element.type === "draw") return <DrawShape element={element} />;
 
@@ -213,20 +216,10 @@ export function ElementShape({
 
   if (element.type === "note") {
     return (
-      <g data-element-id={element.id} opacity={element.opacity} className="group">
-        <rect x={element.x} y={element.y} width={element.width} height={element.height} rx={6} fill={element.props.color} className={selected ? "stroke-accent" : ""} strokeWidth={selected ? 2 : 0} />
-        <foreignObject x={element.x} y={element.y} width={element.width} height={element.height}>
-          <InlineText
-            text={element.props.text} color={element.props.textColor} editing={editing}
-            bold={element.props.bold} italic={element.props.italic} fontSize={element.props.fontSize}
-            textAlign={element.props.textAlign}
-            onCommit={(t, h) => onCommitText(element.id, t, h)} padded
-          />
-        </foreignObject>
-        {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
-        {soleSelected && <ResizeHandle element={element} />}
-        {soleSelected && !editing && <DragHandle element={element} />}
-      </g>
+      <NoteShape
+        element={element} editing={editing} selected={selected} soleSelected={soleSelected}
+        onCommitText={onCommitText} onStartEdit={onStartEdit} zoom={zoom}
+      />
     );
   }
 
@@ -258,13 +251,75 @@ export function ElementShape({
 
   // text
   return (
+    <TextShape
+      element={element} editing={editing} soleSelected={soleSelected}
+      onCommitText={onCommitText} onStartEdit={onStartEdit} zoom={zoom}
+    />
+  );
+}
+
+/**
+ * Text and note boxes in "grow" autofit mode need to visually grow while
+ * the user is still typing, not just on commit — otherwise the box (and
+ * for a colored box, its own background) stays clipped at its old height
+ * for the whole gesture and only jumps to the right size on blur. Kept as
+ * its own component (like DrawShape/MathShape below) because it owns hooks
+ * that ElementShape's own early-return branches can't host directly.
+ */
+function TextShape({
+  element, editing, soleSelected, onCommitText, onStartEdit, zoom,
+}: {
+  element: Extract<CanvasElement, { type: "text" }>; editing: boolean; soleSelected: boolean;
+  onCommitText: (id: string, text: string, contentHeight: number) => void;
+  onStartEdit: (id: string) => void;
+  zoom: number;
+}) {
+  const [liveHeight, setLiveHeight] = useState(element.height);
+  useEffect(() => setLiveHeight(element.height), [element.height]);
+  const isGrowing = editing && element.props.autoFit === "grow";
+  const displayHeight = isGrowing ? Math.max(liveHeight, element.height) : element.height;
+
+  return (
     <g data-element-id={element.id} opacity={element.opacity} className="group">
-      <foreignObject x={element.x} y={element.y} width={element.width} height={element.height}>
+      <foreignObject x={element.x} y={element.y} width={element.width} height={displayHeight}>
         <InlineText
           text={element.props.text} color={element.props.color} editing={editing}
           backgroundColor={element.props.backgroundColor} bold={element.props.bold} italic={element.props.italic}
           fontSize={element.props.fontSize} textAlign={element.props.textAlign}
           onCommit={(t, h) => onCommitText(element.id, t, h)}
+          onLiveHeightChange={isGrowing ? (px) => setLiveHeight(px / zoom) : undefined}
+        />
+      </foreignObject>
+      {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
+      {soleSelected && <ResizeHandle element={element} />}
+      {soleSelected && !editing && <DragHandle element={element} />}
+    </g>
+  );
+}
+
+function NoteShape({
+  element, editing, selected, soleSelected, onCommitText, onStartEdit, zoom,
+}: {
+  element: Extract<CanvasElement, { type: "note" }>; editing: boolean; selected: boolean; soleSelected: boolean;
+  onCommitText: (id: string, text: string, contentHeight: number) => void;
+  onStartEdit: (id: string) => void;
+  zoom: number;
+}) {
+  const [liveHeight, setLiveHeight] = useState(element.height);
+  useEffect(() => setLiveHeight(element.height), [element.height]);
+  const isGrowing = editing && element.props.autoFit === "grow";
+  const displayHeight = isGrowing ? Math.max(liveHeight, element.height) : element.height;
+
+  return (
+    <g data-element-id={element.id} opacity={element.opacity} className="group">
+      <rect x={element.x} y={element.y} width={element.width} height={displayHeight} rx={6} fill={element.props.color} className={selected ? "stroke-accent" : ""} strokeWidth={selected ? 2 : 0} />
+      <foreignObject x={element.x} y={element.y} width={element.width} height={displayHeight}>
+        <InlineText
+          text={element.props.text} color={element.props.textColor} editing={editing}
+          bold={element.props.bold} italic={element.props.italic} fontSize={element.props.fontSize}
+          textAlign={element.props.textAlign}
+          onCommit={(t, h) => onCommitText(element.id, t, h)} padded
+          onLiveHeightChange={isGrowing ? (px) => setLiveHeight(px / zoom) : undefined}
         />
       </foreignObject>
       {!editing && <EditBadge element={element} onStartEdit={onStartEdit} />}
@@ -388,7 +443,7 @@ function MathShape({
 }
 
 function InlineText({
-  text, color, editing, onCommit, padded, backgroundColor, bold, italic, fontSize, textAlign,
+  text, color, editing, onCommit, padded, backgroundColor, bold, italic, fontSize, textAlign, onLiveHeightChange,
 }: {
   text: string; color: string; editing: boolean;
   /** contentHeight is the textarea's own scrollHeight in *screen* pixels at
@@ -399,6 +454,10 @@ function InlineText({
   padded?: boolean;
   backgroundColor?: string | null; bold?: boolean; italic?: boolean; fontSize?: number;
   textAlign?: "left" | "center" | "right";
+  /** Fires on every keystroke (screen px, same units as onCommit's
+   * contentHeight) — lets the caller grow the box in real time instead of
+   * only once on blur. Omitted entirely outside "grow" autofit mode. */
+  onLiveHeightChange?: (contentHeight: number) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
@@ -409,6 +468,7 @@ function InlineText({
   function autoGrow(el: HTMLTextAreaElement) {
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
+    onLiveHeightChange?.(el.scrollHeight);
   }
 
   const textStyle: React.CSSProperties = {

@@ -810,6 +810,7 @@ export function CanvasView({
               onCommitMath={commitMath}
               onRenameFrame={renameFrame}
               onStartEdit={startEdit}
+              zoom={transform.k}
             />
           ))}
 
