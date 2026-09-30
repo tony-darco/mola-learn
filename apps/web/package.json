@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "worker": "tsx scripts/worker.ts"
+    "worker": "tsx scripts/worker.ts",
+    "eval:canvas": "tsx evals/canvas-syntax/run.ts"
   },
   "dependencies": {
     "@auth/core": "0.41.3",

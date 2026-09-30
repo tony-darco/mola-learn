@@ -1,13 +1,17 @@
 /**
  * A tiny single-stroke "handwriting" font for driving the canvas pen tool
  * from a test. Every glyph is a hand-authored set of polylines in a unit box
- * (x across, y down) — no randomness, no wobble — so the same text at the
- * same position always yields the identical pen path, point for point.
+ * (x across, y down), so the same text at the same position always yields
+ * the identical pen path, point for point.
  *
- * The only non-trivial math is `arc`'s sin/cos. V8 computes those with a
- * portable software implementation, and every coordinate is snapped to whole
- * pixels in `penStroke` before it leaves this file, so a last-bit difference
- * between machines can't change the output.
+ * `Jitter` adds human-looking variation (slant, size, position, tremor) from
+ * a seeded PRNG — still fully deterministic: the same seed gives the same
+ * strokes on every run.
+ *
+ * The only non-trivial math is sin/cos. V8 computes those with a portable
+ * software implementation, and every coordinate is snapped to whole pixels
+ * before it leaves this file, so a last-bit difference between machines
+ * can't change the output.
  */
 export type Pt = { x: number; y: number };
 export type Stroke = Pt[];
@@ -45,16 +49,93 @@ const GLYPHS: Record<string, XY[][]> = {
   "↓": [[[0.5, 0], [0.5, 1]], [[0.15, 0.62], [0.5, 1], [0.85, 0.62]]],
 };
 
+// ── Jitter ───────────────────────────────────────────────────────────────────
+
+/** mulberry32 — tiny, well-distributed, and the same sequence for the same seed everywhere. */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export type Jitter = {
+  rng: () => number;
+  /** Per-glyph lean, ± degrees. */
+  slantDeg: number;
+  /** Per-glyph size change, ± fraction. */
+  scale: number;
+  /** Per-glyph position drift, ± px. */
+  offset: number;
+  /** Each stroke inside a glyph lands slightly off from the others, ± px. */
+  strokeOffset: number;
+  /** Smooth tremor along each stroke, px amplitude. */
+  wobble: number;
+};
+
+/** Moderate, human-looking defaults — readable, but no two copies of a character alike. */
+export function makeJitter(seed: number): Jitter {
+  return { rng: seededRandom(seed), slantDeg: 10, scale: 0.1, offset: 2.5, strokeOffset: 1.2, wobble: 1.2 };
+}
+
+const spread = (j: Jitter, amount: number) => (j.rng() * 2 - 1) * amount;
+
+/**
+ * Slants, resizes, and nudges one glyph (or bracket/bar) as a unit, about
+ * the centre of its box, then nudges each of its strokes a little on its own.
+ */
+export function distort(
+  strokes: Pt[][], box: { x: number; y: number; w: number; h: number }, j: Jitter, slantDeg = j.slantDeg,
+): Pt[][] {
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const s = 1 + spread(j, j.scale);
+  const k = Math.tan((spread(j, slantDeg) * Math.PI) / 180);
+  const ox = spread(j, j.offset);
+  const oy = spread(j, j.offset);
+  return strokes.map((stroke) => {
+    const sx = spread(j, j.strokeOffset);
+    const sy = spread(j, j.strokeOffset);
+    return stroke.map((p) => {
+      const dx = (p.x - cx) * s;
+      const dy = (p.y - cy) * s;
+      // A positive slant leans the top of the glyph to the right.
+      return { x: cx + dx - k * dy + ox + sx, y: cy + dy + oy + sy };
+    });
+  });
+}
+
+/** Low-frequency sine tremor along the stroke's own length, random phase per stroke. */
+function wobble(points: Pt[], j: Jitter): Pt[] {
+  const wavelength = 18 + j.rng() * 18;
+  const phaseX = j.rng() * Math.PI * 2;
+  const phaseY = j.rng() * Math.PI * 2;
+  let travelled = 0;
+  return points.map((p, i) => {
+    const prev = points[i - 1];
+    if (prev) travelled += Math.hypot(p.x - prev.x, p.y - prev.y);
+    const t = (travelled / wavelength) * Math.PI * 2;
+    return { x: p.x + j.wobble * Math.sin(t + phaseX), y: p.y + j.wobble * Math.sin(t * 0.8 + phaseY) };
+  });
+}
+
+// ── Strokes ──────────────────────────────────────────────────────────────────
+
 /** Largest gap between neighbouring pen samples, in px — dense enough that arcs read as curves. */
 const STEP_PX = 5;
 
 /**
  * Turns a polyline into the sample list a real pen would produce: extra
  * points inserted so no two neighbours are more than STEP_PX apart, then
- * every point snapped to whole pixels (so replay doesn't depend on
- * sub-pixel pointer handling) with consecutive repeats dropped.
+ * (optionally) a hand tremor, then every point snapped to whole pixels (so
+ * replay doesn't depend on sub-pixel pointer handling) with consecutive
+ * repeats dropped.
  */
-export function penStroke(points: Pt[]): Stroke {
+export function penStroke(points: Pt[], jitter?: Jitter): Stroke {
   const dense: Pt[] = [];
   points.forEach((p, i) => {
     const prev = points[i - 1];
@@ -68,7 +149,7 @@ export function penStroke(points: Pt[]): Stroke {
   });
 
   const out: Stroke = [];
-  for (const p of dense) {
+  for (const p of jitter ? wobble(dense, jitter) : dense) {
     const q = { x: Math.round(p.x), y: Math.round(p.y) };
     const last = out[out.length - 1];
     if (!last || last.x !== q.x || last.y !== q.y) out.push(q);
@@ -85,17 +166,30 @@ export function textWidth(text: string, size: number): number {
   return text.length === 0 ? 0 : (text.length - 1) * advance(size) + glyphWidth(size);
 }
 
-/** Pen strokes for `text` with its top-left corner at (x, y) and a cap height of `size`. Spaces only advance. */
-export function textStrokes(text: string, x: number, y: number, size: number): Stroke[] {
-  const out: Stroke[] = [];
+/** One drawn character: what it is, which space-separated word of the text it belongs to, and its strokes. */
+export type PlacedGlyph = { char: string; word: number; strokes: Stroke[] };
+
+/** Glyphs for `text` with its top-left corner at (x, y) and a cap height of `size`. Spaces only advance. */
+export function textGlyphs(text: string, x: number, y: number, size: number, jitter?: Jitter): PlacedGlyph[] {
+  const out: PlacedGlyph[] = [];
+  let word = 0;
   [...text].forEach((ch, i) => {
-    if (ch === " ") return;
+    if (ch === " ") {
+      if (text[i - 1] !== " " && i > 0) word++;
+      return;
+    }
     const glyph = GLYPHS[ch];
     if (!glyph) throw new Error(`strokeFont: no glyph for "${ch}"`);
     const gx = x + i * advance(size);
-    for (const stroke of glyph) {
-      out.push(penStroke(stroke.map(([u, v]) => ({ x: gx + u * glyphWidth(size), y: y + v * size }))));
-    }
+    const box = { x: gx, y, w: glyphWidth(size), h: size };
+    const placed = glyph.map((stroke) => stroke.map(([u, v]) => ({ x: gx + u * box.w, y: y + v * size })));
+    const shaped = jitter ? distort(placed, box, jitter) : placed;
+    out.push({ char: ch, word, strokes: shaped.map((s) => penStroke(s, jitter)) });
   });
   return out;
+}
+
+/** Pen strokes for `text` — `textGlyphs` without the per-character bookkeeping. */
+export function textStrokes(text: string, x: number, y: number, size: number, jitter?: Jitter): Stroke[] {
+  return textGlyphs(text, x, y, size, jitter).flatMap((g) => g.strokes);
 }
