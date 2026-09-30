@@ -193,3 +193,41 @@ export function textGlyphs(text: string, x: number, y: number, size: number, jit
 export function textStrokes(text: string, x: number, y: number, size: number, jitter?: Jitter): Stroke[] {
   return textGlyphs(text, x, y, size, jitter).flatMap((g) => g.strokes);
 }
+
+// ── Marks ────────────────────────────────────────────────────────────────────
+// Pen marks drawn about writing: a loop around something, a line under it,
+// an arrow between two things. People aim these at what they mean, so jitter
+// moves their ends by a few px instead of scaling the whole mark.
+
+const nudge = (p: Pt, amount: number, j?: Jitter): Pt => (j ? { x: p.x + spread(j, amount), y: p.y + spread(j, amount) } : p);
+
+/** A loop around (cx, cy): an ellipse started at its upper left, going round a little past where it began. */
+export function loopStroke(cx: number, cy: number, rx: number, ry: number, jitter?: Jitter): Stroke {
+  const points = arc(cx, cy, rx, ry, 200, 580, 40).map(([x, y]) => ({ x, y }));
+  const [shaped] = jitter ? distort([points], { x: cx - rx, y: cy - ry, w: 2 * rx, h: 2 * ry }, jitter, 5) : [points];
+  return penStroke(shaped!, jitter);
+}
+
+/** A straight stroke from `a` to `b` — an underline, say, or a highlighter pass. */
+export function straightStroke(a: Pt, b: Pt, jitter?: Jitter): Stroke {
+  return penStroke([nudge(a, 2.5, jitter), nudge(b, 2.5, jitter)], jitter);
+}
+
+/**
+ * An arrow from `tail` to `tip`: the shaft, then a head of two barbs about
+ * 28° either side of it — drawn as a separate V stroke, or on in the same
+ * stroke (out along one barb, back to the tip, out along the other).
+ */
+export function arrowStrokes(tail: Pt, tip: Pt, head: "separate" | "joined", jitter?: Jitter, barbLength = 18): Stroke[] {
+  const t = nudge(tip, 2.5, jitter);
+  const s = nudge(tail, 2.5, jitter);
+  const back = Math.atan2(s.y - t.y, s.x - t.x);
+  const barb = (side: 1 | -1): Pt => {
+    const a = back + (side * (28 + (jitter ? spread(jitter, 6) : 0)) * Math.PI) / 180;
+    const l = barbLength * (1 + (jitter ? spread(jitter, 0.15) : 0));
+    return { x: t.x + l * Math.cos(a), y: t.y + l * Math.sin(a) };
+  };
+  const [left, right] = [barb(1), barb(-1)];
+  if (head === "joined") return [penStroke([s, t, left, t, right], jitter)];
+  return [penStroke([s, t], jitter), penStroke([left, nudge(t, jitter?.strokeOffset ?? 0, jitter), right], jitter)];
+}

@@ -59,17 +59,17 @@ export function boxOf(points: Pt[]): Box {
   return b;
 }
 
-function union(boxes: Box[]): Box {
+export function union(boxes: Box[]): Box {
   return {
     minX: Math.min(...boxes.map((b) => b.minX)), minY: Math.min(...boxes.map((b) => b.minY)),
     maxX: Math.max(...boxes.map((b) => b.maxX)), maxY: Math.max(...boxes.map((b) => b.maxY)),
   };
 }
 
-const width = (b: Box) => b.maxX - b.minX;
-const height = (b: Box) => b.maxY - b.minY;
-const centerX = (b: Box) => (b.minX + b.maxX) / 2;
-const centerY = (b: Box) => (b.minY + b.maxY) / 2;
+export const width = (b: Box) => b.maxX - b.minX;
+export const height = (b: Box) => b.maxY - b.minY;
+export const centerX = (b: Box) => (b.minX + b.maxX) / 2;
+export const centerY = (b: Box) => (b.minY + b.maxY) / 2;
 
 /** `b` grown about its centre to at least `minHeight` tall — a line holding only a minus sign is still a line, not a flat band. */
 function atLeastTall(b: Box, minHeight: number): Box {
@@ -77,7 +77,7 @@ function atLeastTall(b: Box, minHeight: number): Box {
   return { ...b, minY: b.minY - grow, maxY: b.maxY + grow };
 }
 
-function median(values: number[]): number {
+export function median(values: number[]): number {
   if (values.length === 0) return 0;
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
@@ -255,21 +255,29 @@ function buildTexts(inks: Ink[], unit: number): Omit<TextBlock, "id">[] {
   return out;
 }
 
-/** Top to bottom within each column of the board, columns left to right; ids numbered in that order. */
-function readingOrder(blocks: (Omit<MatrixBlock, "id"> | Omit<TextBlock, "id">)[]): Block[] {
-  const bands = groupBy(blocks, (a, b) => Math.min(a.box.maxX, b.box.maxX) > Math.max(a.box.minX, b.box.minX))
+/** Top to bottom within each column of the board (things whose x-extents overlap), columns left to right. */
+export function inReadingOrder<T extends { box: Box }>(items: T[]): T[] {
+  return groupBy(items, (a, b) => Math.min(a.box.maxX, b.box.maxX) > Math.max(a.box.minX, b.box.minX))
     .map((band) => band.sort((a, b) => a.box.minY - b.box.minY || a.box.minX - b.box.minX))
-    .sort((a, b) => union(a.map((x) => x.box)).minX - union(b.map((x) => x.box)).minX);
+    .sort((a, b) => union(a.map((x) => x.box)).minX - union(b.map((x) => x.box)).minX)
+    .flat();
+}
 
+/** Reading order, with ids numbered in that order. */
+function readingOrder(blocks: (Omit<MatrixBlock, "id"> | Omit<TextBlock, "id">)[]): Block[] {
   let matrices = 0;
   let texts = 0;
-  return bands.flat().map((b) => (b.kind === "matrix" ? { ...b, id: `M${++matrices}` } : { ...b, id: `T${++texts}` }));
+  return inReadingOrder(blocks).map((b) => (b.kind === "matrix" ? { ...b, id: `M${++matrices}` } : { ...b, id: `T${++texts}` }));
+}
+
+/** "Typical stroke size" — a digit's height, a minus sign's width. Every threshold here and in marks.ts is a multiple of it. */
+export function strokeUnit(inks: Ink[]): number {
+  return Math.max(1, median(inks.map((i) => Math.max(width(i.box), height(i.box)))));
 }
 
 export function segmentHandwriting(inks: Ink[]): HandwritingDoc {
   if (inks.length === 0) return { blocks: [] };
-  // "Typical stroke size" — a digit's height, a minus sign's width.
-  const unit = Math.max(1, median(inks.map((i) => Math.max(width(i.box), height(i.box)))));
+  const unit = strokeUnit(inks);
 
   const kinds = new Map(inks.map((i) => [i.id, classifyTall(i, unit)]));
   const lefts = inks.filter((i) => kinds.get(i.id) === "left").sort((a, b) => a.box.minX - b.box.minX);

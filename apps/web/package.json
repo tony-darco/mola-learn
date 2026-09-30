@@ -11,7 +11,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "worker": "tsx scripts/worker.ts",
-    "eval:canvas": "tsx evals/canvas-syntax/run.ts"
+    "eval:canvas": "tsx evals/canvas-syntax/run.ts",
+    "eval:canvas-reader": "tsx evals/canvas-reader/run.ts"
   },
   "dependencies": {
     "@auth/core": "0.41.3",

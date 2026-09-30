@@ -20,6 +20,8 @@
  *   pnpm --filter @mola/web eval:canvas --max-call-minutes 10    # abort a call that runs longer, and stop the run
  *   pnpm --filter @mola/web eval:canvas --resume evals/canvas-syntax/output/<timestamp>   # finish a stopped run
  */
+// First: it loads .env.local before anything can import lib/llm/ollama.ts.
+import { ask } from "../ollama";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,11 +31,6 @@ import { leaderboard, parseReply, scoreNormalized, scoreStageA, scoreStageB, sug
 import { loadStageB, writeReport } from "./report";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-// Like e2e/global-setup.ts: a plain Node process doesn't get .env.local for free.
-// It must load before lib/llm/ollama.ts, which reads OLLAMA_HOST at import time.
-const envPath = resolve(here, "../../.env.local");
-if (existsSync(envPath)) process.loadEnvFile(envPath);
-const { OllamaProvider } = await import("@/lib/llm/ollama");
 
 // ── options ─────────────────────────────────────────────────────────────────
 
@@ -84,53 +81,6 @@ Transcribe everything handwritten above.
 - For every line of text (T1, T2, ...), give the text with single spaces between words.
 Reply with ONLY a JSON object of this shape (the values shown are placeholders):
 {"matrices": {"M1": [["7", "-4", "12", "9"], ...], ...}, "text": {"T1": "...", ...}}`;
-}
-
-/** `firstTokenMs`: when the first visible token arrived — for a thinking model, roughly how long it thought. */
-type CallResult = {
-  raw: string; stopReason: string | null; errors: string[];
-  latencyMs: number; firstTokenMs: number | null; attempts: number; timedOut: boolean;
-};
-
-const describeError = (err: unknown) => {
-  if (!(err instanceof Error)) return String(err);
-  const cause = err.cause as { code?: string; message?: string } | undefined;
-  return cause ? `${err.message} (${cause.code ?? cause.message})` : err.message;
-};
-
-/**
- * One call, never throwing. A network failure before any output (a
- * transient EHOSTUNREACH) is retried twice; a call cut off at `timeoutMs`
- * is not.
- */
-async function ask(model: string, think: boolean, prompt: string, opts: { maxTokens?: number; timeoutMs?: number } = {}): Promise<CallResult> {
-  const provider = new OllamaProvider(model, think);
-  const errors: string[] = [];
-  for (let attempt = 1; ; attempt++) {
-    const signal = opts.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined;
-    const started = performance.now();
-    let raw = "";
-    let stopReason: string | null = null;
-    let firstTokenMs: number | null = null;
-    try {
-      for await (const ev of provider.stream({ system: SYSTEM, messages: [{ role: "user", content: prompt }], maxTokens: opts.maxTokens, signal })) {
-        if (ev.type === "text_delta") {
-          firstTokenMs ??= Math.round(performance.now() - started);
-          raw += ev.text;
-        } else if (ev.type === "done") stopReason = ev.stopReason;
-        else if (ev.type === "error") errors.push(ev.message);
-      }
-    } catch (err) {
-      errors.push(`attempt ${attempt}: ${describeError(err)}`);
-      if (!raw && attempt < 3 && !signal?.aborted) {
-        await new Promise((r) => setTimeout(r, 5_000));
-        continue;
-      }
-    }
-    const timedOut = !!signal?.aborted;
-    if (timedOut) errors.push(`cut off after ${opts.timeoutMs! / 60_000} minutes`);
-    return { raw, stopReason, errors, latencyMs: Math.round(performance.now() - started), firstTokenMs, attempts: attempt, timedOut };
-  }
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
@@ -193,11 +143,11 @@ if (!opts.stageAOnly) {
           }
           if (!warmedUp) {
             // Load the model with the same options the timed calls use, so its first call isn't charged for it.
-            const warm = await ask(model, false, "Reply with {}", { maxTokens: 1 });
+            const warm = await ask(model, false, SYSTEM, "Reply with {}", { maxTokens: 1 });
             console.log(`${model}: warmed up in ${(warm.latencyMs / 1000).toFixed(1)}s${warm.errors.length ? ` (${warm.errors.join("; ")})` : ""}`);
             warmedUp = true;
           }
-          const call = await ask(model, opts.think, prompt, { timeoutMs: opts.maxCallMs });
+          const call = await ask(model, opts.think, SYSTEM, prompt, { timeoutMs: opts.maxCallMs });
           const parsed = parseReply(call.raw);
           const { steps, scores } = scoreStageB(FIXTURES[fixture].plan.steps, mapping, parsed);
           const summary: RunSummary = {

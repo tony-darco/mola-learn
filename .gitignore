@@ -37,6 +37,8 @@ apps/web/blob-report/
 
 # canvas-syntax eval runs (apps/web/evals/canvas-syntax)
 apps/web/evals/canvas-syntax/output/
+# canvas-reader eval runs (apps/web/evals/canvas-reader)
+apps/web/evals/canvas-reader/output/
 
 # local-only dev-server launch config for the Browser preview tool
 .claude/

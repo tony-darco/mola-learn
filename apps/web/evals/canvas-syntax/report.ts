@@ -38,9 +38,9 @@ export function loadStageB(dir: string): StageBFile[] {
     .map((b) => ({ ...b, condition: b.condition ?? "raw" }));
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
-const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+export const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+export const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 const frac = (a: number, b: number) => `<span class="${a === b ? "ok" : "bad"}">${a}/${b}</span>`;
 
 // ── pieces ──────────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ function runDetails(b: StageBFile): string {
 
 // ── page ────────────────────────────────────────────────────────────────────
 
-const CSS = `
+export const CSS = `
 :root { color-scheme: light dark; --bg:#ffffff; --fg:#1c1b18; --muted:#6b6860; --line:#ddd9cf; --card:#f7f5ee;
   --ok:#15803d; --bad:#b91c1c; --bad-bg:#fde2e2; --pick:#fff7d6; --accent:#2563eb; --ink:#1c1b18; }
 @media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#ece9e1; --muted:#a19d93; --line:#3a3833; --card:#211f1c;
