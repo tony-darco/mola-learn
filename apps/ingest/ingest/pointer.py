@@ -43,7 +43,9 @@ class OllamaSummarizer:
         )
         resp = httpx.post(
             f"{self.host}/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False},
+            # A two-paragraph summary gains nothing from hidden reasoning, and
+            # a thinking model would otherwise spend most of the call on it.
+            json={"model": self.model, "prompt": prompt, "stream": False, "think": False},
             timeout=600,
         )
         resp.raise_for_status()
