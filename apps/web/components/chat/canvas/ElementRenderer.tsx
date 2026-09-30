@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
 import { Move, MoveDiagonal2, Pencil } from "lucide-react";
 import type { MathfieldElement } from "mathlive";
@@ -116,11 +116,12 @@ export function ShapeOutline({
 }
 
 export function ElementShape({
-  element, selected, soleSelected, editing, onCommitText, onCommitMath, onRenameFrame, onStartEdit, zoom,
+  element, selected, soleSelected, editing, onCommitText, onCommitMath, onMeasureMath, onRenameFrame, onStartEdit, zoom,
 }: {
   element: CanvasElement; selected: boolean; soleSelected: boolean; editing: boolean;
   onCommitText: (id: string, text: string, contentHeight: number) => void;
   onCommitMath: (id: string, latex: string) => void;
+  onMeasureMath: (id: string, width: number, height: number) => void;
   onRenameFrame: (id: string, name: string) => void;
   onStartEdit: (id: string) => void;
   /** Current pan/zoom scale — text/note boxes need it to convert a live,
@@ -224,7 +225,7 @@ export function ElementShape({
   }
 
   if (element.type === "math") {
-    return <MathShape element={element} editing={editing} onCommit={onCommitMath} />;
+    return <MathShape element={element} editing={editing} onCommit={onCommitMath} onMeasure={onMeasureMath} />;
   }
 
   if (element.type === "frame") {
@@ -384,11 +385,16 @@ function DrawShape({ element }: { element: Extract<CanvasElement, { type: "draw"
   );
 }
 
+/** Breathing room around a formula inside its box, in canvas units. */
+const MATH_PAD = 6;
+
 function MathShape({
-  element, editing, onCommit,
+  element, editing, onCommit, onMeasure,
 }: {
   element: Extract<CanvasElement, { type: "math" }>; editing: boolean;
   onCommit: (id: string, latex: string) => void;
+  /** Reports the box size the rendered formula actually needs, when it differs from the stored one. */
+  onMeasure: (id: string, width: number, height: number) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -396,6 +402,12 @@ function MathShape({
     () => (mounted ? katex.renderToString(element.props.latex || "\\,", { throwOnError: false }) : ""),
     [element.props.latex, mounted],
   );
+  // React 19 re-sets innerHTML whenever this object is new, even with an
+  // identical string — which rebuilt the formula's DOM on every re-render,
+  // including the one selecting it on pointerdown. The node under the
+  // pointer vanished before pointerup, so the browser never fired click or
+  // dblclick, and double-click-to-edit silently did nothing.
+  const innerHtml = useMemo(() => ({ __html: html }), [html]);
 
   const [ready, setReady] = useState(false);
   const fieldRef = useRef<MathfieldElement | null>(null);
@@ -414,15 +426,52 @@ function MathShape({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- set once when the editor opens, not on every keystroke.
   }, [editing, ready]);
 
+  // While editing, the box grows with what's being typed instead of clipping it.
+  const [editorSize, setEditorSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const field = fieldRef.current;
+    if (!editing || !ready || !field) return;
+    const measure = () => setEditorSize({ width: field.offsetWidth, height: field.offsetHeight });
+    measure();
+    field.addEventListener("input", measure);
+    return () => field.removeEventListener("input", measure);
+  }, [editing, ready]);
+
+  // A committed formula's box is exactly what KaTeX draws — a matrix or a
+  // long equation needs more than the 160×40 a new math element starts at —
+  // so it's never clipped, and selection sees its real extent.
+  // offsetWidth/Height are layout sizes, untouched by the canvas's pan/zoom
+  // transform, so they're already in canvas units. Measured again once web
+  // fonts load, since KaTeX's metrics change when its fonts arrive.
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (editing || !html) return;
+    let cancelled = false;
+    const measure = () => {
+      const content = contentRef.current;
+      if (cancelled || !content) return;
+      const width = content.offsetWidth + MATH_PAD * 2;
+      const height = content.offsetHeight + MATH_PAD * 2;
+      if (Math.abs(width - element.width) > 1 || Math.abs(height - element.height) > 1) onMeasure(element.id, width, height);
+    };
+    measure();
+    document.fonts?.ready.then(measure);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-measure only when what's drawn changes, not after our own resize.
+  }, [editing, html, element.props.fontSize]);
+
   if (editing) {
     return (
-      <foreignObject data-element-id={element.id} x={element.x} y={element.y} width={Math.max(element.width, 140)} height={Math.max(element.height, 40)}>
+      <foreignObject
+        data-element-id={element.id} x={element.x} y={element.y}
+        width={Math.max(element.width, 140, editorSize.width + 4)} height={Math.max(element.height, 40, editorSize.height + 4)}
+      >
         {ready ? (
           <math-field
             ref={fieldRef as unknown as React.RefObject<HTMLElement>}
             onBlur={() => onCommit(element.id, fieldRef.current?.value ?? element.props.latex)}
             onKeyDown={(e: React.KeyboardEvent) => { if (e.key === "Escape") (e.target as HTMLElement).blur(); }}
-            className="block rounded border border-accent bg-surface px-1.5 py-1 text-base"
+            className="inline-block min-w-[140px] rounded border border-accent bg-surface px-1.5 py-1 text-base"
           />
         ) : (
           <div className="text-xs text-fg-muted">Loading…</div>
@@ -435,9 +484,10 @@ function MathShape({
     <foreignObject data-element-id={element.id} x={element.x} y={element.y} width={element.width} height={element.height} opacity={element.opacity}>
       <div
         className="flex h-full items-center"
-        style={{ color: element.props.color, fontSize: element.props.fontSize }}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+        style={{ color: element.props.color, fontSize: element.props.fontSize, padding: `0 ${MATH_PAD}px` }}
+      >
+        <div ref={contentRef} className="inline-block whitespace-nowrap" dangerouslySetInnerHTML={innerHtml} />
+      </div>
     </foreignObject>
   );
 }

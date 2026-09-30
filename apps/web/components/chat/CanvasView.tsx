@@ -585,6 +585,11 @@ export function CanvasView({
     mutate((prev) => prev.map((e) => (e.id === id && e.type === "math" ? { ...e, props: { ...e.props, latex } } : e)));
   }
 
+  /** A math box sizing itself to its rendered formula — layout, not an edit, so no undo step. */
+  function measureMath(id: string, width: number, height: number) {
+    applyMutation((prev) => prev.map((e) => (e.id === id && e.type === "math" ? { ...e, width, height } : e)));
+  }
+
   function renameFrame(id: string, name: string) {
     mutate((prev) => prev.map((e) => (e.id === id && e.type === "frame" ? { ...e, props: { ...e.props, name } } : e)));
   }
@@ -808,6 +813,7 @@ export function CanvasView({
               editing={el.id === editingId}
               onCommitText={commitText}
               onCommitMath={commitMath}
+              onMeasureMath={measureMath}
               onRenameFrame={renameFrame}
               onStartEdit={startEdit}
               zoom={transform.k}
