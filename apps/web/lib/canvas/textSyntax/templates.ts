@@ -1,8 +1,10 @@
 /**
  * Reference shapes for the character recognizer (recognize.ts): a few
- * hand-drawn variants of every character it knows, the way different people
- * write them — a "1" bare or with a flag and base, an open and a closed "4",
- * a "7" with and without a crossbar, one- and two-stroke "R"s.
+ * hand-drawn variants of every character it matches by shape, the way
+ * different people write them — a "1" bare, flagged, leaning, or with a
+ * base, an open and a closed "4", a "7" with and without a crossbar, one- and
+ * two-stroke "R"s. ("-" and "=" aren't here: they are recognized from their
+ * straight strokes instead.)
  *
  * Each variant is a list of strokes; each stroke is a polyline in pen order,
  * on a grid 10 wide and 16 tall (x across, y down). Only the shape matters —
@@ -24,6 +26,8 @@ export const TEMPLATES: Record<string, Variant[]> = {
     [[[5, 0], [5, 16]]],
     // With a flag.
     [[[2, 4], [5.5, 0], [5.5, 16]]],
+    // Leaning right, with a flag.
+    [[[3.5, 4], [7.5, 0], [4.5, 16]]],
     // With a flag and a base.
     [[[2.5, 3.5], [5.5, 0], [5.5, 16]], [[2, 16], [9, 16]]],
   ],
@@ -78,17 +82,10 @@ export const TEMPLATES: Record<string, Variant[]> = {
     // A loop and a curved tail.
     [[[8, 2], [5.5, 0], [2.5, 0.5], [1, 3.5], [2, 6.5], [5, 7], [8, 5], [8.5, 2], [8.5, 8], [7.5, 12.5], [5, 15.5], [2, 16]]],
   ],
-  "-": [
-    [[[0, 0], [10, 0]]],
-    [[[0, 0.6], [10, -0.3]]],
-  ],
+  // Usually caught by the straight-stroke check; these are for a "+" drawn less cleanly.
   "+": [
     [[[5, 1], [5, 9]], [[1, 5], [9, 5]]],
     [[[0.5, 4.5], [9.5, 5]], [[5.5, 0], [4.5, 10]]],
-  ],
-  "=": [
-    [[[0, 0], [10, 0]], [[0, 4], [10, 4]]],
-    [[[0.5, 0], [9, 0.3]], [[0, 4.5], [10, 4.2]]],
   ],
   R: [
     // One stroke: up the stem, round the bowl, back to the stem, out along the leg.

@@ -77,23 +77,27 @@ function stageAMetrics(m: StageAMetrics): string {
 
 const misreadList = (m: NormalizedMetrics) => m.confusions.map((c) => `${esc(c.expected)} → ${esc(c.got)} <small>×${c.count}</small>`).join(", ");
 
-/** Recognition on jittered hands it was not tuned on — one row per seed, then the total. */
-function heldOutTable(rows: (NormalizedMetrics & { seed: number })[]): string {
+/** Recognition on jittered hands it was not tuned on, added up over all their seeds. */
+function heldOutMetrics(rows: (NormalizedMetrics & { seed: number })[]): string {
   const sum = (f: (m: NormalizedMetrics) => number) => rows.reduce((n, m) => n + f(m), 0);
-  const line = (label: string, g: [number, number], fallback: number, wrong: number, cells: [number, number], texts: [number, number], misreads: string) =>
-    `<tr><th>${label}</th><td>${frac(...g)}</td><td class="num">${fallback}</td><td class="num ${wrong ? "bad" : "ok"}">${wrong}</td><td>${frac(...cells)}</td><td>${frac(...texts)}</td><td>${misreads}</td></tr>`;
-  return `<table class="metrics"><caption>Recognition on held-out hands (jitter seeds 3–5)</caption>
-    <thead><tr><th></th><th>Characters</th><th>Uncertain</th><th>Misread, not flagged</th><th>Cells</th><th>Text lines</th><th>Misreads</th></tr></thead><tbody>
-    ${rows.map((m) => line(`seed ${m.seed}`, [m.glyphs.correct, m.glyphs.expected], m.glyphs.fallback, m.glyphs.confidentWrong,
-      [m.cells.correct, m.cells.expected], [m.texts.correct, m.texts.expected], misreadList(m) || "none")).join("")}
-    ${line("total", [sum((m) => m.glyphs.correct), sum((m) => m.glyphs.expected)], sum((m) => m.glyphs.fallback), sum((m) => m.glyphs.confidentWrong),
-      [sum((m) => m.cells.correct), sum((m) => m.cells.expected)], [sum((m) => m.texts.correct), sum((m) => m.texts.expected)], "")}
-  </tbody></table>`;
+  const confusions = new Map<string, NormalizedMetrics["confusions"][number]>();
+  for (const c of rows.flatMap((m) => m.confusions)) {
+    const k = `${c.expected}\u0000${c.got}`;
+    confusions.set(k, { ...c, count: (confusions.get(k)?.count ?? 0) + c.count });
+  }
+  const total: NormalizedMetrics = {
+    glyphs: { expected: sum((m) => m.glyphs.expected), correct: sum((m) => m.glyphs.correct), fallback: sum((m) => m.glyphs.fallback), confidentWrong: sum((m) => m.glyphs.confidentWrong) },
+    cells: { expected: sum((m) => m.cells.expected), correct: sum((m) => m.cells.correct) },
+    texts: { expected: sum((m) => m.texts.expected), correct: sum((m) => m.texts.correct) },
+    confusions: [...confusions.values()].sort((a, b) => b.count - a.count),
+  };
+  const seeds = rows.map((m) => m.seed);
+  return normalizedMetrics(total, `Recognition on held-out hands (jitter seeds ${Math.min(...seeds)}–${Math.max(...seeds)}, added up)`);
 }
 
-function normalizedMetrics(m: NormalizedMetrics): string {
+function normalizedMetrics(m: NormalizedMetrics, caption = "Recognition — what we wrote vs what was read"): string {
   const misreads = misreadList(m);
-  return `<table class="metrics"><caption>Recognition — what we wrote vs what was read</caption><tbody>
+  return `<table class="metrics"><caption>${esc(caption)}</caption><tbody>
     <tr><th>Characters read correctly</th><td>${frac(m.glyphs.correct, m.glyphs.expected)}</td></tr>
     <tr><th>Left uncertain (shown as bitmaps)</th><td>${m.glyphs.fallback}</td></tr>
     <tr><th>Misread and not flagged</th><td class="${m.glyphs.confidentWrong ? "bad" : "ok"}">${m.glyphs.confidentWrong}</td></tr>
@@ -265,7 +269,7 @@ export function buildReport(dir: string): string {
 <p class="meta">${meta}</p>
 <h2>Leaderboard</h2>${leaderSection}
 <h2>Stage A — segmentation and recognition</h2>
-${heldOut ? `<p class="meta">The recognizer's cut-offs and confidence threshold were tuned on jitter seeds 1–2 only — so the jitter fixture (seed 1) is tuning data, while the clean hand and seeds 3–5 are held out.</p><div class="scroll">${heldOutTable(heldOut)}</div>` : ""}
+${heldOut ? `<p class="meta">The recognizer's constants and confidence threshold were tuned on jitter seeds 1–20 only — so the jitter fixture (seed 1) is tuning data, while the clean hand and the seeds below are held out. "∅" means segmentation never produced the glyph as written.</p>${heldOutMetrics(heldOut)}` : ""}
 ${fixtureSections}
 ${runSections ? `<h2>Stage B — answers, step by step</h2><p class="meta">Red cells are wrong: what the model wrote, with the true entry underneath.</p>${runSections}` : ""}
 </body></html>

@@ -167,8 +167,8 @@ for (const name of opts.fixtures) {
     + (normalized.confusions.length ? `; misread ${normalized.confusions.map((c) => `${c.expected}→${c.got} ×${c.count}`).join(", ")}` : ""));
 }
 
-// The recognizer was tuned on jitter seeds 1–2 (the jitter fixture is seed 1); these hands are unseen.
-write("recognition-held-out.json", [3, 4, 5].map((seed) => {
+// The recognizer was tuned on jitter seeds 1–20 (the jitter fixture is seed 1); these hands are unseen.
+write("recognition-held-out.json", Array.from({ length: 50 }, (_, i) => 100 + i).map((seed) => {
   const fx = makeFixture(`seed ${seed}`, seed);
   const { doc } = canvasHandwritingToText(fx.elements);
   return { seed, ...scoreNormalized(fx.plan, doc, scoreStageA(fx.plan, doc).mapping) };
