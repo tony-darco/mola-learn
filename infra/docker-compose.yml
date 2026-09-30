@@ -63,6 +63,8 @@ services:
       S3_BUCKET_SAFE: mola-safe
       S3_BUCKET_QUARANTINE: mola-quarantine
       OLLAMA_HOST: http://192.168.1.17:11434
+      # Same model as chat, so a summary job never evicts it from the 12 GB GPU.
+      MOLA_CHAT_MODEL: gemma4:26b
       CLAMD_HOST: clamav
       CLAMD_PORT: "3310"
     depends_on:

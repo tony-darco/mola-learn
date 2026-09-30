@@ -38,7 +38,7 @@ const { OllamaProvider } = await import("@/lib/llm/ollama");
 // ── options ─────────────────────────────────────────────────────────────────
 
 /** The candidates for canvas work. Any other Ollama tag can be passed with --models. */
-const DEFAULT_MODELS = ["gemma4:26b", "gemma4:12b", "qwen3.6:27b"];
+const DEFAULT_MODELS = ["gemma4:26b", "gemma4:12b"];
 const CONDITIONS: SyntaxRender[] = ["raw", "normalized"];
 
 function readOptions() {

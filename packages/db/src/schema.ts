@@ -36,7 +36,7 @@ export const users = pgTable("users", {
   expectedGradDate: timestamp("expected_grad_date", { withTimezone: true }),
   phoneNumber: text("phone_number"),
   /** What a newly created chat starts with. Updated whenever the user changes either on any chat. */
-  defaultModel: text("default_model").notNull().default("qwen3.6:27b"),
+  defaultModel: text("default_model").notNull().default("gemma4:26b"),
   defaultThinkingEnabled: integer("default_thinking_enabled").notNull().default(1),
   /** What create_quiz falls back to when the student's prompt doesn't say
    * how many questions (§6, Agent G) — editable in Settings. */
@@ -94,7 +94,7 @@ export const chats = pgTable("chats", {
   title: text("title").notNull().default("New chat"),
   isPinned: integer("is_pinned").notNull().default(0),
   /** Snapshotted from the user's default at creation; overridable per chat (§ model switcher). */
-  model: text("model").notNull().default("qwen3.6:27b"),
+  model: text("model").notNull().default("gemma4:26b"),
   thinkingEnabled: integer("thinking_enabled").notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
