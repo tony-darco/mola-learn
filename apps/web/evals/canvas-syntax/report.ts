@@ -14,6 +14,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PlannedStep } from "@/e2e/support/matrixPlan";
+import type { AlphabetMetrics } from "./alphabet";
 import {
   leaderboard, suggestedModel,
   type LeaderRow, type NormalizedMetrics, type Reply, type RunSummary, type StageAMetrics, type StepMapping, type StepResult, type summarizeDoc,
@@ -93,6 +94,31 @@ function heldOutMetrics(rows: (NormalizedMetrics & { seed: number })[]): string 
   };
   const seeds = rows.map((m) => m.seed);
   return normalizedMetrics(total, `Recognition on held-out hands (jitter seeds ${Math.min(...seeds)}–${Math.max(...seeds)}, added up)`);
+}
+
+type AlphabetFile = {
+  clean: AlphabetMetrics; tuning: Omit<AlphabetMetrics, "reads">; heldOut: Omit<AlphabetMetrics, "reads">;
+  matrixHeldOut: (NormalizedMetrics & { seed: number })[];
+};
+
+/** The full alphabet, clean and over the tuning and held-out hands, side by side; then the clean hand's lines as read. */
+export function alphabetSection(a: AlphabetFile): string {
+  const cols: [string, Omit<AlphabetMetrics, "reads">][] = [["clean hand", a.clean], ["seeds 1–20 (tuning)", a.tuning], ["seeds 300–349 (held out)", a.heldOut]];
+  const row = (label: string, f: (m: Omit<AlphabetMetrics, "reads">) => string) => `<tr><th>${label}</th>${cols.map(([, m]) => `<td class="num">${f(m)}</td>`).join("")}</tr>`;
+  const share = (n: number, d: number) => `${n} <small>${pct(d ? n / d : 0)}</small>`;
+  return `<table class="metrics"><caption>The full alphabet — A–Z, a–z, 0–9, symbols, Greek — alone and in formulas</caption>
+    <thead><tr><th></th>${cols.map(([c]) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>
+    ${row("Characters", (m) => String(m.glyphs.expected))}
+    ${row("Segmented as written", (m) => share(m.glyphs.segmented, m.glyphs.expected))}
+    ${row("Read correctly", (m) => share(m.glyphs.correct, m.glyphs.expected))}
+    ${row("Flagged as unsure", (m) => share(m.glyphs.flagged, m.glyphs.segmented))}
+    ${row("Misread and not flagged", (m) => `<span class="${m.glyphs.confidentWrong ? "bad" : "ok"}">${share(m.glyphs.confidentWrong, m.glyphs.segmented)}</span>`)}
+    ${row("Sub/superscripts read as such", (m) => `${share(m.scripts.correct, m.scripts.expected)}${m.scripts.falsePositives ? ` <small>+${m.scripts.falsePositives} taken for scripts</small>` : ""}`)}
+    ${row("Lines exact", (m) => share(m.lines.correct, m.lines.expected))}
+    </tbody></table>
+    <p class="meta">Confusions on the held-out hands (written → read; "?" = flagged, "∅" = not segmented as written):
+    ${a.heldOut.confusions.slice(0, 40).map((c) => `${esc(c.expected)}→${esc(c.got)} <small>×${c.count}</small>`).join(", ")}</p>
+    <details><summary>The clean hand's lines, as read</summary><pre>${esc(a.clean.reads.map((r) => `${r.expected === r.got ? "  " : "✗ "}${r.got}${r.expected === r.got ? "" : `   (written: ${r.expected})`}`).join("\n"))}</pre></details>`;
 }
 
 function normalizedMetrics(m: NormalizedMetrics, caption = "Recognition — what we wrote vs what was read"): string {
@@ -216,6 +242,7 @@ export function buildReport(dir: string): string {
   const stageA = readdirSync(dir).filter((f) => /^stage-a\..+\.json$/.test(f)).sort().map((f) => read<StageAFile>(f));
   const stageB = loadStageB(dir);
   const heldOut = existsSync(join(dir, "recognition-held-out.json")) ? read<(NormalizedMetrics & { seed: number })[]>("recognition-held-out.json") : null;
+  const alphabet = existsSync(join(dir, "recognition-alphabet.json")) ? read<AlphabetFile>("recognition-alphabet.json") : null;
 
   const fixtures = summary?.options.fixtures ?? stageA.map((a) => a.fixture);
   const models = [...new Set([...(summary?.options.models ?? []), ...stageB.map((b) => b.model)])];
@@ -270,6 +297,7 @@ export function buildReport(dir: string): string {
 <h2>Leaderboard</h2>${leaderSection}
 <h2>Stage A — segmentation and recognition</h2>
 ${heldOut ? `<p class="meta">The recognizer's constants and confidence threshold were tuned on jitter seeds 1–20 only — so the jitter fixture (seed 1) is tuning data, while the clean hand and the seeds below are held out. "∅" means segmentation never produced the glyph as written.</p>${heldOutMetrics(heldOut)}` : ""}
+${alphabet ? `${heldOutMetrics(alphabet.matrixHeldOut)}<h3>The full alphabet</h3>${alphabetSection(alphabet)}` : ""}
 ${fixtureSections}
 ${runSections ? `<h2>Stage B — answers, step by step</h2><p class="meta">Red cells are wrong: what the model wrote, with the true entry underneath.</p>${runSections}` : ""}
 </body></html>

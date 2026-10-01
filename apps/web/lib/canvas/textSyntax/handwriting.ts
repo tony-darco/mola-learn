@@ -11,8 +11,25 @@
  * for a read of a selected region that cuts through it.
  */
 import { renderWord } from "./bitmap";
-import { recognizeDoc } from "./recognize";
+import { recognizeDoc, type Script } from "./recognize";
 import type { Block, Box, HandwritingDoc, MatrixBlock, TextBlock, Word } from "./segment";
+
+/**
+ * A word's characters with its scripts marked, as in LaTeX: "H_2O", "x^2",
+ * and braces round a run of more than one character, "x^{10}", "C_{?g1}".
+ */
+export function scriptedText(chars: { char: string; script?: Script | null }[]): string {
+  let out = "";
+  for (let i = 0; i < chars.length;) {
+    const script = chars[i]!.script ?? null;
+    let j = i + 1;
+    while (j < chars.length && (chars[j]!.script ?? null) === script) j++;
+    const run = chars.slice(i, j).map((c) => c.char).join("");
+    out += !script ? run : `${script === "sub" ? "_" : "^"}${[...run].length === 1 ? run : `{${run}}`}`;
+    i = j;
+  }
+  return out;
+}
 
 export type SyntaxRender = "raw" | "normalized";
 
@@ -49,6 +66,7 @@ export const HANDWRITING_GUIDE: Record<SyntaxRender, (rows: number) => string[]>
   normalized: (rows) => [
     "- Every handwritten character has been read from its pen strokes by a shape recognizer.",
     `- A matrix is printed row by row between square brackets, with "|" where a vertical bar is drawn and "_" for an empty cell. A line of text is printed after its id, with single spaces between words.`,
+    `- Subscripts and superscripts are marked as in LaTeX: "H_2O" has a subscript 2, "x^2" a superscript 2, and braces group several characters, "x^{10}".`,
     `- A character the recognizer is unsure of is printed as ?g<n>. Under its matrix or line, g<n> lists its likeliest readings with their scores, then shows it as a bitmap: "#" is ink, "." is blank paper, on the same ${rows} rows as the rest of its line, so marks keep their size and height (a minus sign is a short run of "#" in the middle rows).`,
   ],
 };
@@ -109,15 +127,15 @@ function normalizedBlock(doc: HandwritingDoc, rows: number, minConfidence: numbe
   let uncertain = 0;
   return (block: Block, { tag = "", only }: BlockExtras = {}): string => {
     const legend: string[] = [];
-    const read = (w: Word, band: Box) => w.glyphs.map((g) => {
+    const read = (w: Word, band: Box) => scriptedText(w.glyphs.map((g) => {
       const r = reads.get(g)!;
-      if (r.confidence >= minConfidence) return r.char;
+      if (r.confidence >= minConfidence) return r;
       const id = `g${++uncertain}`;
       const options = r.candidates.slice(0, 3).map((c) => `${c.char} (${c.score.toFixed(2)})`);
       const readings = options.length > 1 ? `${options.slice(0, -1).join(", ")} or ${options[options.length - 1]}` : options[0];
       legend.push(`${id}: ${readings}\n${renderWord({ glyphs: [g], box: g.box }, band, rows).join("\n")}`);
-      return `?${id}`;
-    }).join("");
+      return { char: `?${id}`, script: r.script };
+    }));
 
     if (block.kind === "text") {
       if (!only) return [`${describeText(block, tag)}\n${block.id}: ${block.words.map((w) => read(w, block.box)).join(" ")}`, ...legend].join("\n\n");

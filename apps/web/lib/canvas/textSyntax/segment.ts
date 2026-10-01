@@ -47,6 +47,11 @@ const WORD_GAP_RATIO = 0.6;
 const CELL_GAP_RATIO = 1.1;
 /** Two runs of writing on the same line more than this × its height apart are separate blocks. */
 const BLOCK_GAP_RATIO = 3;
+/** A stroke that comes within this × the line's height of another is part of the same character, if the two are no wider together than JOIN_WIDTH × the line's height. */
+const JOIN_RATIO = 0.08;
+const JOIN_WIDTH = 0.8;
+/** A dot is no bigger than this × the line's height. */
+const DOT_RATIO = 0.2;
 
 // ── geometry ────────────────────────────────────────────────────────────────
 
@@ -176,9 +181,43 @@ function splitLines(inks: Ink[], unit: number): Ink[][] {
   return lines.sort((a, b) => union(a.map((i) => i.box)).minY - union(b.map((i) => i.box)).minY);
 }
 
-/** Strokes that overlap horizontally on one line form one character: "=", "+", a two-stroke "R". Returned left to right. */
+function distToPolyline(p: Pt, points: Pt[]): number {
+  let best = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]!;
+    const b = points[Math.min(i + 1, points.length - 1)]!;
+    const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+    const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2));
+    best = Math.min(best, Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y))));
+  }
+  return best;
+}
+
+/**
+ * Two strokes on one line are one character when they overlap horizontally
+ * ("=", "÷", a two-stroke "R"); when they meet (the arms of a "Y" or "k",
+ * the arch of an "r", the bar of an "H"); or when one is a dot just above
+ * the other (the dot of an "i" or "j").
+ */
+function sameGlyph(a: Ink, b: Ink, lineHeight: number): boolean {
+  if (overlapRatio(a.box.minX, a.box.maxX, b.box.minX, b.box.maxX, 0.1 * lineHeight) >= 0.3) return true;
+  const dot = (s: Ink) => Math.max(width(s.box), height(s.box)) <= DOT_RATIO * lineHeight;
+  const dotOver = (d: Ink, stem: Ink) => dot(d) && height(stem.box) > 2 * height(d.box)
+    && centerX(d.box) >= stem.box.minX - 0.1 * lineHeight && centerX(d.box) <= stem.box.maxX + 0.1 * lineHeight
+    && d.box.maxY <= stem.box.minY + 0.1 * lineHeight && stem.box.minY - d.box.maxY <= 0.5 * lineHeight;
+  if (dotOver(a, b) || dotOver(b, a)) return true;
+  const reach = JOIN_RATIO * lineHeight;
+  const apart = (p: Box, q: Box) => p.minX - q.maxX > reach || q.minX - p.maxX > reach || p.minY - q.maxY > reach || q.minY - p.maxY > reach;
+  if (apart(a.box, b.box)) return false;
+  // Touching strokes are one character only if together they are no wider than one:
+  // neighbours crowded together touch too — the bowl of an "R" on the top of a "3".
+  if (Math.max(a.box.maxX, b.box.maxX) - Math.min(a.box.minX, b.box.minX) > JOIN_WIDTH * lineHeight) return false;
+  return a.points.some((p) => distToPolyline(p, b.points) <= reach) || b.points.some((p) => distToPolyline(p, a.points) <= reach);
+}
+
+/** Strokes of one character (see sameGlyph) grouped. Returned left to right. */
 function splitGlyphs(inks: Ink[], lineHeight: number): Glyph[] {
-  return groupBy(inks, (a, b) => overlapRatio(a.box.minX, a.box.maxX, b.box.minX, b.box.maxX, 0.1 * lineHeight) >= 0.3)
+  return groupBy(inks, (a, b) => sameGlyph(a, b, lineHeight))
     .map((strokes) => ({ strokes, box: union(strokes.map((s) => s.box)) }))
     .sort((a, b) => a.box.minX - b.box.minX);
 }

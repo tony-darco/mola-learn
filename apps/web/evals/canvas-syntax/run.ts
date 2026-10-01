@@ -4,7 +4,8 @@
  *
  *   Stage A — segment the handwritten matrix reduction and score the
  *             structure it recovers, then how well the recognizer reads each
- *             character (no model involved).
+ *             character; and read the full alphabet (alphabet.ts) the same
+ *             way (no model involved).
  *   Stage B — hand each model the syntax text, ask for every matrix and
  *             label back as JSON, and score the answer against the truth.
  *             Under two conditions: "raw" (every character as a bitmap) and
@@ -26,6 +27,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canvasHandwritingToText, type SyntaxRender } from "@/lib/canvas/textSyntax";
+import { makeAlphabet, scoreAlphabet, sumAlphabet } from "./alphabet";
 import { FIXTURES, makeFixture, type FixtureName } from "./fixtures";
 import { leaderboard, parseReply, scoreNormalized, scoreStageA, scoreStageB, suggestedModel, summarizeDoc, type RunSummary, type StepMapping } from "./score";
 import { loadStageB, writeReport } from "./report";
@@ -118,11 +120,29 @@ for (const name of opts.fixtures) {
 }
 
 // The recognizer was tuned on jitter seeds 1–20 (the jitter fixture is seed 1); these hands are unseen.
-write("recognition-held-out.json", Array.from({ length: 50 }, (_, i) => 100 + i).map((seed) => {
+const matrixRecognition = (seed: number) => {
   const fx = makeFixture(`seed ${seed}`, seed);
   const { doc } = canvasHandwritingToText(fx.elements);
   return { seed, ...scoreNormalized(fx.plan, doc, scoreStageA(fx.plan, doc).mapping) };
-}));
+};
+const seeds = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+write("recognition-held-out.json", seeds(100, 149).map(matrixRecognition));
+
+// The full alphabet: tuned on seeds 1–20 (of both fixtures); seeds 300–349 were first scored once tuning was frozen.
+const alphabet = {
+  clean: scoreAlphabet(makeAlphabet()),
+  tuning: sumAlphabet(seeds(1, 20).map((s) => scoreAlphabet(makeAlphabet(s)))),
+  heldOut: sumAlphabet(seeds(300, 349).map((s) => scoreAlphabet(makeAlphabet(s)))),
+  matrixHeldOut: seeds(300, 349).map(matrixRecognition),
+};
+write("recognition-alphabet.json", alphabet);
+for (const [name, m] of [["clean", alphabet.clean], ["seeds 1–20", alphabet.tuning], ["held out, seeds 300–349", alphabet.heldOut]] as const) {
+  const g = m.glyphs;
+  console.log(`alphabet ${name}: read ${g.correct}/${g.expected} (segmented ${g.segmented}), flagged ${g.flagged}, misread unflagged ${g.confidentWrong}, `
+    + `scripts ${m.scripts.correct}/${m.scripts.expected} (+${m.scripts.falsePositives} false), lines ${m.lines.correct}/${m.lines.expected}`);
+}
+const mh = alphabet.matrixHeldOut.reduce((t, m) => ({ n: t.n + m.glyphs.expected, ok: t.ok + m.glyphs.correct, flagged: t.flagged + m.glyphs.fallback, wrong: t.wrong + m.glyphs.confidentWrong }), { n: 0, ok: 0, flagged: 0, wrong: 0 });
+console.log(`matrix held out, seeds 300–349: read ${mh.ok}/${mh.n}, flagged ${mh.flagged}, misread unflagged ${mh.wrong}`);
 
 if (!opts.stageAOnly) {
   const total = opts.models.length * opts.conditions.length * opts.fixtures.length * opts.repeats;
