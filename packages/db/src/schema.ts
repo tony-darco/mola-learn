@@ -7,7 +7,7 @@
 import { sql } from "drizzle-orm";
 import {
   index, integer, jsonb, pgEnum, pgTable, real, text,
-  timestamp, uniqueIndex, uuid, vector,
+  timestamp, uniqueIndex, uuid, vector, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { EMBEDDING } from "@mola/shared";
 
@@ -96,9 +96,17 @@ export const chats = pgTable("chats", {
   /** Snapshotted from the user's default at creation; overridable per chat (§ model switcher). */
   model: text("model").notNull().default("gemma4:26b"),
   thinkingEnabled: integer("thinking_enabled").notNull().default(1),
+  /** Set on a canvas's own conversation (the chat panel on the canvas page). */
+  canvasId: uuid("canvas_id").references((): AnyPgColumn => artifacts.id, { onDelete: "set null" }),
+  /** The canvas reader's LabelMap, kept between turns so M1, Q2, … keep naming the same things. */
+  canvasLabels: jsonb("canvas_labels"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (t) => [index("chats_user_idx").on(t.userId), index("chats_course_idx").on(t.courseId)]);
+}, (t) => [
+  index("chats_user_idx").on(t.userId),
+  index("chats_course_idx").on(t.courseId),
+  index("chats_canvas_idx").on(t.canvasId),
+]);
 
 export const roleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool"]);
 
@@ -122,6 +130,9 @@ export const messages = pgTable("messages", {
   status: messageStatusEnum("status").notNull().default("done"),
   /** Set only when status is "error" — the message shown in the failure banner. */
   errorMessage: text("error_message"),
+  /** Canvas chats, on the user's message: { text, region } — the canvas as text that was sent
+   * with it, and the selected rectangle it was limited to (null: the whole board). */
+  canvasContext: jsonb("canvas_context"),
   createdAt: createdAt(),
 }, (t) => [
   index("messages_chat_idx").on(t.chatId, t.createdAt),

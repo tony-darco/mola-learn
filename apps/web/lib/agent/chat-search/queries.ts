@@ -14,10 +14,13 @@
  * see compactionBoundaries), so every summary hit carries `upToMessageId`
  * pointing back into the raw turns it was condensed from.
  */
-import { and, desc, eq, ilike, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, sql } from "drizzle-orm";
 import { chats, compactionBoundaries, db, messages } from "@mola/db";
 
 const DEFAULT_LIMIT = 10;
+
+/** A canvas's own chat lives in that canvas's chat panel, and isn't searched with the other chats. */
+const notCanvasChat = isNull(chats.canvasId);
 
 export type ChatHit = {
   source: "message" | "summary";
@@ -59,7 +62,7 @@ export async function grepChats(pattern: string, scope: ChatSearchScope): Promis
     })
     .from(messages)
     .innerJoin(chats, eq(chats.id, messages.chatId))
-    .where(and(eq(messages.userId, userId), ilike(messages.content, `%${pattern}%`)))
+    .where(and(eq(messages.userId, userId), notCanvasChat, ilike(messages.content, `%${pattern}%`)))
     .orderBy(desc(sql`similarity(${messages.content}, ${pattern})`))
     .limit(limit);
 
@@ -74,7 +77,7 @@ export async function grepChats(pattern: string, scope: ChatSearchScope): Promis
     })
     .from(compactionBoundaries)
     .innerJoin(chats, eq(chats.id, compactionBoundaries.chatId))
-    .where(and(eq(compactionBoundaries.userId, userId), ilike(compactionBoundaries.summary, `%${pattern}%`)))
+    .where(and(eq(compactionBoundaries.userId, userId), notCanvasChat, ilike(compactionBoundaries.summary, `%${pattern}%`)))
     .orderBy(desc(sql`similarity(${compactionBoundaries.summary}, ${pattern})`))
     .limit(limit);
 
@@ -100,7 +103,7 @@ export async function bm25Chats(query: string, scope: ChatSearchScope): Promise<
     })
     .from(messages)
     .innerJoin(chats, eq(chats.id, messages.chatId))
-    .where(and(eq(messages.userId, userId), sql`to_tsvector('english', ${messages.content}) @@ ${tsq}`))
+    .where(and(eq(messages.userId, userId), notCanvasChat, sql`to_tsvector('english', ${messages.content}) @@ ${tsq}`))
     .orderBy(desc(messageRank))
     .limit(limit);
 
@@ -117,7 +120,7 @@ export async function bm25Chats(query: string, scope: ChatSearchScope): Promise<
     .from(compactionBoundaries)
     .innerJoin(chats, eq(chats.id, compactionBoundaries.chatId))
     .where(
-      and(eq(compactionBoundaries.userId, userId), sql`to_tsvector('english', ${compactionBoundaries.summary}) @@ ${tsq}`),
+      and(eq(compactionBoundaries.userId, userId), notCanvasChat, sql`to_tsvector('english', ${compactionBoundaries.summary}) @@ ${tsq}`),
     )
     .orderBy(desc(summaryRank))
     .limit(limit);

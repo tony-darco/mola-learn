@@ -24,7 +24,7 @@ export default async function CanvasDetailPage({ params }: { params: Promise<{ c
   if (canvas.payload.kind !== "canvas") notFound();
 
   return (
-    <main className="flex-1 min-w-0 overflow-hidden">
+    <main className="flex flex-1 min-w-0 overflow-hidden">
       <CanvasView canvasId={canvas.id} title={canvas.title} payload={canvas.payload} initialVersion={canvas.version} />
     </main>
   );

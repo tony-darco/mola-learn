@@ -4,7 +4,7 @@
  * id to guess and nothing to leak (§9's requireOwned is for loading a single
  * resource BY id; listing/creating your own rows needs only requireSession).
  */
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { chats, courses, db, users } from "@mola/db";
 import { authzResponse, requireSession } from "@/lib/auth/ownership";
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL } from "@/lib/llm";
@@ -14,9 +14,10 @@ export async function GET() {
     const session = await requireSession();
 
     const [userChats, userCourses] = await Promise.all([
+      // A canvas's own chat lives in that canvas's chat panel, not in the chat lists.
       db.select({
         id: chats.id, title: chats.title, courseId: chats.courseId, updatedAt: chats.updatedAt, isPinned: chats.isPinned,
-      }).from(chats).where(eq(chats.userId, session.userId)).orderBy(desc(chats.updatedAt)),
+      }).from(chats).where(and(eq(chats.userId, session.userId), isNull(chats.canvasId))).orderBy(desc(chats.updatedAt)),
       db.select({
         id: courses.id, name: courses.name, number: courses.number,
       }).from(courses).where(eq(courses.userId, session.userId)),

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { chats, courses, db } from "@mola/db";
@@ -33,9 +33,10 @@ export default async function ShellLayout({ children }: { children: ReactNode })
   });
 
   const [userChats, userCourses] = await Promise.all([
+    // A canvas's own chat lives in that canvas's chat panel, not in the chat lists.
     db.select({
       id: chats.id, title: chats.title, courseId: chats.courseId, updatedAt: chats.updatedAt, isPinned: chats.isPinned,
-    }).from(chats).where(eq(chats.userId, session.userId)).orderBy(desc(chats.updatedAt)),
+    }).from(chats).where(and(eq(chats.userId, session.userId), isNull(chats.canvasId))).orderBy(desc(chats.updatedAt)),
     db.select({
       id: courses.id, name: courses.name, number: courses.number,
     }).from(courses).where(eq(courses.userId, session.userId)),
