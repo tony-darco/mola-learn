@@ -16,6 +16,7 @@
  *   pnpm --filter @mola/web eval:canvas-understanding
  *   pnpm --filter @mola/web eval:canvas-understanding --models gemma4:26b --sections co2-neat   # a single probe call
  *   pnpm --filter @mola/web eval:canvas-understanding --boards diagram
+ *   pnpm --filter @mola/web eval:canvas-understanding --models gemma4:26b --sections car-shaky --no-think   # thinking off
  *   pnpm --filter @mola/web eval:canvas-understanding --max-call-minutes 10                     # abort a call that runs longer, and stop the run
  *   pnpm --filter @mola/web eval:canvas-understanding --resume evals/canvas-understanding/output/<timestamp>   # finish a stopped run
  */
@@ -68,6 +69,8 @@ function readOptions() {
     maxCallMs: maxMinutes === undefined ? undefined : Number(maxMinutes) * 60_000,
     /** An earlier run's directory: calls that finished there are reused; ones that errored or were cut off are made again. */
     resume: value("--resume"),
+    /** Thinking is on unless --no-think (the app's default is on). */
+    think: !args.includes("--no-think"),
   };
 }
 
@@ -133,7 +136,7 @@ const createdAt = new Date().toISOString();
 const writeSummary = (finishedAt: string | null) => write("summary.json", {
   createdAt, finishedAt,
   options: {
-    models: opts.models, boards: opts.boards, sections: opts.sections ?? null, think: true,
+    models: opts.models, boards: opts.boards, sections: opts.sections ?? null, think: opts.think,
     maxCallMinutes: opts.maxCallMs === undefined ? null : opts.maxCallMs / 60_000,
   },
   prompt: { system: SYSTEM, question: QUESTION },
@@ -161,9 +164,9 @@ models: for (const model of opts.models) {
       console.log(`${model}: warmed up in ${(warm.latencyMs / 1000).toFixed(1)}s${warm.errors.length ? ` (${warm.errors.join("; ")})` : ""}`);
       warmedUp = true;
     }
-    const call = await ask(model, true, SYSTEM, s.sent, { timeoutMs: opts.maxCallMs });
+    const call = await ask(model, opts.think, SYSTEM, s.sent, { timeoutMs: opts.maxCallMs });
     const answer: AnswerFile = {
-      board: s.board, section: s.id, model, think: true,
+      board: s.board, section: s.id, model, think: opts.think,
       latencyMs: call.latencyMs, firstTokenMs: call.firstTokenMs, stopReason: call.stopReason, errors: call.errors,
       attempts: call.attempts, timedOut: call.timedOut, prompt: { system: SYSTEM, user: s.sent }, raw: call.raw,
     };
