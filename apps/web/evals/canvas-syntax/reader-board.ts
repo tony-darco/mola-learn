@@ -7,6 +7,10 @@
  * by their LaTeX. No model involved.
  *
  *   pnpm --filter @mola/web exec tsx evals/canvas-syntax/reader-board.ts
+ *
+ * With `--seeds 1-20`, the board isn't loaded but planned afresh in those
+ * hands (planReaderBoard({ seed })), and only its handwritten sections are
+ * read; totals per section are printed.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -18,6 +22,7 @@ import { DEFAULT_MIN_CONFIDENCE, recognizeDoc } from "@/lib/canvas/textSyntax/re
 import { centerY, union, type Box, type Glyph } from "@/lib/canvas/textSyntax/segment";
 import { planReaderBoard, READER_BOARD_TITLE, type BoardSection } from "@/e2e/support/readerBoard";
 import { loadSavedCanvas } from "../savedCanvas";
+import { planElements } from "./fixtures";
 import { textSimilarity } from "./score";
 
 export type SectionRead = {
@@ -29,8 +34,12 @@ export type SectionRead = {
   glyphs: number; flagged: number;
 };
 
-/** Ignoring spaces and how the minus sign was spelled; MathLive's braces and spaces too, for LaTeX. */
-const normal = (s: string) => s.replace(/[−‐-―]/g, "-").replace(/\s+/g, "");
+/**
+ * Ignoring spaces and how the minus sign was spelled — except inside a
+ * matrix's brackets, where a space separates entries ("[19 22]" is not
+ * "[1 9 22]"); MathLive's braces and spaces too, for LaTeX.
+ */
+const normal = (s: string) => s.replace(/[−‐-―]/g, "-").replace(/\[[^\]]*\]|\s+/g, (m) => (m.startsWith("[") ? m.replace(/\s+/g, " ") : ""));
 const squash = (latex: string) => latex.replace(/[{}\s]/g, "");
 
 /** One section's writing, line by line: words and whole matrices, grouped by height on the board and read left to right. */
@@ -90,7 +99,52 @@ export async function readReaderBoard(): Promise<{ canvasId: string; sections: S
   return { canvasId: saved.id, sections: plan.sections.map((s) => readSection(saved.elements, s, latexOf)) };
 }
 
+/**
+ * The handwritten sections of the board planned in hand `seed`, each read
+ * from its own strokes alone (a whole-board read per section is too slow
+ * for many hands).
+ */
+export function readPlannedBoard(seed: number): SectionRead[] {
+  const plan = planReaderBoard({ seed });
+  const elements = planElements(plan);
+  return plan.sections.filter((s) => s.style !== "math").map((s) => {
+    const own = elements.filter((e) => e.x >= s.rect.minX && e.x + e.width <= s.rect.maxX && e.y >= s.rect.minY && e.y + e.height <= s.rect.maxY);
+    try {
+      return readSection(own, s, new Map());
+    } catch (e) {
+      // A read that throws (sketch.ts does on a few shaky hands) reads nothing.
+      console.error(`seed ${seed}, ${s.id}: ${(e as Error).message}`);
+      return { id: s.id, subject: s.subject, style: s.style, expected: s.expected, read: [], exact: 0, similarity: 0, glyphs: 0, flagged: 0 };
+    }
+  });
+}
+
+function readSeeds(from: number, to: number) {
+  const totals = new Map<string, { exact: number; lines: number; similarity: number; hands: number; misses: string[] }>();
+  for (let seed = from; seed <= to; seed++) {
+    for (const s of readPlannedBoard(seed)) {
+      const t = totals.get(s.id) ?? { exact: 0, lines: 0, similarity: 0, hands: 0, misses: [] };
+      t.exact += s.exact;
+      t.lines += s.expected.length;
+      t.similarity += s.similarity;
+      t.hands++;
+      s.expected.forEach((e, i) => { if (normal(s.read[i] ?? "") !== normal(e)) t.misses.push(`seed ${seed}: ${s.read[i] ?? "(nothing)"}`); });
+      totals.set(s.id, t);
+    }
+  }
+  for (const [id, t] of totals) {
+    console.log(`${id}: ${t.exact}/${t.lines} lines exact, mean similarity ${((t.similarity / t.hands) * 100).toFixed(1)}%`);
+    if (process.argv.includes("--misses")) t.misses.forEach((m) => console.log(`    ${m}`));
+  }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const seeds = process.argv[process.argv.indexOf("--seeds") + 1];
+  if (process.argv.includes("--seeds") && seeds) {
+    const [from, to] = seeds.split("-").map(Number);
+    readSeeds(from!, to ?? from!);
+    process.exit(0);
+  }
   const result = await readReaderBoard();
   if (!result) {
     console.error(`no saved canvas "${READER_BOARD_TITLE}" — write it with canvas-reader-board.spec.ts`);

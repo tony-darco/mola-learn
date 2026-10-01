@@ -124,7 +124,7 @@ function writeLine(text: string, x: number, y: number, size: number, jitter: Jit
 }
 
 /** A bracketed matrix, entries right-aligned in their columns, top-left at (x, y). */
-function writeMatrix(m: number[][], x: number, y: number, size: number, jitter: Jitter): { strokes: Stroke[]; width: number; height: number } {
+export function writeMatrix(m: number[][], x: number, y: number, size: number, jitter: Jitter): { strokes: Stroke[]; width: number; height: number } {
   const arm = size * 0.35;
   const pad = size * 0.35;
   const rowH = size * 1.5;
@@ -182,13 +182,17 @@ const SUBJECTS: { subject: BoardSubject; lines: string[]; latex: string[] }[] = 
   },
 ];
 
-function jitterFor(style: "neat" | "shaky", seed: number): Jitter {
+export function jitterFor(style: "neat" | "shaky", seed: number): Jitter {
   return style === "neat"
     ? { rng: seededRandom(seed), slantDeg: 5, scale: 0.05, offset: 1.2, strokeOffset: 0.6, wobble: 0.6 }
     : { rng: seededRandom(seed), slantDeg: 14, scale: 0.15, offset: 3, strokeOffset: 1.8, wobble: 2.2 };
 }
 
-export function planReaderBoard(): BoardPlan {
+/**
+ * With no options, the board as saved. `seed` writes the same board in other
+ * hands (a different one per section), for checks over many hands.
+ */
+export function planReaderBoard(opts: { seed?: number } = {}): BoardPlan {
   const sections: BoardSection[] = [];
   const strokes: Stroke[] = [];
   const math: BoardPlan["math"] = [];
@@ -207,7 +211,8 @@ export function planReaderBoard(): BoardPlan {
         return;
       }
 
-      const jitter = jitterFor(style, (row + 1) * 100 + col);
+      const base = opts.seed === undefined ? 0 : 100_000 + opts.seed * 1000;
+      const jitter = jitterFor(style, base + (row + 1) * 100 + col);
       if (content.subject === "matrix-multiplication") {
         let cx = x;
         const top = y + 10;

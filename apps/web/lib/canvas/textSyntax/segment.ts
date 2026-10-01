@@ -28,7 +28,14 @@ export type MatrixBlock = {
   rows: MatrixRow[];
 };
 /** One line of writing. Its box is also the reference band every character on it is drawn against. */
-export type TextBlock = { kind: "text"; id: string; box: Box; words: Word[] };
+export type TextBlock = {
+  kind: "text"; id: string; box: Box; words: Word[];
+  /**
+   * Only for the operators written between matrices on one row, "[..] × [..] = [..]":
+   * the matrices, left to right, by their left delimiters. Word i sits between matrices i and i + 1.
+   */
+  operands?: Ink[];
+};
 export type Block = MatrixBlock | TextBlock;
 /** Blocks in reading order: top to bottom within a column of the board, columns left to right. */
 export type HandwritingDoc = { blocks: Block[] };
@@ -37,19 +44,40 @@ export type HandwritingDoc = { blocks: Block[] };
 const TALL_RATIO = 2.5;
 /** Bracket arms must stick out this far (fraction of the bracket's height) past its spine. */
 const ARM_RATIO = 0.04;
+/** A bracket's spine is fitted to the stroke less this fraction of its height at each end, where the arms are. */
+const SPINE_END = 0.15;
 /**
  * Words on one text line split at a gap wider than this × the line's height.
  * Measured on jittered handwriting: gaps inside a word stay under ~0.6,
  * gaps between words stay over it (typically ~0.9).
  */
 const WORD_GAP_RATIO = 0.6;
-/** Matrix entries split at a gap wider than this × the row's height — people space entries further apart than words. */
+/**
+ * Matrix entries always split at a gutter wider than this × the row's
+ * height. Narrower ones (see cellBreaks) split where gutter widths jump by
+ * CELL_GAP_JUMP or more, to at least CELL_GAP_MIN — widths under
+ * GUTTER_FLOOR count as GUTTER_FLOOR, so two tight gaps inside numbers don't
+ * make a jump — and, if they don't jump, all split when their median is
+ * CELL_GAP_ALONE or more. Tuned on jitter seeds 1–20 of the reader board's
+ * tightly spaced matrix multiplication (planReaderBoard({ seed })), keeping
+ * the matrix reduction's widely spaced entries exact.
+ */
 const CELL_GAP_RATIO = 1.1;
+const CELL_GAP_JUMP = 1.4;
+const CELL_GAP_MIN = 0.4;
+const GUTTER_FLOOR = 0.2;
+const CELL_GAP_ALONE = 0.5;
+/** Gaps in different rows of a matrix are one gutter when their middles are within this × the row height of each other. */
+const GUTTER_ALIGN = 0.3;
+/** A typical glyph in a matrix is at least this × its typical glyph height wide, however many narrow "1"s it holds. */
+const GLYPH_WIDTH = 0.5;
 /** Two runs of writing on the same line more than this × its height apart are separate blocks. */
 const BLOCK_GAP_RATIO = 3;
 /** A stroke that comes within this × the line's height of another is part of the same character, if the two are no wider together than JOIN_WIDTH × the line's height. */
 const JOIN_RATIO = 0.08;
 const JOIN_WIDTH = 0.8;
+/** Writing between two matrices taller than this × the typical stroke size isn't an operator joining them. */
+const OPERATOR_RATIO = 1.5;
 /** A dot is no bigger than this × the line's height. */
 const DOT_RATIO = 0.2;
 
@@ -140,16 +168,20 @@ export function inkFromElements(elements: CanvasElement[]): Ink[] {
 type TallKind = "left" | "right" | "bar";
 
 /**
- * A tall, narrow stroke is a left delimiter if its ends curl to the right of
- * its spine ("[" or "("), a right delimiter if they curl left, and a bar if
- * they don't curl at all. The spine is a line fitted through the middle of
- * the stroke, so a slanted bracket still reads as a bracket.
+ * A tall, narrow stroke is a left delimiter if both its ends curl to the
+ * right of its spine ("[" or "("), a right delimiter if both curl left, and a
+ * bar if neither curls. The spine is a line fitted through all but the ends
+ * of the stroke, so a slanted bracket still reads as a bracket, and a shaky
+ * one's wobble barely tilts it. Where the pen starts and stops says which
+ * way the arms point even when a corner overshoots or the spine wobbles as
+ * far as the arms reach; a stroke with one end curled and one not (a tall
+ * "1", a hook) is none of the three.
  */
 function classifyTall(ink: Ink, unit: number): TallKind | null {
   const h = height(ink.box);
   if (h < TALL_RATIO * unit || width(ink.box) > 0.5 * h) return null;
 
-  const middle = ink.points.filter((p) => p.y > ink.box.minY + 0.3 * h && p.y < ink.box.maxY - 0.3 * h);
+  const middle = ink.points.filter((p) => p.y > ink.box.minY + SPINE_END * h && p.y < ink.box.maxY - SPINE_END * h);
   if (middle.length < 2) return null;
   const my = middle.reduce((s, p) => s + p.y, 0) / middle.length;
   const mx = middle.reduce((s, p) => s + p.x, 0) / middle.length;
@@ -157,20 +189,14 @@ function classifyTall(ink: Ink, unit: number): TallKind | null {
   const slope = vy === 0 ? 0 : middle.reduce((s, p) => s + (p.y - my) * (p.x - mx), 0) / vy;
   if (Math.abs(slope) > 0.4) return null;
 
-  let right = 0;
-  let left = 0;
-  for (const p of ink.points) {
-    const nearEnd = p.y <= ink.box.minY + 0.15 * h || p.y >= ink.box.maxY - 0.15 * h;
-    if (!nearEnd) continue;
-    const r = p.x - (mx + slope * (p.y - my));
-    right = Math.max(right, r);
-    left = Math.max(left, -r);
-  }
   const arm = ARM_RATIO * h;
-  if (right >= arm && right >= 2 * left) return "left";
-  if (left >= arm && left >= 2 * right) return "right";
-  if (right < arm && left < arm) return "bar";
-  return null;
+  const curl = (p: Pt) => {
+    const r = p.x - (mx + slope * (p.y - my));
+    return r >= arm ? 1 : r <= -arm ? -1 : 0;
+  };
+  const ends = [curl(ink.points[0]!), curl(ink.points[ink.points.length - 1]!)];
+  if (ends[0] !== ends[1]) return null;
+  return ends[0] === 1 ? "left" : ends[0] === -1 ? "right" : "bar";
 }
 
 // ── lines, characters, words ────────────────────────────────────────────────
@@ -240,13 +266,66 @@ function splitWords(glyphs: Glyph[], maxGap: number, breaks: number[] = []): Wor
 
 // ── blocks ──────────────────────────────────────────────────────────────────
 
+/**
+ * Where a matrix's rows split into entries, as x positions between glyphs.
+ *
+ * A gap between two glyphs is measured between their centres, less a typical
+ * glyph's width (the matrix's median, and at least GLYPH_WIDTH × its median
+ * glyph height), so a narrow "1" doesn't open a gap inside "19" or "11"; and
+ * as a fraction of its row's height. Gaps are judged by gutter: the gaps of
+ * different rows at the same place across the matrix (their centres'
+ * midpoints within GUTTER_ALIGN × the row height) are one gutter, as wide as
+ * their mean, since an entry boundary runs down every row and one jittered
+ * glyph can throw any single gap. Gutters split where their widths jump the
+ * most — gaps inside numbers against gaps between entries — if the jump is
+ * big enough; otherwise they are all one kind, and their typical width says
+ * which. A gutter wider than CELL_GAP_RATIO always splits. A bar always
+ * splits, and its gap isn't a gutter.
+ */
+function cellBreaks(rows: { box: Box; glyphs: Glyph[] }[], barXs: number[]): number[] {
+  const glyphWidth = Math.max(
+    median(rows.flatMap((r) => r.glyphs.map((g) => width(g.box)))),
+    GLYPH_WIDTH * median(rows.flatMap((r) => r.glyphs.map((g) => height(g.box)))),
+  );
+  const gaps = rows.flatMap((r, row) => {
+    const out: { row: number; at: number; break: number; h: number; size: number }[] = [];
+    let prev: Glyph | null = null;
+    for (const g of r.glyphs) {
+      // Overlapping or touching glyphs, and a bar between, never make a gutter.
+      if (prev && g.box.minX > prev.box.maxX && !barXs.some((x) => x > prev!.box.maxX && x < g.box.minX)) {
+        const h = height(r.box);
+        out.push({
+          row, h,
+          at: (centerX(prev.box) + centerX(g.box)) / 2,
+          break: (prev.box.maxX + g.box.minX) / 2,
+          size: (centerX(g.box) - centerX(prev.box) - glyphWidth) / h,
+        });
+      }
+      if (!prev || g.box.maxX > prev.box.maxX) prev = g;
+    }
+    return out;
+  });
+  const gutters = groupBy(gaps, (a, b) => a.row !== b.row && Math.abs(a.at - b.at) <= GUTTER_ALIGN * Math.max(a.h, b.h))
+    .map((gs) => ({ gaps: gs, size: gs.reduce((s, g) => s + g.size, 0) / gs.length }));
+  const sizes = gutters.map((g) => g.size).sort((a, b) => a - b);
+
+  let jump = { ratio: 0, at: Infinity };
+  for (let i = 1; i < sizes.length; i++) {
+    const ratio = sizes[i]! / Math.max(sizes[i - 1]!, GUTTER_FLOOR);
+    if (sizes[i]! >= CELL_GAP_MIN && ratio > jump.ratio) jump = { ratio, at: sizes[i]! };
+  }
+  const threshold = Math.min(CELL_GAP_RATIO, jump.ratio >= CELL_GAP_JUMP ? jump.at : median(sizes) >= CELL_GAP_ALONE ? 0 : Infinity);
+  return [...barXs, ...gutters.filter((g) => g.size >= threshold).flatMap((g) => g.gaps.map((x) => x.break))];
+}
+
 function buildMatrix(left: Ink, right: Ink, bars: Ink[], content: Ink[], unit: number): Omit<MatrixBlock, "id"> {
   const barXs = bars.map((b) => centerX(b.box));
-  const rawRows = splitLines(content, unit).map((inks) => {
+  const lines = splitLines(content, unit).map((inks) => {
     const box = atLeastTall(union(inks.map((i) => i.box)), 0.5 * unit);
-    const h = height(box);
-    return { box, words: splitWords(splitGlyphs(inks, h), CELL_GAP_RATIO * h, barXs) };
+    return { box, glyphs: splitGlyphs(inks, height(box)) };
   });
+  const breaks = cellBreaks(lines, barXs);
+  const rawRows = lines.map((r) => ({ box: r.box, words: splitWords(r.glyphs, Infinity, breaks) }));
 
   // Columns come from the fullest rows; every other row's entries snap to the nearest one.
   const columns = Math.max(0, ...rawRows.map((r) => r.words.length));
@@ -290,6 +369,50 @@ function buildTexts(inks: Ink[], unit: number): Omit<TextBlock, "id">[] {
   for (const ink of oversized) {
     const glyph: Glyph = { strokes: [ink], box: ink.box };
     out.push({ kind: "text", box: ink.box, words: [{ glyphs: [glyph], box: ink.box }] });
+  }
+  return out;
+}
+
+/**
+ * The operators written between matrices on one row — "[..] × [..] = [..]" —
+ * as one line of text tied to the matrices it joins (TextBlock.operands), so
+ * the row reads as one expression rather than as matrices and a stray line.
+ * Neighbouring matrices on a row, no further apart than the taller is high,
+ * are joined when small writing sits between them, level with both; that
+ * writing is one word. `loose` is the writing no block has claimed.
+ */
+function matrixExpressions(matrices: Omit<MatrixBlock, "id">[], loose: Ink[], unit: number): Omit<TextBlock, "id">[] {
+  const byX = [...matrices].sort((a, b) => a.box.minX - b.box.minX);
+  const next = (a: Omit<MatrixBlock, "id">) => byX.find((b) => b.box.minX >= a.box.maxX
+    && b.box.minX - a.box.maxX <= Math.max(height(a.box), height(b.box))
+    && overlapRatio(a.box.minY, a.box.maxY, b.box.minY, b.box.maxY, 1) >= 0.5);
+  const between = (a: Omit<MatrixBlock, "id">, b: Omit<MatrixBlock, "id">) => {
+    const top = Math.max(a.box.minY, b.box.minY);
+    const bottom = Math.min(a.box.maxY, b.box.maxY);
+    return loose.filter((i) => i.box.minX >= a.box.maxX && i.box.maxX <= b.box.minX
+      && centerY(i.box) > top && centerY(i.box) < bottom && height(i.box) <= OPERATOR_RATIO * unit);
+  };
+
+  const joined = new Set<Omit<MatrixBlock, "id">>();
+  const out: Omit<TextBlock, "id">[] = [];
+  for (const first of byX) {
+    if (joined.has(first)) continue;
+    const operands = [first];
+    const operators: Ink[][] = [];
+    for (let b = next(first); b && !joined.has(b); b = next(b)) {
+      const inks = between(operands[operands.length - 1]!, b);
+      if (inks.length === 0) break;
+      operands.push(b);
+      operators.push(inks);
+    }
+    if (operators.length === 0) continue;
+    operands.forEach((m) => joined.add(m));
+    const lineHeight = Math.max(height(union(operators.flat().map((i) => i.box))), 0.5 * unit);
+    const words = operators.map((inks): Word => {
+      const glyphs = splitGlyphs(inks, lineHeight);
+      return { glyphs, box: union(glyphs.map((g) => g.box)) };
+    });
+    out.push({ kind: "text", box: atLeastTall(union(words.map((w) => w.box)), 0.5 * unit), words, operands: operands.map((m) => m.delimiters.left) });
   }
   return out;
 }
@@ -360,6 +483,8 @@ export function segmentHandwriting(inks: Ink[]): HandwritingDoc {
     return buildMatrix(left, right, ownBars, content, unit);
   });
 
+  const expressions = matrixExpressions(matrixParts, inks.filter((i) => !claimed.has(i.id) && kinds.get(i.id) === null), unit);
+  for (const e of expressions) for (const w of e.words) for (const g of w.glyphs) for (const s of g.strokes) claimed.add(s.id);
   const texts = buildTexts(inks.filter((i) => !claimed.has(i.id)), unit);
-  return { blocks: readingOrder([...matrixParts, ...texts]) };
+  return { blocks: readingOrder([...matrixParts, ...expressions, ...texts]) };
 }

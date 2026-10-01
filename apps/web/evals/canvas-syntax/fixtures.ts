@@ -14,7 +14,7 @@ import { planMatrixReduction, type MatrixPlan } from "@/e2e/support/matrixPlan";
 export type FixtureName = "clean" | "jitter";
 export type Fixture = { name: string; jitterSeed?: number; plan: MatrixPlan; elements: CanvasElement[] };
 
-export function planElements(plan: MatrixPlan): CanvasElement[] {
+export function planElements(plan: Pick<MatrixPlan, "strokes">): CanvasElement[] {
   let index: string | null = null;
   return plan.strokes.map((stroke, i) => {
     const f = finalizeStroke(stroke);

@@ -138,6 +138,8 @@ const RUN_GAP = 1.5;
 /** What a matrix of numbers holds, and how sure a reading must be to count as evidence of what a matrix holds. */
 const NUMERIC = /^[0-9.\-+\/]$/;
 const NUMBERS_SURE = DEFAULT_MIN_CONFIDENCE;
+/** What the writing between two matrices on a row can be (segment.ts's TextBlock.operands): an operator — and a dot there is a multiplication dot. */
+const BETWEEN_MATRICES = /^[+\-=×*→]$/;
 /** A glyph read at least this surely is a reference for its character on its board; at most EXEMPLARS per character, the surest. */
 const EXEMPLAR_SURE = 0.25;
 const EXEMPLARS = 16;
@@ -523,9 +525,19 @@ export function recognizeDoc(doc: HandwritingDoc): Map<Glyph, Recognition> {
   const out = new Map<Glyph, Recognition>();
   const placements = new Map<Word, { baseline: number; cap: number }>();
   const numericBlocks = new Set<HandwritingDoc["blocks"][number]>();
+  const operators = new Set(doc.blocks.flatMap((b) => (b.kind === "text" && b.operands ? b.words : [])));
+  const readOperator = (g: Glyph, at: Placement, exemplars?: Exemplars): Recognition => {
+    const r = recognizeGlyph(g, at, BETWEEN_MATRICES, exemplars);
+    return r.char === "." ? { char: "·", confidence: 1, candidates: [{ char: "·", score: 1 }] } : r;
+  };
   for (const words of lines) {
     const { baseline, cap } = linePlacement(words, boardCap);
-    for (const word of words) word.glyphs.forEach((g, i) => out.set(g, recognizeGlyph(g, { baseline, cap, afterBase: i > 0 })));
+    for (const word of words) {
+      word.glyphs.forEach((g, i) => {
+        const at = { baseline, cap, afterBase: i > 0 };
+        out.set(g, operators.has(word) ? readOperator(g, at) : recognizeGlyph(g, at));
+      });
+    }
     placements.set(words[0]!, { baseline, cap });
   }
   for (const block of doc.blocks) {
@@ -559,7 +571,8 @@ export function recognizeDoc(doc: HandwritingDoc): Map<Glyph, Recognition> {
     for (const word of words) word.glyphs.forEach((g, i) => {
       if (out.get(g)!.confidence >= DEFAULT_MIN_CONFIDENCE) return;
       const block = doc.blocks.find((b) => rowsOf(b).some((ws) => ws.includes(word)))!;
-      out.set(g, recognizeGlyph(g, { baseline, cap, afterBase: i > 0 }, numericBlocks.has(block) ? NUMERIC : undefined, exemplars));
+      const at = { baseline, cap, afterBase: i > 0 };
+      out.set(g, operators.has(word) ? readOperator(g, at, exemplars) : recognizeGlyph(g, at, numericBlocks.has(block) ? NUMERIC : undefined, exemplars));
     });
   }
 

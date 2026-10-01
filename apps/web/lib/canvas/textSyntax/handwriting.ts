@@ -54,7 +54,17 @@ export function describeMatrix(m: MatrixBlock, tag = ""): string {
   return `${m.id} — matrix in brackets${tag}, ${plural(m.rows.length, "row", "rows")} x ${plural(m.columns, "column", "columns")}${barText}. Top-left ${topLeft(m.box)}, size ${size}.`;
 }
 
-export const describeText = (t: TextBlock, tag = "") => `${t.id} — line of text${tag}, ${plural(t.words.length, "word", "words")}. Top-left ${topLeft(t.box)}.`;
+/** `operands`: for the operators written between matrices (TextBlock.operands), those matrices' labels. */
+export const describeText = (t: TextBlock, tag = "", operands?: string[]) => (operands
+  ? `${t.id} — operators written between matrices${tag}, joining ${operands.slice(0, -1).join(", ")} and ${operands[operands.length - 1]} into one expression. Top-left ${topLeft(t.box)}.`
+  : `${t.id} — line of text${tag}, ${plural(t.words.length, "word", "words")}. Top-left ${topLeft(t.box)}.`);
+
+/** Matrices' labels with the operators between them: "M1 × M2 = M3". */
+const expression = (operands: string[], operators: string[]) => operands.flatMap((m, i) => (i < operators.length ? [m, operators[i]!] : [m])).join(" ");
+
+/** The labels of the matrices a block of operators joins, as `doc` names them; undefined for any other block. */
+const operandLabels = (doc: HandwritingDoc, t: TextBlock) =>
+  t.operands?.map((left) => doc.blocks.find((b) => b.kind === "matrix" && b.delimiters.left === left)?.id ?? "a matrix");
 
 /** How to read the handwriting, as guide bullets. */
 export const HANDWRITING_GUIDE: Record<SyntaxRender, (rows: number) => string[]> = {
@@ -98,16 +108,18 @@ export function blockRenderer(
   doc: HandwritingDoc, opts: { render: SyntaxRender; rows: number; minConfidence: number; reads?: Map<Glyph, Recognition> },
 ): (block: Block, extras?: BlockExtras) => string {
   const { rows } = opts;
-  return opts.render === "raw" ? rawBlock(rows) : normalizedBlock(opts.reads ?? recognizeDoc(doc), rows, opts.minConfidence);
+  return opts.render === "raw" ? rawBlock(doc, rows) : normalizedBlock(doc, opts.reads ?? recognizeDoc(doc), rows, opts.minConfidence);
 }
 
 // ── raw: every character as a bitmap ────────────────────────────────────────
 
-const rawBlock = (rows: number) => (block: Block, { tag = "", only }: BlockExtras = {}): string => {
+const rawBlock = (doc: HandwritingDoc, rows: number) => (block: Block, { tag = "", only }: BlockExtras = {}): string => {
   const shown = (w: Word | null): w is Word => !!w && (!only || only.has(w));
   if (block.kind === "text") {
+    const operands = operandLabels(doc, block);
     return [
-      describeText(block, tag) + (only ? PARTLY.text : ""),
+      describeText(block, tag, operands) + (only ? PARTLY.text : "")
+        + (operands && !only ? `\n${block.id}: ${expression(operands, block.words.map((_, i) => `(word ${i + 1})`))}` : ""),
       ...block.words.flatMap((w, i) => (shown(w) ? [`${block.id} word ${i + 1}\n${renderWord(w, block.box, rows).join("\n")}`] : [])),
     ].join("\n\n");
   }
@@ -123,7 +135,7 @@ const rawBlock = (rows: number) => (block: Block, { tag = "", only }: BlockExtra
 
 // ── normalized: every character as recognized ──────────────────────────────
 
-function normalizedBlock(reads: Map<Glyph, Recognition>, rows: number, minConfidence: number) {
+function normalizedBlock(doc: HandwritingDoc, reads: Map<Glyph, Recognition>, rows: number, minConfidence: number) {
   let uncertain = 0;
   return (block: Block, { tag = "", only }: BlockExtras = {}): string => {
     const legend: string[] = [];
@@ -138,7 +150,11 @@ function normalizedBlock(reads: Map<Glyph, Recognition>, rows: number, minConfid
     }));
 
     if (block.kind === "text") {
-      if (!only) return [`${describeText(block, tag)}\n${block.id}: ${block.words.map((w) => read(w, block.box)).join(" ")}`, ...legend].join("\n\n");
+      const operands = operandLabels(doc, block);
+      if (!only) {
+        const words = block.words.map((w) => read(w, block.box));
+        return [`${describeText(block, tag, operands)}\n${block.id}: ${operands ? expression(operands, words) : words.join(" ")}`, ...legend].join("\n\n");
+      }
       // Runs of consecutive selected words, under their addresses.
       const lines: string[] = [];
       let run: number[] = [];
@@ -148,7 +164,7 @@ function normalizedBlock(reads: Map<Glyph, Recognition>, rows: number, minConfid
       };
       block.words.forEach((w, i) => (only.has(w) ? run.push(i) : flush()));
       flush();
-      return [[describeText(block, tag) + PARTLY.text, ...lines].join("\n"), ...legend].join("\n\n");
+      return [[describeText(block, tag, operands) + PARTLY.text, ...lines].join("\n"), ...legend].join("\n\n");
     }
 
     // In part, a row with every entry selected is printed whole; otherwise only its selected cells are read.

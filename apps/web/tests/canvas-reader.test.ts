@@ -12,6 +12,8 @@ import type { CanvasElement } from "@mola/shared";
 import { readCanvas, type LabelMap } from "../lib/canvas/textSyntax";
 import { drawn, line, makeBoard, SINGLES, written } from "../evals/canvas-reader/fixtures";
 import { checkBoard } from "../evals/canvas-reader/score";
+import { planElements } from "../evals/canvas-syntax/fixtures";
+import { jitterFor, planReaderBoard, writeMatrix } from "../e2e/support/readerBoard";
 import { makeJitter, textStrokes } from "../e2e/support/strokeFont";
 
 /**
@@ -111,6 +113,56 @@ describe("readCanvas: the composite board", () => {
     const elements = [...makeBoard("clean").elements, line("probe", { x: 460, y: 1000 }, { x: 545, y: 764 }, "end")];
     const probe = readCanvas(elements).doc.items.find((i) => i.elementIds.includes("probe"));
     expect(probe?.ends).toEqual([null, "M4 row 2 col 3"]);
+  });
+});
+
+describe("readCanvas: matrices multiplied on one row", () => {
+  /** The reader board's matrix multiplication, [1 2; 3 4] × [5 6; 7 8] = [19 22; 43 50] with its entries tightly spaced, on a canvas of its own. */
+  const multiplication = (style: "neat" | "shaky", seed?: number) => {
+    const plan = planReaderBoard(seed === undefined ? {} : { seed });
+    const { rect } = plan.sections.find((s) => s.id === `matrix-multiplication-${style}`)!;
+    return planElements(plan).filter((e) => e.x >= rect.minX && e.x + e.width <= rect.maxX && e.y >= rect.minY && e.y + e.height <= rect.maxY);
+  };
+  /** Each matrix's rows, as how many characters each entry has: "1,1;1,1". */
+  const entries = (elements: CanvasElement[]) => readCanvas(elements, RAW).doc.handwriting.blocks.flatMap((b) => (b.kind === "matrix"
+    ? [b.rows.map((r) => r.cells.map((c) => c?.glyphs.length ?? 0).join(",")).join(";")]
+    : []));
+
+  it("reads each entry of tightly spaced matrices, and the operators between them as one expression", () => {
+    const { text } = readCanvas(multiplication("neat"));
+    // In reading order: the operators span M2, so they come under it.
+    expect(itemsOf(text).map((s) => s.split("\n").slice(1).join("\n"))).toEqual([
+      "[  1  2 ]\n[  3  4 ]",
+      "[  5  6 ]\n[  7  8 ]",
+      "T1: M1 × M2 = M3",
+      "[ 19 22 ]\n[ 43 50 ]",
+    ]);
+    expect(item(text, "T1")).toMatch(/^T1 — operators written between matrices, joining M1, M2 and M3 into one expression\./);
+  });
+
+  it("places the operators between the matrices in a raw read too", () => {
+    expect(item(readCanvas(multiplication("neat"), RAW).text, "T1")!.split("\n")[1]).toBe("T1: M1 (word 1) M2 (word 2) M3");
+  });
+
+  it("reads the same in other neat hands (seeds 1–20): every entry, \"19\" as one, and × never as x", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const elements = multiplication("neat", seed);
+      expect(entries(elements), `seed ${seed}`).toEqual(["1,1;1,1", "1,1;1,1", "2,2;2,2"]);
+      expect(item(readCanvas(elements).text, "T1")!.split("\n")[1], `seed ${seed}`).toBe("T1: M1 × M2 = M3");
+    }
+  });
+
+  it("keeps two-digit entries whole in a column of them, in neat hands (seeds 1–20)", () => {
+    for (const m of [[[19], [43]], [[11], [11]], [[10], [11]]]) {
+      for (let seed = 1; seed <= 20; seed++) {
+        const { strokes } = writeMatrix(m, 300, 100, 24, jitterFor("neat", seed));
+        expect(entries(planElements({ strokes })), `${JSON.stringify(m)}, seed ${seed}`).toEqual(["2;2"]);
+      }
+    }
+  });
+
+  it("finds the brackets of the shaky hand", () => {
+    expect(entries(multiplication("shaky"))).toEqual(["1,1;1,1", "1,1;1,1", "2,2;2,2"]);
   });
 });
 
