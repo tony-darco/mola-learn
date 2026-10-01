@@ -11,8 +11,8 @@
  * for a read of a selected region that cuts through it.
  */
 import { renderWord } from "./bitmap";
-import { recognizeDoc, type Script } from "./recognize";
-import type { Block, Box, HandwritingDoc, MatrixBlock, TextBlock, Word } from "./segment";
+import { recognizeDoc, type Recognition, type Script } from "./recognize";
+import type { Block, Box, Glyph, HandwritingDoc, MatrixBlock, TextBlock, Word } from "./segment";
 
 /**
  * A word's characters with its scripts marked, as in LaTeX: "H_2O", "x^2",
@@ -91,13 +91,14 @@ export type BlockExtras = {
  * A renderer for the blocks of one document. Uncertain characters are
  * numbered g1, g2, … across the whole document, in the order its blocks are
  * rendered. Each call returns one block's text, sections separated by blank
- * lines.
+ * lines. `reads`: the recognizer's readings, if already made (of a document
+ * holding these blocks and maybe more).
  */
 export function blockRenderer(
-  doc: HandwritingDoc, opts: { render: SyntaxRender; rows: number; minConfidence: number },
+  doc: HandwritingDoc, opts: { render: SyntaxRender; rows: number; minConfidence: number; reads?: Map<Glyph, Recognition> },
 ): (block: Block, extras?: BlockExtras) => string {
   const { rows } = opts;
-  return opts.render === "raw" ? rawBlock(rows) : normalizedBlock(doc, rows, opts.minConfidence);
+  return opts.render === "raw" ? rawBlock(rows) : normalizedBlock(opts.reads ?? recognizeDoc(doc), rows, opts.minConfidence);
 }
 
 // ── raw: every character as a bitmap ────────────────────────────────────────
@@ -122,8 +123,7 @@ const rawBlock = (rows: number) => (block: Block, { tag = "", only }: BlockExtra
 
 // ── normalized: every character as recognized ──────────────────────────────
 
-function normalizedBlock(doc: HandwritingDoc, rows: number, minConfidence: number) {
-  const reads = recognizeDoc(doc);
+function normalizedBlock(reads: Map<Glyph, Recognition>, rows: number, minConfidence: number) {
   let uncertain = 0;
   return (block: Block, { tag = "", only }: BlockExtras = {}): string => {
     const legend: string[] = [];

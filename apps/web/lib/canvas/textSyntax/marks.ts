@@ -126,9 +126,10 @@ function vee(ink: Ink, unit: number): Vee | null {
  * stroke first turns back once about as far from where it started as it
  * ever gets (the barbs come back toward the tail; the pen often returns to
  * the tip for the second barb a touch further out). Tried from both ends,
- * for an arrow drawn head first.
+ * for an arrow drawn head first. `maxHeadShare`: how long the head may be,
+ * as a share of the shaft.
  */
-function arrowInOneStroke(points: Pt[], unit: number): { tail: Pt; tip: Pt } | null {
+export function arrowInOneStroke(points: Pt[], unit: number, maxHeadShare = 0.5): { tail: Pt; tip: Pt } | null {
   for (const pts of [points, [...points].reverse()]) {
     const tail = pts[0]!;
     const out = pts.map((p) => dist(p, tail));
@@ -139,7 +140,7 @@ function arrowInOneStroke(points: Pt[], unit: number): { tail: Pt; tip: Pt } | n
     const head = pts.slice(t);
     if (head.length < 2 || dist(tail, tip) < SHAFT * unit) continue;
     const headLength = pathLength(head);
-    if (headLength < 0.3 * unit || headLength > Math.min(HEAD_PATH * unit, 0.5 * pathLength(shaft))) continue;
+    if (headLength < 0.3 * unit || headLength > Math.min(HEAD_PATH * unit, maxHeadShare * pathLength(shaft))) continue;
     const arriving = sub(tip, walk([...shaft].reverse(), 0.5 * unit));
     const leaving = sub(walk(head, 0.4 * unit), tip);
     if (degrees(arriving, leaving) < REVERSAL) continue;

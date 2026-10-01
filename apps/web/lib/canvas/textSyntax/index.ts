@@ -4,7 +4,8 @@
  * then rendered raw or normalized (handwriting.ts).
  *
  * For everything else on the canvas as well — typed text, shapes, arrows,
- * frames, pen marks, and what they point at — see readCanvas (read.ts).
+ * frames, pen marks and drawings, and what they point at — see readCanvas
+ * (read.ts).
  *
  * The output explains its own format, since it is meant to be handed to a
  * model verbatim. Deterministic: the same elements always give the

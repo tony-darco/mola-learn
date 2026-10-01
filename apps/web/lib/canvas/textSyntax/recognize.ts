@@ -133,6 +133,8 @@ const ZONES: Record<string, Zone> = {
   "→": [0.65, 0.35], "←": [0.65, 0.35], "*": [0.9, 0.45], "^": [1, 0.6], "°": [1, 0.7],
   ",": [0.12, -0.2], ".": [0.1, 0],
 };
+/** Words on one line further apart than this × its height are fitted to separate baselines. */
+const RUN_GAP = 1.5;
 /** What a matrix of numbers holds, and how sure a reading must be to count as evidence of what a matrix holds. */
 const NUMERIC = /^[0-9.\-+\/]$/;
 const NUMBERS_SURE = DEFAULT_MIN_CONFIDENCE;
@@ -207,7 +209,8 @@ function resample(strokes: Pt[][], n: number): CloudPt[] {
 function shape(all: Pt[][], n = N): { cloud: CloudPt[]; ends: CloudPt[]; dots: number; turns: number[] } {
   // Dots are counted, not drawn: a dot's few points would weigh in the cloud as much as a stroke's.
   const dotted = dotStrokes(all);
-  const strokes = all.filter((s) => !dotted.has(s));
+  // (A glyph of nothing but dots is drawn as it is.)
+  const strokes = dotted.size === all.length ? all : all.filter((s) => !dotted.has(s));
   const points = resample(strokes, n);
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
@@ -509,7 +512,8 @@ function linePlacement(words: Word[], boardCap: number): { baseline: number; cap
  * variables) and it is left as read.
  */
 export function recognizeDoc(doc: HandwritingDoc): Map<Glyph, Recognition> {
-  const rowsOf = (b: HandwritingDoc["blocks"][number]) => (b.kind === "matrix" ? b.rows.map((r) => r.cells.filter((c): c is Word => !!c)) : [b.words]);
+  // A line's words far apart (labels written beside a drawing) needn't share a baseline: each run of close words is fitted on its own.
+  const rowsOf = (b: HandwritingDoc["blocks"][number]) => (b.kind === "matrix" ? b.rows.map((r) => r.cells.filter((c): c is Word => !!c)) : runsOf(b.words, b.box.maxY - b.box.minY));
   const lines = doc.blocks.flatMap(rowsOf).filter((words) => words.length > 0);
   // The board's cap height: the typical line's, counting only lines with a few upright glyphs if there are any.
   const caps = lines.map(lineCap).filter((c) => c.count > 0);
@@ -590,6 +594,17 @@ export function recognizeDoc(doc: HandwritingDoc): Map<Glyph, Recognition> {
     }
   }
   return out;
+}
+
+/** Words in runs, split where the gap between two is wider than RUN_GAP × the line's height. */
+function runsOf(words: Word[], lineHeight: number): Word[][] {
+  const runs: Word[][] = [];
+  for (const w of words) {
+    const last = runs[runs.length - 1];
+    if (last && w.box.minX - last[last.length - 1]!.box.maxX <= RUN_GAP * lineHeight) last.push(w);
+    else runs.push([w]);
+  }
+  return runs;
 }
 
 /**

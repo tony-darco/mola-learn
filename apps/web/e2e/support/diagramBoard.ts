@@ -65,25 +65,31 @@ type Sheet = {
   overshoot: number;
   oval: number;
   head: "separate" | "joined";
+  /** No jitter at all: lines, circles, arrows and writing exactly as aimed. */
+  clean: boolean;
   origin: Pt;
   /** The whole plan's strokes. */
   strokes: Stroke[];
   truth: DiagramTruth;
 };
 
-/** Neat writes like readerBoard's neat hand, shaky like its shaky one. */
-function hand(style: DiagramStyle, seed: number): Omit<Sheet, "origin" | "strokes" | "truth"> {
+/** Neat writes like readerBoard's neat hand, shaky like its shaky one; a clean hand has no jitter at all. */
+function hand(style: DiagramStyle, seed: number, clean: boolean): Omit<Sheet, "origin" | "strokes" | "truth"> {
   const rng = seededRandom(seed);
+  if (clean) {
+    const still: Jitter = { rng, slantDeg: 0, scale: 0, offset: 0, strokeOffset: 0, wobble: 0 };
+    return { j: still, trace: still, aim: 0, bow: 0, bend: 0, overshoot: 0, oval: 0, head: style === "neat" ? "separate" : "joined", clean };
+  }
   return style === "neat"
     ? {
       j: { rng, slantDeg: 5, scale: 0.05, offset: 1.2, strokeOffset: 0.6, wobble: 0.6 },
       trace: { rng, slantDeg: 0, scale: 0, offset: 0, strokeOffset: 0, wobble: 0.35 },
-      aim: 1.5, bow: 1.5, bend: 0, overshoot: 8, oval: 0.03, head: "separate",
+      aim: 1.5, bow: 1.5, bend: 0, overshoot: 8, oval: 0.03, head: "separate", clean,
     }
     : {
       j: { rng, slantDeg: 14, scale: 0.15, offset: 3, strokeOffset: 1.8, wobble: 2.2 },
       trace: { rng, slantDeg: 0, scale: 0, offset: 0, strokeOffset: 0, wobble: 1 },
-      aim: 4, bow: 4, bend: 2, overshoot: 25, oval: 0.08, head: "joined",
+      aim: 4, bow: 4, bend: 2, overshoot: 25, oval: 0.08, head: "joined", clean,
     };
 }
 
@@ -165,7 +171,7 @@ function arcLine(s: Sheet, cx: number, cy: number, r: number, fromDeg: number, t
 
 /** A dot, filled in the way a pen does it: a tight spiral in to the centre. */
 function dot(s: Sheet, cx: number, cy: number, r = 4): Stroke {
-  const c = { x: cx + spread(s, 1), y: cy + spread(s, 1) };
+  const c = { x: cx + spread(s, s.clean ? 0 : 1), y: cy + spread(s, s.clean ? 0 : 1) };
   const points = Array.from({ length: 37 }, (_, i) => {
     const a = rad(i * 30);
     const rr = r * (1 - i / 36);
@@ -213,7 +219,7 @@ function toward(a: XY, b: XY, d: number): XY {
 }
 
 function arrow(s: Sheet, id: string, tail: XY, tip: XY, barb = 14): string {
-  const strokes = arrowStrokes(at(s, ...tail), at(s, ...tip), s.head, s.trace, barb);
+  const strokes = arrowStrokes(at(s, ...tail), at(s, ...tip), s.head, s.clean ? undefined : s.trace, barb);
   return shape(s, id, "arrow", strokes);
 }
 
@@ -224,7 +230,7 @@ function write(s: Sheet, text: string, cx: number, cy: number, size: number): nu
   const ys = ink.map((p) => p.y);
   const x = cx - (Math.min(...xs) + Math.max(...xs)) / 2;
   const y = cy - (Math.min(...ys) + Math.max(...ys)) / 2;
-  const { glyphs } = writeText(text, s.origin.x + x, s.origin.y + y, size, s.j);
+  const { glyphs } = writeText(text, s.origin.x + x, s.origin.y + y, size, s.clean ? undefined : s.j);
   return put(s, glyphs.flatMap((g) => g.strokes));
 }
 
@@ -236,7 +242,7 @@ function label(s: Sheet, text: string, cx: number, cy: number, size: number, of?
 
 /** A worked formula, its top-left at (x, y); returns the text, for `expected`. */
 function formula(s: Sheet, text: string, x: number, y: number): string {
-  put(s, writeText(text, s.origin.x + x, s.origin.y + y, LABEL, s.j).glyphs.flatMap((g) => g.strokes));
+  put(s, writeText(text, s.origin.x + x, s.origin.y + y, LABEL, s.clean ? undefined : s.j).glyphs.flatMap((g) => g.strokes));
   return text;
 }
 
@@ -445,7 +451,12 @@ const DRAW: Record<DiagramName, (s: Sheet) => string[]> = {
   co2, ch4, glucose, car, incline, circuit, "supply-demand": supplyDemand, "right-triangle": rightTriangle,
 };
 
-export function planDiagramBoard(): DiagramBoardPlan {
+/**
+ * With no options, the board as saved. `seed` draws the same diagrams in other
+ * hands (a different one per section), for checks over many hands; `clean`
+ * draws them with no jitter at all.
+ */
+export function planDiagramBoard(opts: { seed?: number; clean?: boolean } = {}): DiagramBoardPlan {
   const sections: DiagramSection[] = [];
   const strokes: Stroke[] = [];
 
@@ -456,7 +467,8 @@ export function planDiagramBoard(): DiagramBoardPlan {
       const origin = { x: ORIGIN.x + col * COLUMN_PITCH, y: ORIGIN.y + Math.floor(d / 2) * ROW_PITCH };
       const rect: Rect = { minX: origin.x, minY: origin.y, maxX: origin.x + SECTION_W, maxY: origin.y + SECTION_H };
       const first = strokes.length;
-      const sheet: Sheet = { ...hand(style, 7000 + (d * 2 + k) * 37), origin, strokes, truth: { primitives: [], labels: [] } };
+      const base = opts.seed === undefined ? 7000 : 100_000 + opts.seed * 1000;
+      const sheet: Sheet = { ...hand(style, base + (d * 2 + k) * 37, !!opts.clean), origin, strokes, truth: { primitives: [], labels: [] } };
       const expected = DRAW[diagram](sheet);
 
       // A region read is limited to the rect, so nothing may stray outside it.
