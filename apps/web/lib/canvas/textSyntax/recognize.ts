@@ -139,6 +139,13 @@ const NUMBERS_SURE = DEFAULT_MIN_CONFIDENCE;
 /** A glyph read at least this surely is a reference for its character on its board; at most EXEMPLARS per character, the surest. */
 const EXEMPLAR_SURE = 0.25;
 const EXEMPLARS = 16;
+/**
+ * A "0", "O" or "o" whose look-alike of the other kind comes within this
+ * relative margin, with no neighbour to say which it is, is flagged: most
+ * hands write the two alike. On seeds 1–20 this flags as much as the
+ * alphabet's floor on flags allows (0.45 would flag 30.3%, past it).
+ */
+const OVAL_MARGIN = 0.3;
 /** What can be written as a subscript or superscript. */
 const SCRIPTABLE = /^[A-Za-z0-9θπΔ+\-*]$/;
 
@@ -542,8 +549,8 @@ export function recognizeDoc(doc: HandwritingDoc): Map<Glyph, Recognition> {
     const strokes = g.strokes.map((st) => st.points);
     exemplars.set(r.char, [...list, { full: shape(strokes), rough: shape(strokes, ROUGH_N) }]);
   }
-  if (exemplars.size === 0) return out;
   for (const words of lines) {
+    if (exemplars.size === 0) break;
     const { baseline, cap } = placements.get(words[0]!)!;
     for (const word of words) word.glyphs.forEach((g, i) => {
       if (out.get(g)!.confidence >= DEFAULT_MIN_CONFIDENCE) return;
@@ -551,5 +558,63 @@ export function recognizeDoc(doc: HandwritingDoc): Map<Glyph, Recognition> {
       out.set(g, recognizeGlyph(g, { baseline, cap, afterBase: i > 0 }, numericBlocks.has(block) ? NUMERIC : undefined, exemplars));
     });
   }
+
+  // Look-alikes — "0" or "O", "1" or "l", "5" or "S" — are told apart by their neighbours (see LOOK_ALIKES).
+  for (const words of lines) {
+    const { baseline, cap } = placements.get(words[0]!)!;
+    // A matrix of numbers is all the context its entries need.
+    if (numericBlocks.has(doc.blocks.find((b) => rowsOf(b).some((ws) => ws.includes(words[0]!)))!)) continue;
+    for (const word of words) {
+      const reads = word.glyphs.map((g) => out.get(g)!);
+      word.glyphs.forEach((g, i) => {
+        const r = reads[i]!;
+        const margin = lookAlikeMargin(r);
+        if (margin === 1) return;
+        // Its neighbours: on the line, the nearest glyphs either side that aren't scripts; in a script, the next ones in it.
+        const same = (k: number) => !!reads[k] && !!reads[k]!.script === !!r.script;
+        let p = i - 1;
+        while (p >= 0 && !same(p)) p--;
+        let n = i + 1;
+        while (n < reads.length && !same(n)) n++;
+        const kind = (k: number) => (!reads[k] ? "edge" : DIGIT.test(reads[k]!.char) ? "digit" : LETTER.test(reads[k]!.char) ? "letter" : "other");
+        const oval = OVALS.includes(r.char);
+        const afterSubscriptedLetter = reads[i - 1]?.script === "sub" && kind(p) === "letter";
+        const asLetter = !r.script && (reads[i + 1]?.script === "sub" || afterSubscriptedLetter);
+        const asDigit = oval && kind(p) === "digit" && kind(n) === "digit";
+        // Context says which kind it is, not which character: it is the look-alike of that kind.
+        const twins = [...LOOK_ALIKES.find((group) => group.includes(r.char))!].filter((c) => DIGIT.test(c) === asDigit).join("");
+        if (asLetter || asDigit) reads[i] = recognizeGlyph(g, { baseline, cap, afterBase: i > 0 }, new RegExp(`^[${twins}]$`), exemplars);
+        else if (oval && margin < OVAL_MARGIN) reads[i] = { ...r, confidence: Math.min(r.confidence, (margin / OVAL_MARGIN) * DEFAULT_MIN_CONFIDENCE) };
+        out.set(g, reads[i]!);
+      });
+    }
+  }
   return out;
+}
+
+/**
+ * Digits and letters that are written alike. Which one a glyph is, its
+ * neighbours decide where they can, whatever its shape says: next to a
+ * subscript it follows, or a script that follows it, it is a letter ("CO_2",
+ * "H_2O" — but not "10^3": numbers take powers). An oval — "0", "O" or
+ * "o", which most hands write alike — between digits is a digit ("101").
+ * Elsewhere — "R1" is an index, "2S" a count, "20" a number, "H2O" written
+ * without its subscript — the shape decides, and an oval is flagged if it
+ * could be either.
+ */
+const LOOK_ALIKES = ["0Oo", "1lI", "5Ss", "2Zz", "8B"];
+const OVALS = "0Oo";
+const DIGIT = /^[0-9]$/;
+const LETTER = /^[A-Za-zθπΔΩ]$/;
+
+/**
+ * How clearly a glyph's shape rules out its look-alike of the other kind —
+ * a letter for a digit, a digit for a letter: the relative margin between
+ * the two, or 1 if the look-alike isn't a candidate at all.
+ */
+function lookAlikeMargin(r: Recognition): number {
+  const group = LOOK_ALIKES.find((g) => g.includes(r.char));
+  const best = r.candidates.find((c) => c.char === r.char);
+  const other = group && r.candidates.find((c) => group.includes(c.char) && DIGIT.test(c.char) !== DIGIT.test(r.char));
+  return best && other ? 1 - Math.sqrt(other.score / best.score) : 1;
 }
