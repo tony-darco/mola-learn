@@ -11,6 +11,8 @@
  *   or a frame's and sticky note's own look) and a click elsewhere clears it;
  *   a plain drag on empty space still pans; Delete from the menu removes the
  *   selection, and Undo brings it back.
+ * - A canvas's own chat stays out of the sidebar's chat list, its search box
+ *   and the /chats landing, and is still the one its canvas's panel opens.
  *
  *   E2E_PORT=3040 pnpm --filter @mola/web e2e --no-deps canvas-selection
  */
@@ -274,6 +276,50 @@ test.describe("canvas selection", () => {
       await expect(element("b")).toBeVisible();
       await expect.poll(savedIds, { timeout: 15_000 }).toEqual(["a", "b", "c"]);
     } finally {
+      await sql`delete from artifacts where id = ${canvasId}`;
+      await sql.end();
+    }
+  });
+
+  test("a canvas's own chat stays out of the chat lists and search, and its canvas still has it", async ({ page }) => {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    const canvasId = await scratchCanvas(sql, []);
+    // Both the newest of Alice's chats, the canvas one newest of all — whatever lists chats would show it first.
+    const [canvasChat] = await sql<{ id: string }[]>`
+      insert into chats (user_id, canvas_id, title, updated_at)
+      values ((select id from users where email = ${ALICE.email}), ${canvasId}, 'E2E Hidden canvas chat', now() + interval '2 minutes')
+      returning id`;
+    const [control] = await sql<{ id: string }[]>`
+      insert into chats (user_id, title, updated_at)
+      values ((select id from users where email = ${ALICE.email}), 'E2E Hidden control chat', now() + interval '1 minute')
+      returning id`;
+
+    try {
+      // The /chats landing opens the newest chat that isn't a canvas's.
+      await page.goto("/chats");
+      await page.waitForURL(`**/chats/${control!.id}`);
+
+      // The sidebar: as first rendered, as refreshed, and on screen.
+      const html = await (await page.request.get("/artifacts")).text();
+      expect(html).toContain(control!.id);
+      expect(html).not.toContain(canvasChat!.id);
+      const list = (await (await page.request.get("/api/chat")).json()) as { chats: { id: string }[] };
+      expect(list.chats.map((c) => c.id)).toContain(control!.id);
+      expect(list.chats.map((c) => c.id)).not.toContain(canvasChat!.id);
+      await expect(page.locator(`a[href="/chats/${control!.id}"]`).first()).toBeVisible();
+      await expect(page.locator(`a[href="/chats/${canvasChat!.id}"]`)).toHaveCount(0);
+
+      // The search box.
+      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await page.getByPlaceholder("Search chats and courses…").fill("E2E Hidden");
+      await expect(page.getByRole("button", { name: /E2E Hidden control chat/ })).toBeVisible();
+      await expect(page.getByText("E2E Hidden canvas chat")).toHaveCount(0);
+
+      // Still the canvas's own conversation.
+      const panel = (await (await page.request.get(`/api/canvas/${canvasId}/chat`)).json()) as { chatId: string | null };
+      expect(panel.chatId).toBe(canvasChat!.id);
+    } finally {
+      await sql`delete from chats where id in (${canvasChat!.id}, ${control!.id})`;
       await sql`delete from artifacts where id = ${canvasId}`;
       await sql.end();
     }
