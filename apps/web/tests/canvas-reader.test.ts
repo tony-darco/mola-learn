@@ -304,3 +304,17 @@ describe("readCanvas: determinism", () => {
     expect(a.labels).toEqual(b.labels);
   });
 });
+
+describe("readCanvas: shaky strokes that once crashed the sketch layer", () => {
+  // corners() can merge two close turns into their midpoint, which isn't a
+  // vertex of the path; looking it up with indexOf() returned -1 and threw.
+  it.each([
+    [17, "physics-shaky"],
+    [13, "matrix-multiplication-shaky"],
+  ])("seed %i, %s reads without throwing", (seed, id) => {
+    const plan = planReaderBoard({ seed });
+    const { rect } = plan.sections.find((s) => s.id === id)!;
+    const elements = planElements(plan).filter((e) => e.x >= rect.minX && e.x + e.width <= rect.maxX && e.y >= rect.minY && e.y + e.height <= rect.maxY);
+    expect(() => readCanvas(elements)).not.toThrow();
+  });
+});

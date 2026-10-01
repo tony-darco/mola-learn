@@ -268,8 +268,12 @@ export function fitStroke(ink: Ink, unit: number): Part {
   const turning = path.slice(1, -1).reduce((s, p, i) => s + turn(path[i]!, p, path[i + 2]!), 0);
   if (Math.abs(turning) >= 2 * 360) return { ...base, kind: "coil", points: [a, z], count: Math.round(Math.abs(turning) / 360) };
   const signs = found.map((p) => {
-    const i = path.indexOf(p);
-    return Math.sign(turn(path[i - 1]!, p, path[i + 1]!));
+    // A corner merged from two close turns is their midpoint, not a vertex of
+    // the path — so take the nearest interior vertex rather than indexOf(),
+    // which returned -1 and crashed the whole read on some shaky strokes.
+    let i = 1;
+    for (let k = 2; k < path.length - 1; k++) if (dist(path[k]!, p) < dist(path[i]!, p)) i = k;
+    return Math.sign(turn(path[i - 1]!, path[i]!, path[i + 1]!));
   });
   const alternating = signs.slice(1).filter((s, i) => s !== signs[i]).length;
   if (found.length >= 4 && alternating >= 0.75 * (found.length - 1)) return { ...base, kind: "zigzag", points: [a, ...found, z], count: found.length };
