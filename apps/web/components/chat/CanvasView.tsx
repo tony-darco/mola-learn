@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { zoomIdentity } from "d3-zoom";
+import { MessageSquare } from "lucide-react";
 import type { z } from "zod";
 import type { canvasDashStyleSchema, canvasFillStyleSchema, canvasPayloadSchema, CanvasElement } from "@mola/shared";
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
@@ -16,11 +17,15 @@ import { emptyHistory, pushHistory, redo as historyRedo, undo as historyUndo, ty
 import { eraseWholeObjects, erasePartial } from "@/lib/canvas/eraser";
 import { resizeBox, type ResizeCorner } from "@/lib/canvas/resize";
 import { cursorForTool } from "@/lib/canvas/cursors";
+import { boundsOf, elementsInRect, rectFromPoints, toScreenRect, unionRect, type Rect } from "@/lib/canvas/marquee";
 import { COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
 import { Toolbar, type EraserMode, type ShapeKind, type Tool } from "./canvas/Toolbar";
 import { BottomPill } from "./canvas/BottomPill";
 import { StylePanel, type StyleContext } from "./canvas/StylePanel";
 import { ElementShape, ShapeOutline } from "./canvas/ElementRenderer";
+import { SelectionMenu } from "./canvas/SelectionMenu";
+import { CanvasChatPanel, type ChatAttachment } from "./canvas/CanvasChatPanel";
+import { useCanvasChat } from "./canvas/useCanvasChat";
 import { useConfirm } from "./shell-context";
 
 type Payload = z.infer<typeof canvasPayloadSchema>;
@@ -37,6 +42,7 @@ const MIN_AUTO_FIT_FONT_SIZE = 8;
 const SAVE_DEBOUNCE_MS = 900;
 const LASER_FADE_MS = 700;
 const BG_PATTERN_ID = "canvas-bg-pattern";
+const CHECK_MY_WORK = "Check my work in this selection.";
 
 export function CanvasView({
   canvasId, title, payload, initialVersion,
@@ -67,6 +73,14 @@ export function CanvasView({
   const [conflict, setConflict] = useState(false);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [background, setBackground] = useState(payload.background);
+  /** The Shift-drag rectangle while it's being drawn, in world coordinates. */
+  const [marquee, setMarquee] = useState<Rect | null>(null);
+  /** The area the marquees drew around the current selection — kept with the exact Set it made, so any other
+   * change to the selection (a new Set) drops it, and Ask AI falls back to the selected elements' bounds. */
+  const [marqueeArea, setMarqueeArea] = useState<{ ids: Set<string>; rect: Rect } | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
+  const chat = useCanvasChat(canvasId);
 
   const elementsRef = useRef(elements);
   elementsRef.current = elements;
@@ -87,6 +101,7 @@ export function CanvasView({
   const draftRafRef = useRef<number | null>(null);
   const dragRef = useRef<{ ids: string[]; startWorld: { x: number; y: number }; startPositions: Map<string, { x: number; y: number }> } | null>(null);
   const boxStartRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
   const lineStartRef = useRef<{ x: number; y: number } | null>(null);
   const eraserDraggingRef = useRef(false);
   const laserDraggingRef = useRef(false);
@@ -121,6 +136,12 @@ export function CanvasView({
   function scheduleSave() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(requestSaveNow, SAVE_DEBOUNCE_MS);
+  }
+
+  /** The canvas chat reads the board from what's saved — so save now, and wait for it, before asking. */
+  async function flushSave() {
+    if (saveTimerRef.current) requestSaveNow();
+    while (serializer.isInFlight) await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
   /** Applies a state change without touching history — used for the many
@@ -176,6 +197,11 @@ export function CanvasView({
     setSelectedIds(new Set());
   }
 
+  function deleteSelected() {
+    mutate((prev) => [...selectedIds].reduce((acc, id) => deleteElement(acc, id), prev));
+    setSelectedIds(new Set());
+  }
+
   useEffect(() => {
     function onVisibilityChange() { if (document.hidden) requestSaveNow(); }
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -197,8 +223,7 @@ export function CanvasView({
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0 && !inInput) {
         e.preventDefault();
-        mutate((prev) => [...selectedIds].reduce((acc, id) => deleteElement(acc, id), prev));
-        setSelectedIds(new Set());
+        deleteSelected();
       }
     }
     function onKeyUp(e: KeyboardEvent) { if (e.code === "Space") spaceHeldRef.current = false; }
@@ -227,6 +252,8 @@ export function CanvasView({
     if (spaceHeldRef.current) return true;
     if (toolRef.current === "pan") return true;
     if (toolRef.current !== "select") return false;
+    // Shift + drag on empty space draws a marquee instead (handlePointerDown).
+    if (me.shiftKey) return false;
     const target = me.target as Element;
     return !target.closest?.("[data-element-id]");
   }
@@ -261,6 +288,17 @@ export function CanvasView({
 
     if (tool === "select") {
       const target = e.target as Element;
+      if (e.shiftKey && !elementIdFromTarget(target)) {
+        e.preventDefault();
+        target.setPointerCapture(e.pointerId);
+        const start = worldFromEvent(e);
+        marqueeStartRef.current = start;
+        setMarquee(rectFromPoints(start, start));
+        return;
+      }
+      // Moving, resizing or re-selecting leaves behind the area a marquee drew.
+      setMarqueeArea(null);
+
       const handleEl = target.closest?.("[data-resize-handle]");
       if (handleEl) {
         const id = handleEl.getAttribute("data-element-id")!;
@@ -350,6 +388,11 @@ export function CanvasView({
   }
 
   function handlePointerMove(e: React.PointerEvent<SVGSVGElement>) {
+    if (marqueeStartRef.current) {
+      setMarquee(rectFromPoints(marqueeStartRef.current, worldFromEvent(e)));
+      return;
+    }
+
     if (resizeRef.current) {
       const { id, corner } = resizeRef.current;
       const p = worldFromEvent(e);
@@ -407,7 +450,14 @@ export function CanvasView({
     }
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e: React.PointerEvent<SVGSVGElement>) {
+    if (marqueeStartRef.current) {
+      finishMarquee(rectFromPoints(marqueeStartRef.current, worldFromEvent(e)));
+      marqueeStartRef.current = null;
+      setMarquee(null);
+      return;
+    }
+
     if (resizeRef.current) {
       resizeRef.current = null;
       applyMutation((prev) => recomputeParentIds(prev));
@@ -500,6 +550,38 @@ export function CanvasView({
 
     if (tool === "eraser") { eraserDraggingRef.current = false; return; }
     if (tool === "laser") { laserDraggingRef.current = false; return; }
+  }
+
+  /** Adds what's mostly inside the rectangle to the selection, and keeps the area for Ask AI. */
+  function finishMarquee(rect: Rect) {
+    const hits = elementsInRect(elementsRef.current, rect).filter((id) => !selectedIds.has(id));
+    if (hits.length === 0) return;
+    // What was already selected stays covered: by the earlier marquees' area, or by its own bounds.
+    const before = marqueeArea?.ids === selectedIds
+      ? marqueeArea.rect
+      : boundsOf(elementsRef.current.filter((el) => selectedIds.has(el.id)));
+    const next = new Set([...selectedIds, ...hits]);
+    setSelectedIds(next);
+    setMarqueeArea({ ids: next, rect: before ? unionRect(before, rect) : rect });
+  }
+
+  function openChat() {
+    setChatOpen(true);
+    void chat.ensureLoaded();
+  }
+
+  async function sendToChat(message: string, rect: Rect | null) {
+    await flushSave();
+    await chat.send(message, rect);
+  }
+
+  /** Ask AI / Check my work: attach the selection to the chat, and for a check, ask straight away. */
+  function askAboutSelection(checkWork: boolean) {
+    if (!selectionArea) return;
+    const next = { rect: selectionArea, count: selectedIds.size };
+    setAttachment(next);
+    openChat();
+    if (checkWork) void sendToChat(CHECK_MY_WORK, next.rect);
   }
 
   function handleClick(e: React.MouseEvent<SVGSVGElement>) {
@@ -718,6 +800,10 @@ export function CanvasView({
 
   const selectedElement = selectedId ? elements.find((e) => e.id === selectedId) ?? null : null;
   const isTextLikeSelected = selectedElement?.type === "text" || selectedElement?.type === "note";
+  /** What Ask AI asks about: the marquees' area while it still describes the selection, else the selected elements' bounds. */
+  const selectionArea = selectedIds.size === 0 ? null
+    : marqueeArea?.ids === selectedIds ? marqueeArea.rect
+    : boundsOf(elements.filter((e) => selectedIds.has(e.id)));
 
   const styleContext: StyleContext = {
     dash: !isTextLikeSelected && (tool === "line" || tool === "arrow" || tool === "shape" || tool === "draw" || tool === "highlighter"),
@@ -745,7 +831,8 @@ export function CanvasView({
   const allowNoBackground = isTextLikeSelected && selectedElement!.type === "text";
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg">
+    <>
+    <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg">
       <Toolbar
         tool={tool} onToolChange={setTool}
         locked={locked} onLockedChange={setLocked}
@@ -788,6 +875,28 @@ export function CanvasView({
       )}
       {!conflict && saving && (
         <div className="absolute right-3 top-20 z-10 text-xs text-fg-muted">Saving…</div>
+      )}
+
+      {!chatOpen && (
+        <button
+          type="button"
+          onClick={openChat}
+          title="Canvas chat"
+          aria-label="Canvas chat"
+          className="absolute right-3 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-fg-muted shadow-lg hover:text-fg"
+        >
+          <MessageSquare size={18} />
+        </button>
+      )}
+
+      {selectionArea && !marquee && !editingId && (
+        <SelectionMenu
+          screen={toScreenRect(selectionArea, transform)}
+          canvasWidth={svgRef.current?.clientWidth ?? 0}
+          onAsk={() => askAboutSelection(false)}
+          onCheck={() => askAboutSelection(true)}
+          onDelete={deleteSelected}
+        />
       )}
 
       <svg
@@ -833,6 +942,14 @@ export function CanvasView({
             <rect x={boxDraft.x} y={boxDraft.y} width={boxDraft.width} height={boxDraft.height} fill="none" className="stroke-accent" strokeWidth={1.5} strokeDasharray="4 3" />
           )}
 
+          {marquee && (
+            <rect
+              data-testid="marquee"
+              x={marquee.minX} y={marquee.minY} width={marquee.maxX - marquee.minX} height={marquee.maxY - marquee.minY}
+              className="fill-accent/5 stroke-accent" strokeWidth={1.5} strokeDasharray="4 3" vectorEffect="non-scaling-stroke"
+            />
+          )}
+
           {visibleLaser.length >= 2 && (
             <>
               <path
@@ -845,6 +962,16 @@ export function CanvasView({
         </g>
       </svg>
     </div>
+
+    {chatOpen && (
+      <CanvasChatPanel
+        turns={chat.turns} busy={chat.busy} loadError={chat.loadError}
+        attachment={attachment} onRemoveAttachment={() => setAttachment(null)}
+        onSend={(text) => void sendToChat(text, attachment?.rect ?? null)}
+        onClose={() => setChatOpen(false)}
+      />
+    )}
+    </>
   );
 }
 
