@@ -33,6 +33,17 @@ const SYSTEM = [
     + "If something you need is unreadable or missing from the text, say so rather than guessing.",
 ].join("\n\n");
 
+/**
+ * The model's whole output for one reply, thinking included. On a clean board
+ * read, thinking is short and helps a little; on a garbled one it runs away,
+ * fills the provider's default 8192 tokens, and only then does OllamaProvider
+ * silently retry with thinking off. Capping it here makes that fallback come
+ * after about 40 s instead of about 2 minutes. The cap also bounds the
+ * visible answer (the retry gets the same budget), which is plenty for a
+ * question about the board.
+ */
+const MAX_OUTPUT_TOKENS = 3072;
+
 const rectSchema = z.object({
   minX: z.number().finite(), minY: z.number().finite(), maxX: z.number().finite(), maxY: z.number().finite(),
 }).refine((r) => r.minX <= r.maxX && r.minY <= r.maxY, "empty rectangle");
@@ -153,7 +164,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
           send({ type: "canvas_context", userMessageId: userRow!.id, messageId, ...context });
           let stopReason = "end_turn";
           const provider = getChatProvider(session.userId, { model: chat.model, think: chat.thinkingEnabled === 1 });
-          for await (const ev of provider.stream({ system: SYSTEM, messages: modelMessages })) {
+          for await (const ev of provider.stream({ system: SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS })) {
             if (ev.type === "text_delta") { text += ev.text; send(ev); }
             if (ev.type === "done") stopReason = ev.stopReason;
             if (ev.type === "error") { error = ev.message; break; }
