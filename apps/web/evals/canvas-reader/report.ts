@@ -73,7 +73,7 @@ function typedText(x: number, y: number, text: string, size: number, cls: string
   return `<text class="${cls}" x="${x}" y="${y}" style="font-size:${size}px">${text.split("\n").map((l, i) => `<tspan x="${x}" dy="${i === 0 ? size : size * 1.25}">${esc(l)}</tspan>`).join("")}</text>`;
 }
 
-function elementSvg(e: CanvasElement): string {
+export function elementSvg(e: CanvasElement): string {
   switch (e.type) {
     case "draw": {
       const points = e.props.points.map((p) => `${e.x + p.x},${e.y + p.y}`).join(" ");
@@ -178,7 +178,7 @@ function runDetails(r: QaRun): string {
 
 // ── page ────────────────────────────────────────────────────────────────────
 
-const CSS = `${SYNTAX_CSS}
+export const CSS = `${SYNTAX_CSS}
 :root { --note:#fde68a; --hl:rgba(234, 179, 8, .45); --region:#db2777; --ai:#7c3aed; }
 @media (prefers-color-scheme: dark) { :root { --note:#5b4a12; --hl:rgba(250, 204, 21, .35); --region:#f472b6; --ai:#c4b5fd; } }
 svg.board { width: 100%; height: auto; background: var(--card); border-radius: 6px; display: block; margin: 8px 0; }
