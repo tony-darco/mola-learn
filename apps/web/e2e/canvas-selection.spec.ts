@@ -7,8 +7,10 @@
  *   exactly that section's content — its LaTeX, or its handwritten digits —
  *   and nothing from the sections around it. A reply arrives and is stored;
  *   what it says is for a person to judge, not this test.
- * - On a scratch canvas: a plain drag on empty space still pans; Delete from
- *   the menu removes the selection, and Undo brings it back.
+ * - On scratch canvases: every kind of selected element shows it (an outline,
+ *   or a frame's and sticky note's own look) and a click elsewhere clears it;
+ *   a plain drag on empty space still pans; Delete from the menu removes the
+ *   selection, and Undo brings it back.
  *
  *   E2E_PORT=3040 pnpm --filter @mola/web e2e --no-deps canvas-selection
  */
@@ -58,6 +60,27 @@ async function shiftDrag(page: Page, rect: Rect) {
 const topLefts = (text: string) => [...text.matchAll(/top-left \((-?\d+), (-?\d+)\)/gi)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
 
 const parseEvents = (body: string) => body.split("\n\n").filter((f) => f.startsWith("data: ")).map((f) => JSON.parse(f.slice(6)) as CanvasChatEvent);
+
+const INK = "#1c1b18";
+const IMAGE = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='6'><rect width='8' height='6' fill='%23b6c2d0'/></svg>";
+
+/** A canvas element as saved (packages/shared/src/artifacts.ts). */
+function el(id: string, index: string, x: number, y: number, width: number, height: number, type: string, props: Record<string, postgres.JSONValue>) {
+  return { id, parentId: null, index, x, y, width, height, rotation: 0, opacity: 1, createdBy: "user", type, props };
+}
+const text = (id: string, index: string, x: number, y: number) => el(id, index, x, y, 160, 40, "text", {
+  text: `box ${id}`, color: INK, fontSize: 18, backgroundColor: null, bold: false, italic: false, textAlign: "left", autoFit: "grow",
+});
+
+/** A throwaway canvas of Alice's, panned and zoomed out so the marquee has to work in world coordinates. */
+async function scratchCanvas(sql: postgres.Sql, elements: ReturnType<typeof el>[]): Promise<string> {
+  const payload = { kind: "canvas", elements, viewport: { x: 60, y: 40, zoom: 0.8 }, background: { pattern: "dots", color: "#ffffff" } };
+  const [row] = await sql<{ id: string }[]>`
+    insert into artifacts (user_id, kind, title, payload)
+    values ((select id from users where email = ${ALICE.email}), 'canvas', 'E2E Selection', ${sql.json(payload)})
+    returning id`;
+  return row!.id;
+}
 
 test.describe("canvas selection", () => {
   test.use({ storageState: ALICE_STORAGE, viewport: { width: 1920, height: 1200 } });
@@ -173,30 +196,55 @@ test.describe("canvas selection", () => {
     }
   });
 
+  test("every selected element shows it: outlines after a Shift-drag, none after a click elsewhere", async ({ page }, testInfo) => {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    const canvasId = await scratchCanvas(sql, [
+      el("pen", "a0", 200, 420, 100, 40, "draw", { points: [{ x: 0, y: 0 }, { x: 50, y: 40 }, { x: 100, y: 10 }], color: INK, strokeWidth: 3, variant: "pen", dash: "solid" }),
+      el("math", "a1", 340, 420, 120, 40, "math", { latex: "x^2+1", color: INK, fontSize: 18 }),
+      text("text", "a2", 200, 480),
+      el("shape", "a3", 500, 410, 80, 60, "shape", { shapeKind: "rectangle", color: INK, fillColor: null, fillStyle: "none", strokeWidth: 2, dash: "solid" }),
+      el("arrow", "a4", 620, 480, 80, 60, "line", { endX: 80, endY: -60, color: INK, strokeWidth: 2, dash: "solid", startArrow: false, endArrow: true }),
+      el("image", "a5", 740, 410, 80, 60, "image", { url: IMAGE, naturalWidth: 8, naturalHeight: 6 }),
+      el("note", "a6", 860, 410, 100, 100, "note", { text: "note", color: "#fef3c7", textColor: INK, fontSize: 16, bold: false, italic: false, textAlign: "left", autoFit: "grow" }),
+      el("frame", "a7", 1000, 400, 160, 120, "frame", { name: "Frame" }),
+    ]);
+
+    try {
+      await page.goto(`/canvas/${canvasId}`);
+      const outlines = page.getByTestId("selection-outline");
+      await expect(page.locator('svg.touch-none [data-element-id="frame"]').first()).toBeVisible();
+
+      await shiftDrag(page, { minX: 180, minY: 380, maxX: 1180, maxY: 540 });
+      await expect(page.getByTestId("selection-menu")).toBeVisible();
+      // One outline per selected element — except frames and sticky notes, which keep their own selected look.
+      await expect.poll(async () => (await outlines.evaluateAll((els) => els.map((e) => e.getAttribute("data-outline-for")))).sort())
+        .toEqual(["arrow", "image", "math", "pen", "shape", "text"]);
+      await expect(page.locator('g[data-element-id="frame"] rect[stroke="var(--accent)"]')).toHaveCount(1);
+      await expect(page.locator('g[data-element-id="note"] rect.stroke-accent')).toHaveCount(1);
+      await page.screenshot({ path: testInfo.outputPath("selection-outlines.png") });
+
+      const empty = await onScreen(page, { minX: 200, minY: 650, maxX: 200, maxY: 650 });
+      await page.mouse.click(empty.minX, empty.minY);
+      await expect(outlines).toHaveCount(0);
+      await expect(page.locator('g[data-element-id="frame"] rect[stroke="var(--accent)"]')).toHaveCount(0);
+      await expect(page.locator('g[data-element-id="note"] rect.stroke-accent')).toHaveCount(0);
+      await expect(page.getByTestId("selection-menu")).toHaveCount(0);
+    } finally {
+      await sql`delete from artifacts where id = ${canvasId}`;
+      await sql.end();
+    }
+  });
+
   test("a plain drag still pans; Delete from the menu removes the selection, and Undo brings it back", async ({ page }) => {
     const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
-    const box = (id: string, index: string, x: number, y: number) => ({
-      id, parentId: null, index, x, y, width: 160, height: 40, rotation: 0, opacity: 1, createdBy: "user", type: "text",
-      props: { text: `box ${id}`, color: "#1c1b18", fontSize: 18, backgroundColor: null, bold: false, italic: false, textAlign: "left", autoFit: "grow" },
-    });
-    const payload = {
-      kind: "canvas",
-      elements: [box("a", "a0", 200, 200), box("b", "a1", 420, 200), box("c", "a2", 900, 200)],
-      // Panned and zoomed out, so the marquee has to work in world coordinates.
-      viewport: { x: 60, y: 40, zoom: 0.8 },
-      background: { pattern: "dots", color: "#ffffff" },
-    };
-    const [canvas] = await sql<{ id: string }[]>`
-      insert into artifacts (user_id, kind, title, payload)
-      values ((select id from users where email = ${ALICE.email}), 'canvas', 'E2E Selection', ${sql.json(payload)})
-      returning id`;
+    const canvasId = await scratchCanvas(sql, [text("a", "a0", 200, 200), text("b", "a1", 420, 200), text("c", "a2", 900, 200)]);
     const savedIds = async () => {
-      const [row] = await sql<{ payload: { elements: { id: string }[] } }[]>`select payload from artifacts where id = ${canvas!.id}`;
+      const [row] = await sql<{ payload: { elements: { id: string }[] } }[]>`select payload from artifacts where id = ${canvasId}`;
       return row!.payload.elements.map((e) => e.id).sort();
     };
 
     try {
-      await page.goto(`/canvas/${canvas!.id}`);
+      await page.goto(`/canvas/${canvasId}`);
       const element = (id: string) => page.locator(`svg.touch-none g[data-element-id="${id}"]`);
       await expect(element("a")).toBeVisible();
       const menu = page.getByTestId("selection-menu");
@@ -226,7 +274,7 @@ test.describe("canvas selection", () => {
       await expect(element("b")).toBeVisible();
       await expect.poll(savedIds, { timeout: 15_000 }).toEqual(["a", "b", "c"]);
     } finally {
-      await sql`delete from artifacts where id = ${canvas!.id}`;
+      await sql`delete from artifacts where id = ${canvasId}`;
       await sql.end();
     }
   });

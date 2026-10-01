@@ -7,6 +7,7 @@ import type { MathfieldElement } from "mathlive";
 import type { z } from "zod";
 import type { canvasShapeKindSchema, CanvasElement } from "@mola/shared";
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
+import { elementBounds } from "@/lib/canvas/marquee";
 
 /** A single resize handle at the bottom-right corner — deliberately not one
  * per corner; a single, always-in-the-same-place handle is a simpler,
@@ -113,6 +114,38 @@ export function ShapeOutline({
   if (shapeKind === "ellipse") return <ellipse cx={cx} cy={cy} rx={width / 2} ry={height / 2} {...common} />;
   if (shapeKind === "triangle") return <polygon points={`${cx},${y} ${x},${y + height} ${x + width},${y + height}`} {...common} />;
   return <polygon points={starPoints(cx, cy, Math.min(width, height) / 2, Math.min(width, height) / 4.5)} {...common} />;
+}
+
+/** Screen pixels: the outline's stroke, and its gap from the element. */
+const OUTLINE_WIDTH = 1.25;
+const OUTLINE_PAD = 4;
+
+/**
+ * The selected state for every element without one of its own (frames and
+ * sticky notes draw theirs): a thin dashed accent box around its bounds, the
+ * same width on screen at any zoom. Ink drawn past the bounds — a stroke's
+ * width, an arrowhead — is padded around, not cut through.
+ */
+export function SelectionOutline({ element, zoom }: { element: CanvasElement; zoom: number }) {
+  const b = elementBounds(element);
+  let ink = 0;
+  if (element.type === "draw") ink = (element.props.strokeWidth * (element.props.variant === "highlighter" ? 3 : 1)) / 2;
+  if (element.type === "shape") ink = element.props.strokeWidth / 2;
+  if (element.type === "line") {
+    const { strokeWidth, startArrow, endArrow } = element.props;
+    // Half the arrowhead's size (see ElementShape's line branch).
+    ink = startArrow || endArrow ? Math.max(strokeWidth * 2, 6) : strokeWidth / 2;
+  }
+  const pad = ink + OUTLINE_PAD / zoom;
+  return (
+    <rect
+      data-testid="selection-outline"
+      data-outline-for={element.id}
+      x={b.minX - pad} y={b.minY - pad} width={b.maxX - b.minX + 2 * pad} height={b.maxY - b.minY + 2 * pad}
+      fill="none" className="stroke-accent" strokeWidth={OUTLINE_WIDTH / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+      pointerEvents="none"
+    />
+  );
 }
 
 export function ElementShape({

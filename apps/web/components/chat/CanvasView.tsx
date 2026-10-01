@@ -22,7 +22,7 @@ import { COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WID
 import { Toolbar, type EraserMode, type ShapeKind, type Tool } from "./canvas/Toolbar";
 import { BottomPill } from "./canvas/BottomPill";
 import { StylePanel, type StyleContext } from "./canvas/StylePanel";
-import { ElementShape, ShapeOutline } from "./canvas/ElementRenderer";
+import { ElementShape, SelectionOutline, ShapeOutline } from "./canvas/ElementRenderer";
 import { SelectionMenu } from "./canvas/SelectionMenu";
 import { CanvasChatPanel, type ChatAttachment } from "./canvas/CanvasChatPanel";
 import { useCanvasChat } from "./canvas/useCanvasChat";
@@ -927,6 +927,11 @@ export function CanvasView({
               onStartEdit={startEdit}
               zoom={transform.k}
             />
+          ))}
+
+          {/* Frames and sticky notes show their own selected state. */}
+          {sorted.filter((el) => selectedIds.has(el.id) && el.type !== "frame" && el.type !== "note").map((el) => (
+            <SelectionOutline key={el.id} element={el} zoom={transform.k} />
           ))}
 
           {draft && draft.points.length > 1 && (
