@@ -30,6 +30,7 @@ struct ArtifactBlockView: View {
         case .flashcardDeck: return "rectangle.on.rectangle"
         case .quiz: return "checklist"
         case .mindMap: return "point.3.connected.trianglepath.dotted"
+        case .canvas: return "scribble.variable"
         }
     }
 
@@ -38,6 +39,7 @@ struct ArtifactBlockView: View {
         case .flashcardDeck(let cards): return "\(cards.count) cards"
         case .quiz(let questions, let difficulty): return "\(questions.count) questions · \(difficulty)"
         case .mindMap(_, let nodes, _): return "\(nodes.count) concepts"
+        case .canvas(let elements, _, _): return "\(elements.count) elements"
         }
     }
 }
@@ -45,6 +47,7 @@ struct ArtifactBlockView: View {
 /// Routes to the right study surface for the artifact's kind — the detail
 /// screen behind both the gallery and an inline chat card.
 struct ArtifactDetailView: View {
+    @EnvironmentObject private var client: MolaClient
     let artifact: ArtifactRecord
 
     var body: some View {
@@ -57,6 +60,13 @@ struct ArtifactDetailView: View {
                     QuizView(title: artifact.title, questions: questions)
                 case .mindMap(let rootId, let nodes, let edges):
                     MindMapView(title: artifact.title, rootId: rootId, nodes: nodes, edges: edges)
+                case .canvas(let elements, let viewport, let background):
+                    CanvasDetailView(
+                        canvasId: artifact.id, title: artifact.title,
+                        initialElements: elements, initialViewport: viewport,
+                        initialBackground: background, initialVersion: artifact.version,
+                        client: client
+                    )
                 }
             }
             .navigationTitle(artifact.title)

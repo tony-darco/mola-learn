@@ -15,6 +15,7 @@ enum ArtifactKind: String, Codable {
     case flashcardDeck = "flashcard_deck"
     case quiz
     case mindMap = "mind_map"
+    case canvas
 }
 
 struct Flashcard: Codable, Identifiable, Hashable {
@@ -117,11 +118,12 @@ enum ArtifactPayload {
     case flashcardDeck(cards: [Flashcard])
     case quiz(questions: [QuizQuestion], difficulty: String)
     case mindMap(rootId: String, nodes: [MindMapNode], edges: [MindMapEdge])
+    case canvas(elements: [CanvasElement], viewport: CanvasViewport, background: CanvasBackground)
 }
 
 extension ArtifactPayload: Codable {
     private enum CodingKeys: String, CodingKey {
-        case kind, cards, questions, difficulty, rootId, nodes, edges
+        case kind, cards, questions, difficulty, rootId, nodes, edges, elements, viewport, background
     }
 
     init(from decoder: Decoder) throws {
@@ -139,6 +141,13 @@ extension ArtifactPayload: Codable {
                 rootId: try c.decode(String.self, forKey: .rootId),
                 nodes: try c.decode([MindMapNode].self, forKey: .nodes),
                 edges: try c.decode([MindMapEdge].self, forKey: .edges)
+            )
+        case "canvas":
+            self = .canvas(
+                elements: try c.decode([CanvasElement].self, forKey: .elements),
+                viewport: try c.decode(CanvasViewport.self, forKey: .viewport),
+                background: try c.decodeIfPresent(CanvasBackground.self, forKey: .background)
+                    ?? CanvasBackground(pattern: "dots", color: "#ffffff")
             )
         default:
             throw DecodingError.dataCorruptedError(
@@ -162,6 +171,11 @@ extension ArtifactPayload: Codable {
             try c.encode(rootId, forKey: .rootId)
             try c.encode(nodes, forKey: .nodes)
             try c.encode(edges, forKey: .edges)
+        case .canvas(let elements, let viewport, let background):
+            try c.encode("canvas", forKey: .kind)
+            try c.encode(elements, forKey: .elements)
+            try c.encode(viewport, forKey: .viewport)
+            try c.encode(background, forKey: .background)
         }
     }
 }

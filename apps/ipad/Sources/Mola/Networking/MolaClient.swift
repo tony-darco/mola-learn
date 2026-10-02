@@ -167,27 +167,25 @@ final class MolaClient: ObservableObject {
         try Self.checkOK(response, data)
     }
 
-    // MARK: - SSE (chat POST and the reconnect stream both emit this)
+    // MARK: - SSE
+    //
+    // The main chat stream (contract 6, `packages/shared/src/stream.ts`) and
+    // the canvas chat stream (`lib/canvas/chat.ts`) use the same wire framing
+    // — `data: <json>\n\n`, one object per event — but different event
+    // vocabularies, so `rawSSE` does the HTTP + framing once and each typed
+    // wrapper below only supplies its own decoder.
 
-    /// Opens a POST and yields `StreamEvent`s as they arrive — used for
-    /// `POST /api/chat/:chatId` (see `encodeSSE`/`StreamEvent` in
-    /// `packages/shared/src/stream.ts`).
-    func streamPost(_ path: String, body: [String: Any]) -> AsyncThrowingStream<StreamEvent, Error> {
+    /// Opens an HTTP request and yields each SSE frame's raw JSON payload.
+    private func rawSSE(_ request: URLRequest) -> AsyncThrowingStream<Data, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    let url = try self.endpoint(path)
-                    var request = URLRequest(url: url)
-                    request.httpMethod = "POST"
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
                     let (bytes, response) = try await self.session.bytes(for: request)
                     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                         throw MolaError.http(http.statusCode, "")
                     }
                     for try await event in SSEParser.events(from: bytes) {
-                        continuation.yield(StreamEvent.decode(from: event))
+                        continuation.yield(event)
                     }
                     continuation.finish()
                 } catch {
@@ -197,19 +195,52 @@ final class MolaClient: ObservableObject {
         }
     }
 
+    private func jsonRequest(_ path: String, method: String, body: [String: Any]?) throws -> URLRequest {
+        var request = URLRequest(url: try endpoint(path))
+        request.httpMethod = method
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        return request
+    }
+
+    /// Opens a POST and yields `StreamEvent`s as they arrive — used for
+    /// `POST /api/chat/:chatId` (see `encodeSSE`/`StreamEvent` in
+    /// `packages/shared/src/stream.ts`).
+    func streamPost(_ path: String, body: [String: Any]) -> AsyncThrowingStream<StreamEvent, Error> {
+        guard let request = try? jsonRequest(path, method: "POST", body: body) else {
+            return AsyncThrowingStream { $0.finish(throwing: MolaError.notConfigured) }
+        }
+        return mapStream(rawSSE(request), StreamEvent.decode(from:))
+    }
+
     /// `GET /api/chat/:chatId/messages/:messageId/stream` — reconnects to an
     /// in-progress turn after e.g. the app was backgrounded mid-stream.
     func streamGet(_ path: String) -> AsyncThrowingStream<StreamEvent, Error> {
+        guard let request = try? jsonRequest(path, method: "GET", body: nil) else {
+            return AsyncThrowingStream { $0.finish(throwing: MolaError.notConfigured) }
+        }
+        return mapStream(rawSSE(request), StreamEvent.decode(from:))
+    }
+
+    /// `POST /api/canvas/:canvasId/chat` — a canvas's own conversation.
+    /// `lib/canvas/chat.ts`'s event set, not the main chat's.
+    func canvasChatStream(_ path: String, body: [String: Any]) -> AsyncThrowingStream<CanvasChatStreamEvent, Error> {
+        guard let request = try? jsonRequest(path, method: "POST", body: body) else {
+            return AsyncThrowingStream { $0.finish(throwing: MolaError.notConfigured) }
+        }
+        return mapStream(rawSSE(request), CanvasChatStreamEvent.decode(from:))
+    }
+
+    private func mapStream<T>(
+        _ source: AsyncThrowingStream<Data, Error>, _ decode: @escaping (Data) -> T
+    ) -> AsyncThrowingStream<T, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    let url = try self.endpoint(path)
-                    let (bytes, response) = try await self.session.bytes(from: url)
-                    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                        throw MolaError.http(http.statusCode, "")
-                    }
-                    for try await event in SSEParser.events(from: bytes) {
-                        continuation.yield(StreamEvent.decode(from: event))
+                    for try await data in source {
+                        continuation.yield(decode(data))
                     }
                     continuation.finish()
                 } catch {

@@ -11,6 +11,7 @@ enum ShellSection: Hashable {
     case quizzes
     case flashcards
     case mindmaps
+    case canvases
     case plan
     case calendar
     case course(String)
@@ -102,6 +103,8 @@ struct ShellView: View {
             ArtifactsGalleryView(kindFilter: .flashcardDeck)
         case .mindmaps:
             ArtifactsGalleryView(kindFilter: .mindMap)
+        case .canvases:
+            ArtifactsGalleryView(kindFilter: .canvas)
         case .plan:
             PlanView()
         case .calendar:
@@ -170,6 +173,7 @@ struct DrawerView: View {
                     row("Quizzes", "checklist", .quizzes)
                     row("Flashcards", "rectangle.on.rectangle", .flashcards)
                     row("Mind maps", "point.3.connected.trianglepath.dotted", .mindmaps)
+                    row("Canvases", "scribble.variable", .canvases)
 
                     DrawerHeader("Schedule")
                     row("Plan", "calendar.day.timeline.left", .plan)

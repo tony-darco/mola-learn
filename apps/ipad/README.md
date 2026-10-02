@@ -56,10 +56,17 @@ into the app:
   (`packages/shared/src/stream.ts`) the web client reads: text deltas,
   collapsed tool-call rows, sub-agent markers, and artifacts rendering
   inline the moment they're generated.
-- **Artifacts** (quizzes, flashcard decks, mind maps) — browsing is real,
-  via one new backend endpoint this change adds (see below). Flashcard
+- **Artifacts** (quizzes, flashcard decks, mind maps, canvases) — browsing is
+  real, via one new backend endpoint this change adds (see below). Flashcard
   study (flip through a deck) and taking a quiz (graded locally, same rule
   as the server's `gradeQuiz`) both work against the real generated content.
+- **Canvas** — a real freehand whiteboard: pen, eraser, pan/zoom, a basic
+  text box, and the canvas's own chat panel (ask Mola about what's on the
+  board), all saved to and loaded from the same `artifacts` row the web
+  canvas edits. Two new backend routes this change adds make that possible
+  (see below) — everything it reads or writes is real data, not a local
+  mock. What it does *not* reproduce is the web canvas's full editing
+  surface; see "What's deliberately not wired up."
 - **Plan** — today/week/semester, reading `GET /api/plan`, accepting a
   pending proposal via `POST /api/plan/:id/accept`, and checking tasks off
   via `PATCH /api/tasks/:id`.
@@ -68,16 +75,34 @@ into the app:
   course's chats.
 - **Settings** — BYOK key save/remove against `/api/settings`.
 
-## One backend change this includes
+## Backend changes this includes
 
-`apps/web/app/api/artifacts/route.ts` — a new `GET /api/artifacts?kind=`
-route. It didn't exist before this: the web app's Quizzes/Flashcards/Artifacts
-galleries are Next.js **server components** that query the database directly
-(`lib/quizzes/gallery.ts`, `lib/flashcards/gallery.ts`,
-`lib/artifacts/gallery.ts`), with no JSON endpoint behind them, because
-nothing non-browser ever needed one before. The new route is a thin wrapper
-around the same `listAllArtifacts` read those pages already use — same
-ownership scoping, nothing new added to the trust boundary.
+Three new, additive routes — nothing existing was modified, and each wraps
+logic the web app already trusts rather than re-deriving it:
+
+- **`GET /api/artifacts?kind=`** (`apps/web/app/api/artifacts/route.ts`).
+  The web app's Quizzes/Flashcards/Artifacts galleries are Next.js **server
+  components** that query the database directly (`lib/quizzes/gallery.ts`,
+  `lib/flashcards/gallery.ts`, `lib/artifacts/gallery.ts`), with no JSON
+  endpoint behind them, because nothing non-browser ever needed one before.
+  This wraps the same `listAllArtifacts` read — same ownership scoping,
+  nothing new added to the trust boundary. Canvases are `artifacts` rows
+  like any other (`kind: "canvas"`), so this one route already covers them
+  too; nothing canvas-specific was needed here.
+- **`POST /api/canvas`** (`apps/web/app/api/canvas/route.ts`) — create a
+  canvas. The web equivalent, `createCanvasAction`, is a Server Action that
+  ends in `redirect(/canvas/:id)`; this mirrors its insert exactly but
+  returns `{ id }` as JSON instead.
+- **`PATCH /api/canvas/:canvasId`** (`apps/web/app/api/canvas/[canvasId]/route.ts`)
+  — save a canvas's elements/viewport/background. Unlike the create route,
+  this one **calls the existing `saveCanvasAction` directly** rather than
+  re-deriving its logic: that action never redirects, so it's safe to invoke
+  from a route handler, and doing so keeps the optimistic-concurrency
+  (`version`) compare-and-swap in exactly one place instead of two copies
+  that could drift apart.
+
+All three were verified with `pnpm --filter @mola/web typecheck` and a full
+`pnpm --filter @mola/web build` — both clean.
 
 ## What's deliberately not wired up
 
@@ -99,6 +124,21 @@ follow-up pass. Neither is faked client-side:
   that interaction model in SwiftUI (`Canvas`, force simulation, pinch/pan)
   is a project of its own. The outline shows the same tree and the same
   cross-link edges, just not spatially.
+- **The canvas board has no shape/line/note/math/image creation tools, no
+  marquee selection, no undo stack, and no hachure fills.** Only pen, eraser,
+  pan/zoom and a plain text box can *create* content — but an element of any
+  type made on the web (a shape, a sticky note, a math block, an uploaded
+  image, a frame) still **renders** when opened here, just without those
+  tools to make another one. Math shows its raw LaTeX source, not a KaTeX
+  render — there's no LaTeX engine in SwiftUI. Dots/grid/lines backgrounds
+  all draw as the same dot grid (`blank` is the one pattern that's actually
+  distinct). The canvas chat always sends the *whole* board as context —
+  there's no marquee "ask about just this region" selection yet, though the
+  wire format (`lib/canvas/chat.ts`'s `selection.rect`) already supports it.
+  A conflicting save (someone else — the web client, say — saved first)
+  adopts the server's version number rather than attempting a merge; the
+  *next* local edit's save retries cleanly, but the loser's un-saved edit in
+  between isn't reconciled against what changed.
 - **Course documents, memory, and schedule items aren't shown.** Like the
   galleries, `app/(shell)/courses/[id]/page.tsx` reads those straight from
   the database server-side with no JSON route behind them. Course name,
@@ -130,9 +170,12 @@ Sources/Mola/
   Models/         Swift mirrors of packages/shared's frozen contracts
   Features/
     Auth/         Sign in / sign up
-    Root/         NavigationSplitView shell, sidebar
-    Chat/         Transcript, streaming turn, composer
+    Root/         The shell — one main panel plus a sliding drawer (the role
+                  Sidebar.tsx plays on the web), shaped like Claude's own
+                  iPad app rather than a three-column NavigationSplitView
+    Chat/         Transcript, streaming turn, composer, new-chat screen
     Artifacts/    Gallery + flashcard/quiz/mindmap study views
+    Canvas/       Board (pen/eraser/pan/zoom/text), its own chat panel
     Courses/      Course detail
     Plan/         Today/week/semester
     Calendar/     Month grid
@@ -141,8 +184,9 @@ Sources/Mola/
 
 No ViewModel/networking code is shared with the web app or generated from
 its types — `Models/` is a hand-maintained Swift mirror of
-`packages/shared/src/*.ts`. If a contract there changes, this needs a
-matching edit; there's no build step connecting the two today.
+`packages/shared/src/*.ts` (including the `canvas*` schemas added on
+`feat/canvas`). If a contract there changes, this needs a matching edit;
+there's no build step connecting the two today.
 
 ### Why cookies, not a token
 
