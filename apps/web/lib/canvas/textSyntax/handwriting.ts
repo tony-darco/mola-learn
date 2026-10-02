@@ -81,6 +81,23 @@ export const HANDWRITING_GUIDE: Record<SyntaxRender, (rows: number) => string[]>
   ],
 };
 export const COORDINATES = "- Coordinates are canvas units: x grows rightward, y grows downward.";
+export const BOXES_GUIDE = `- After each matrix and line of handwriting comes the box of every cell or word in it, by its top-left and bottom-right corners: "M1 row 2 col 3: (310, 150) to (330, 180)".`;
+
+/** A box rounded outward to whole canvas units: what is printed, so a printed point inside it is inside. */
+export const outward = (b: Box): Box => ({ minX: Math.floor(b.minX), minY: Math.floor(b.minY), maxX: Math.ceil(b.maxX), maxY: Math.ceil(b.maxY) });
+
+/** Every cell's or word's box, one per line under its address; `only`, as in BlockExtras. Empty cells have none. */
+export function describeBoxes(block: Block, only?: Set<Word>): string {
+  const places = block.kind === "matrix"
+    ? block.rows.flatMap((row, r) => row.cells.map((w, c) => ({ w, address: `${block.id} row ${r + 1} col ${c + 1}` })))
+    : block.words.map((w, i) => ({ w, address: `${block.id} word ${i + 1}` }));
+  const lines = places.flatMap(({ w, address }) => {
+    if (!w || (only && !only.has(w))) return [];
+    const b = outward(w.box);
+    return [`${address}: (${b.minX}, ${b.minY}) to (${b.maxX}, ${b.maxY})`];
+  });
+  return [`Boxes of the ${block.kind === "matrix" ? "cells" : "words"} of ${block.id}:`, ...lines].join("\n");
+}
 
 export const RAW_GUIDE = (rows: number) => ["How to read it:", ...HANDWRITING_GUIDE.raw(rows), COORDINATES].join("\n");
 export const NORMALIZED_GUIDE = (rows: number) => ["How to read it:", ...HANDWRITING_GUIDE.normalized(rows), COORDINATES].join("\n");

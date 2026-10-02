@@ -20,6 +20,7 @@ import { inkFromElements, segmentHandwriting, type HandwritingDoc } from "./segm
 export type { SyntaxRender } from "./handwriting";
 export { readCanvas, type CanvasDoc, type ReadItem, type Region } from "./read";
 export { EMPTY_LABELS, type LabelMap } from "./labels";
+export { resolveTarget, type ResolvedTarget } from "./targets";
 
 export function canvasHandwritingToText(
   elements: CanvasElement[],

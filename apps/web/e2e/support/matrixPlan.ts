@@ -48,7 +48,7 @@ export type StrokeMeta =
       place: { kind: "cell"; row: number; col: number } | { kind: "label"; word: number };
     };
 
-/** One step as written: the matrix, and the label drawn under it (null for the last step). */
+/** One step as written (a slip included): the matrix, and the label drawn under it (null for the last step). */
 export type PlannedStep = { matrix: Matrix; label: string | null };
 
 export type MatrixPlan = { strokes: Stroke[]; meta: StrokeMeta[]; bounds: Bounds; steps: PlannedStep[] };
@@ -61,11 +61,15 @@ function matrixWidth(m: Matrix): number {
   return BRACKET_ARM + BRACKET_PAD + m[0]!.length * COL_W + BAR_GAP + BRACKET_PAD;
 }
 
+/** One entry written wrong: at `step`, the cell at 0-based (`row`, `col`) shows `value` instead of what the reduction gives. */
+export type Slip = { step: number; row: number; col: number; value: number };
+
 export function planMatrixReduction({
   system = EXAMPLE_SYSTEM,
   origin = { x: 280, y: 110 },
   jitterSeed,
-}: { system?: ReductionSystem; origin?: { x: number; y: number }; jitterSeed?: number } = {}): MatrixPlan {
+  slip,
+}: { system?: ReductionSystem; origin?: { x: number; y: number }; jitterSeed?: number; slip?: Slip } = {}): MatrixPlan {
   const jitter: Jitter | undefined = jitterSeed === undefined ? undefined : makeJitter(jitterSeed);
   const reduction = reduce(system);
   const first = reduction[0]!.matrix;
@@ -102,7 +106,9 @@ export function planMatrixReduction({
   }
 
   reduction.forEach((current, step) => {
-    const m = current.matrix;
+    const m = slip?.step === step
+      ? current.matrix.map((row, r) => row.map((v, c) => (r === slip.row && c === slip.col ? slip.value : v)))
+      : current.matrix;
     const bx = origin.x + Math.floor(step / ROWS_PER_COLUMN) * columnPitch;
     const by = origin.y + (step % ROWS_PER_COLUMN) * blockPitch;
     const cols = m[0]!.length;

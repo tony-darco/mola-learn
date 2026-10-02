@@ -20,7 +20,7 @@
  */
 import type { CanvasElement, CanvasShapeElement } from "@mola/shared";
 import { DEFAULT_BITMAP_ROWS } from "./bitmap";
-import { blockRenderer, COORDINATES, HANDWRITING_GUIDE, plural, scriptedText, topLeft, type SyntaxRender } from "./handwriting";
+import { blockRenderer, BOXES_GUIDE, COORDINATES, describeBoxes, HANDWRITING_GUIDE, plural, scriptedText, topLeft, type SyntaxRender } from "./handwriting";
 import { assignLabels, EMPTY_LABELS, type Labelable, type LabelMap } from "./labels";
 import { detectPenMarks, type PenMark } from "./marks";
 import { DEFAULT_MIN_CONFIDENCE, recognizeDoc } from "./recognize";
@@ -200,7 +200,11 @@ const DRAWING_GUIDE = `- A drawing made with the pen is described by its parts, 
 
 export function readCanvas(
   elements: CanvasElement[],
-  opts: { labels?: LabelMap; render?: SyntaxRender; region?: Region } = {},
+  opts: {
+    labels?: LabelMap; render?: SyntaxRender; region?: Region;
+    /** Also print the box of every matrix cell and handwritten word, for a model that points by coordinates. Off by default. */
+    coordinates?: boolean;
+  } = {},
 ): { text: string; doc: CanvasDoc; labels: LabelMap } {
   const render = opts.render ?? "normalized";
   const rows = DEFAULT_BITMAP_ROWS;
@@ -327,7 +331,9 @@ export function readCanvas(
     const rel = relations.get(entry);
     if (entry.block) {
       const part = selection?.includes(entry);
-      return renderBlock(entry.block, { tag, only: part instanceof Set ? part : undefined });
+      const only = part instanceof Set ? part : undefined;
+      const text = renderBlock(entry.block, { tag, only });
+      return opts.coordinates ? `${text}\n\n${describeBoxes(entry.block, only)}` : text;
     }
     if (entry.drawing) return describeDrawing(entry.drawing, label, tag);
     const mark = entry.mark;
@@ -378,7 +384,10 @@ export function readCanvas(
     : [
       header.join("\n"),
       LABEL_KEY,
-      ["How to read it:", ...(shown.some((entry) => entry.block) ? HANDWRITING_GUIDE[render](rows) : []), ...(shown.some((entry) => entry.drawing) ? [DRAWING_GUIDE] : []), ...GUIDE, COORDINATES].join("\n"),
+      [
+        "How to read it:", ...(shown.some((entry) => entry.block) ? HANDWRITING_GUIDE[render](rows) : []), ...(shown.some((entry) => entry.drawing) ? [DRAWING_GUIDE] : []),
+        ...GUIDE, ...(opts.coordinates && shown.some((entry) => entry.block) ? [BOXES_GUIDE] : []), COORDINATES,
+      ].join("\n"),
       ...parts.flatMap((p) => [`${p.title}\n${counts(p.entries, p.kinds)}`, ...p.entries.map(itemText)]),
     ].join("\n\n");
 
