@@ -57,7 +57,7 @@ export function describeDrawing(d: Drawing, label: string, tag = ""): string {
     }
   };
 
-  const labelText = (l: Drawing["labels"][number]) => `"${l.text}"${l.doubt ? ` (read with doubt: ${l.doubt})` : ""}`;
+  const labelText = (l: Drawing["labels"][number]) => `"${l.shown ?? l.text}"`;
   const where = (l: Drawing["labels"][number]): string => {
     if (l.part === null) return "";
     const p = d.parts[l.part]!;
@@ -91,7 +91,7 @@ export function describeDrawing(d: Drawing, label: string, tag = ""): string {
     const corners = nodes.map((n, i) => ("corner" in n ? i : -1)).filter((i) => i >= 0);
     const nodeName = (i: number) => {
       const n: GraphNode = nodes[i]!;
-      return "label" in n ? `"${d.labels[n.label]!.text}" ${g({ x: (d.labels[n.label]!.box.minX + d.labels[n.label]!.box.maxX) / 2, y: (d.labels[n.label]!.box.minY + d.labels[n.label]!.box.maxY) / 2 })}`
+      return "label" in n ? `${labelText(d.labels[n.label]!)} ${g({ x: (d.labels[n.label]!.box.minX + d.labels[n.label]!.box.maxX) / 2, y: (d.labels[n.label]!.box.minY + d.labels[n.label]!.box.maxY) / 2 })}`
         : `corner ${corners.indexOf(i) + 1} ${g(n.corner)}`;
     };
     const how = (e: (typeof edges)[number], from: number): string => {
@@ -125,7 +125,6 @@ export function describeDrawing(d: Drawing, label: string, tag = ""): string {
       ...lines,
       ...loose.map(({ p, i }) => `- Also ${name(i)}: ${partText(p)}.`),
       ...(unattached.length ? [`Also written: ${list(unattached.map((l) => `${labelText(l)} at ${g({ x: (l.box.minX + l.box.maxX) / 2, y: (l.box.minY + l.box.maxY) / 2 })}`))}.`] : []),
-      ...d.labels.filter((l) => l.doubt && !unattached.includes(l)).map((l) => `"${l.text}" was read with doubt: ${l.doubt}.`),
     ].join("\n");
   }
 

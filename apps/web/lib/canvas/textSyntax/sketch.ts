@@ -527,8 +527,11 @@ function dashEnds(strokes: Ink[]): Pt[] {
 export type Place = "start" | "end" | "tail" | "head" | "middle" | "side" | "vertex" | "inside" | "near";
 /** Two parts (indices into `parts`) that join: `a`'s end on `b` (meet), their sides against each other (touch), or `a`, or an end of it, within `b` (inside). */
 export type Join = { a: number; b: number; how: "meet" | "touch" | "inside"; at?: Pt };
-/** A label: written text beside the drawing, the part it is nearest, and where on that part. `index`: which side or corner (from 0, in drawing order). */
-export type DrawingLabel = { strokes: Ink[]; box: Box; text: string; part: number | null; place: Place; index?: number; doubt?: string };
+/**
+ * A label: written text beside the drawing, the part it is nearest, and where on that part. `index`: which side or corner (from 0, in drawing order).
+ * `text`: the label as read; `shown`, as printed, if that differs — its unsure characters as what they may be, "«5|S»" (handwriting.ts's printedWord).
+ */
+export type DrawingLabel = { strokes: Ink[]; box: Box; text: string; shown?: string; part: number | null; place: Place; index?: number };
 export type BondType = "single" | "double" | "triple" | "wedge" | "dashed";
 /** Labels and unlabelled corners, joined by lines: `node`s are indices into `labels`, or `{ corner }` for an unlabelled point where lines meet. */
 export type GraphNode = { label: number } | { corner: Pt };
@@ -675,12 +678,12 @@ function graphOf(parts: Part[], labels: DrawingLabel[], unit: number): Graph | n
  * running on through the labels of two drawings side by side). A label
  * within reach of the ends of two drawings' lines joins them into one (the
  * "C" between a molecule's bonds). `blocks` are the board's lines of writing,
- * `textOf` reads words (`doubt`: what they may be instead, where the
- * recognizer is unsure). Returns the finished drawings and the blocks they
- * took as labels — only blocks all of whose words became labels.
+ * `textOf` reads words (`shown`: as printed, where the recognizer is unsure
+ * of some of it). Returns the finished drawings and the blocks they took as
+ * labels — only blocks all of whose words became labels.
  */
 export function attachLabels(
-  drafts: DrawingDraft[], blocks: TextBlock[], textOf: (words: Word[]) => { text: string; doubt?: string }, unit: number,
+  drafts: DrawingDraft[], blocks: TextBlock[], textOf: (words: Word[]) => { text: string; shown?: string }, unit: number,
 ): { drawings: Drawing[]; labels: Set<TextBlock> } {
   type Run = { block: TextBlock; words: Word[]; box: Box };
   const all = blocks.flatMap((b) => {

@@ -4,19 +4,21 @@
  *   "raw"        — every character as a small ASCII bitmap (bitmap.ts), for
  *                  the model to read itself;
  *   "normalized" — every character read by the recognizer (recognize.ts),
- *                  matrices as bracketed rows and text as strings; only the
- *                  characters it is unsure of fall back to bitmaps.
+ *                  matrices as bracketed rows and text as strings; a
+ *                  character it is unsure of is printed in place as the
+ *                  readings it offers, "«5|S|s»".
  *
  * A block can also be rendered in part — only some of its cells or words —
  * for a read of a selected region that cuts through it.
  */
 import { renderWord } from "./bitmap";
-import { recognizeDoc, type Recognition, type Script } from "./recognize";
+import { offered, recognizeDoc, type Recognition, type Script } from "./recognize";
 import type { Block, Box, Glyph, HandwritingDoc, MatrixBlock, TextBlock, Word } from "./segment";
 
 /**
  * A word's characters with its scripts marked, as in LaTeX: "H_2O", "x^2",
- * and braces round a run of more than one character, "x^{10}", "C_{?g1}".
+ * and braces round a run of more than one character, "x^{10}" — an unsure
+ * one counting as one, "C_«2|z»".
  */
 export function scriptedText(chars: { char: string; script?: Script | null }[]): string {
   let out = "";
@@ -25,11 +27,46 @@ export function scriptedText(chars: { char: string; script?: Script | null }[]):
     let j = i + 1;
     while (j < chars.length && (chars[j]!.script ?? null) === script) j++;
     const run = chars.slice(i, j).map((c) => c.char).join("");
-    out += !script ? run : `${script === "sub" ? "_" : "^"}${[...run].length === 1 ? run : `{${run}}`}`;
+    out += !script ? run : `${script === "sub" ? "_" : "^"}${j - i === 1 ? run : `{${run}}`}`;
     i = j;
   }
   return out;
 }
+
+/**
+ * An unsure character as printed: what it may be, most likely first, between
+ * guillemets — "«5|S|s»". Neither "«", "»" nor "|" is ever a reading, and
+ * none of them means anything in math, so the mark can't be taken for writing.
+ */
+export const unsureText = (readings: string[]) => `«${readings.join("|")}»`;
+
+/** A character whose likeliest reading scores below this (the scores of all its readings summing to 1) is barely legible. */
+const ILLEGIBLE = 0.2;
+
+/** Characters printed, and of those, how many were unsure and how many barely legible. */
+export type Tally = { chars: number; unsure: number; illegible: number };
+
+/**
+ * A word as a normalized read prints it: each character as recognized, with
+ * scripts marked (scriptedText), and each one the recognizer is less sure of
+ * than `minConfidence` as the readings it offers (recognize.ts's offered),
+ * "1«0|θ|O»0". `tally`, if given, is added to.
+ */
+export function printedWord(w: Word, reads: Map<Glyph, Recognition>, minConfidence: number, tally?: Tally): string {
+  const rs = w.glyphs.map((g) => reads.get(g)!);
+  return scriptedText(rs.map((r, i) => {
+    if (tally) tally.chars++;
+    if (r.confidence >= minConfidence) return r;
+    if (tally) {
+      tally.unsure++;
+      if (r.candidates[0]!.score < ILLEGIBLE) tally.illegible++;
+    }
+    return { char: unsureText(offered(w.glyphs[i]!, rs, i)), script: r.script };
+  }));
+}
+
+/** Most of a block's characters barely legible: said once, after its kind, so its readings are taken as guesses. */
+const hardToRead = (t: Tally) => (2 * t.illegible > t.chars ? ", hard to read: the recognizer is unsure of most of its characters" : "");
 
 export type SyntaxRender = "raw" | "normalized";
 
@@ -44,20 +81,20 @@ function barPlace(afterColumn: number, columns: number): string {
   return `between columns ${afterColumn} and ${afterColumn + 1}`;
 }
 
-/** `tag` follows the kind, e.g. " (made by the AI)". */
-export function describeMatrix(m: MatrixBlock, tag = ""): string {
+/** `tag` follows the kind, e.g. " (made by the AI)"; `note` ends the description, e.g. ", hard to read: …". */
+export function describeMatrix(m: MatrixBlock, tag = "", note = ""): string {
   const bars = m.bars.map((b) => barPlace(b.afterColumn, m.columns));
   const barText = bars.length === 0 ? ""
     : bars.length === 1 ? `, with a vertical bar ${bars[0]}`
     : `, with vertical bars ${bars.join(" and ")}`;
   const size = `${Math.round(m.box.maxX - m.box.minX)} x ${Math.round(m.box.maxY - m.box.minY)}`;
-  return `${m.id} — matrix in brackets${tag}, ${plural(m.rows.length, "row", "rows")} x ${plural(m.columns, "column", "columns")}${barText}. Top-left ${topLeft(m.box)}, size ${size}.`;
+  return `${m.id} — matrix in brackets${tag}, ${plural(m.rows.length, "row", "rows")} x ${plural(m.columns, "column", "columns")}${barText}${note}. Top-left ${topLeft(m.box)}, size ${size}.`;
 }
 
-/** `operands`: for the operators written between matrices (TextBlock.operands), those matrices' labels. */
-export const describeText = (t: TextBlock, tag = "", operands?: string[]) => (operands
-  ? `${t.id} — operators written between matrices${tag}, joining ${operands.slice(0, -1).join(", ")} and ${operands[operands.length - 1]} into one expression. Top-left ${topLeft(t.box)}.`
-  : `${t.id} — line of text${tag}, ${plural(t.words.length, "word", "words")}. Top-left ${topLeft(t.box)}.`);
+/** `operands`: for the operators written between matrices (TextBlock.operands), those matrices' labels. `note`, as in describeMatrix. */
+export const describeText = (t: TextBlock, tag = "", operands?: string[], note = "") => (operands
+  ? `${t.id} — operators written between matrices${tag}, joining ${operands.slice(0, -1).join(", ")} and ${operands[operands.length - 1]} into one expression${note}. Top-left ${topLeft(t.box)}.`
+  : `${t.id} — line of text${tag}, ${plural(t.words.length, "word", "words")}${note}. Top-left ${topLeft(t.box)}.`);
 
 /** Matrices' labels with the operators between them: "M1 × M2 = M3". */
 const expression = (operands: string[], operators: string[]) => operands.flatMap((m, i) => (i < operators.length ? [m, operators[i]!] : [m])).join(" ");
@@ -66,6 +103,10 @@ const expression = (operands: string[], operators: string[]) => operands.flatMap
 const operandLabels = (doc: HandwritingDoc, t: TextBlock) =>
   t.operands?.map((left) => doc.blocks.find((b) => b.kind === "matrix" && b.delimiters.left === left)?.id ?? "a matrix");
 
+/** How an unsure character is printed (unsureText), as a guide bullet. */
+export const UNSURE_GUIDE = `- A handwritten character the recognizer is unsure of is printed where it was written as what it may be, most likely first, `
+  + `between « and » and separated by "|": "x = «5|S|s»" means the x equals a 5, an S or an s. «, » and | are never part of the writing itself.`;
+
 /** How to read the handwriting, as guide bullets. */
 export const HANDWRITING_GUIDE: Record<SyntaxRender, (rows: number) => string[]> = {
   raw: (rows) => [
@@ -73,11 +114,11 @@ export const HANDWRITING_GUIDE: Record<SyntaxRender, (rows: number) => string[]>
     `- All bitmaps on one line of writing share the same ${rows} rows, top to bottom, so marks keep their size and height: a minus sign is a short run of "#" in the middle rows, "=" is two short runs.`,
     "- A cell or word with several characters shows their bitmaps side by side, one space column apart.",
   ],
-  normalized: (rows) => [
+  normalized: () => [
     "- Every handwritten character has been read from its pen strokes by a shape recognizer.",
     `- A matrix is printed row by row between square brackets, with "|" where a vertical bar is drawn and "_" for an empty cell. A line of text is printed after its id, with single spaces between words.`,
     `- Subscripts and superscripts are marked as in LaTeX: "H_2O" has a subscript 2, "x^2" a superscript 2, and braces group several characters, "x^{10}".`,
-    `- A character the recognizer is unsure of is printed as ?g<n>. Under its matrix or line, g<n> lists its likeliest readings with their scores, then shows it as a bitmap: "#" is ink, "." is blank paper, on the same ${rows} rows as the rest of its line, so marks keep their size and height (a minus sign is a short run of "#" in the middle rows).`,
+    UNSURE_GUIDE,
   ],
 };
 export const COORDINATES = "- Coordinates are canvas units: x grows rightward, y grows downward.";
@@ -115,17 +156,16 @@ export type BlockExtras = {
 };
 
 /**
- * A renderer for the blocks of one document. Uncertain characters are
- * numbered g1, g2, … across the whole document, in the order its blocks are
- * rendered. Each call returns one block's text, sections separated by blank
- * lines. `reads`: the recognizer's readings, if already made (of a document
- * holding these blocks and maybe more).
+ * A renderer for the blocks of one document. Each call returns one block's
+ * text (in a raw render, sections separated by blank lines). `reads`: the
+ * recognizer's readings, if already made (of a document holding these blocks
+ * and maybe more).
  */
 export function blockRenderer(
   doc: HandwritingDoc, opts: { render: SyntaxRender; rows: number; minConfidence: number; reads?: Map<Glyph, Recognition> },
 ): (block: Block, extras?: BlockExtras) => string {
   const { rows } = opts;
-  return opts.render === "raw" ? rawBlock(doc, rows) : normalizedBlock(doc, opts.reads ?? recognizeDoc(doc), rows, opts.minConfidence);
+  return opts.render === "raw" ? rawBlock(doc, rows) : normalizedBlock(doc, opts.reads ?? recognizeDoc(doc), opts.minConfidence);
 }
 
 // ── raw: every character as a bitmap ────────────────────────────────────────
@@ -152,43 +192,35 @@ const rawBlock = (doc: HandwritingDoc, rows: number) => (block: Block, { tag = "
 
 // ── normalized: every character as recognized ──────────────────────────────
 
-function normalizedBlock(doc: HandwritingDoc, reads: Map<Glyph, Recognition>, rows: number, minConfidence: number) {
-  let uncertain = 0;
+function normalizedBlock(doc: HandwritingDoc, reads: Map<Glyph, Recognition>, minConfidence: number) {
   return (block: Block, { tag = "", only }: BlockExtras = {}): string => {
-    const legend: string[] = [];
-    const read = (w: Word, band: Box) => scriptedText(w.glyphs.map((g) => {
-      const r = reads.get(g)!;
-      if (r.confidence >= minConfidence) return r;
-      const id = `g${++uncertain}`;
-      const options = r.candidates.slice(0, 3).map((c) => `${c.char} (${c.score.toFixed(2)})`);
-      const readings = options.length > 1 ? `${options.slice(0, -1).join(", ")} or ${options[options.length - 1]}` : options[0];
-      legend.push(`${id}: ${readings}\n${renderWord({ glyphs: [g], box: g.box }, band, rows).join("\n")}`);
-      return { char: `?${id}`, script: r.script };
-    }));
+    // Every character printed, so the description can say if most were barely legible.
+    const tally: Tally = { chars: 0, unsure: 0, illegible: 0 };
+    const read = (w: Word) => printedWord(w, reads, minConfidence, tally);
 
     if (block.kind === "text") {
       const operands = operandLabels(doc, block);
       if (!only) {
-        const words = block.words.map((w) => read(w, block.box));
-        return [`${describeText(block, tag, operands)}\n${block.id}: ${operands ? expression(operands, words) : words.join(" ")}`, ...legend].join("\n\n");
+        const words = block.words.map(read);
+        return `${describeText(block, tag, operands, hardToRead(tally))}\n${block.id}: ${operands ? expression(operands, words) : words.join(" ")}`;
       }
       // Runs of consecutive selected words, under their addresses.
       const lines: string[] = [];
       let run: number[] = [];
       const flush = () => {
-        if (run.length) lines.push(`${block.id} ${span("word", run[0]! + 1, run[run.length - 1]! + 1)}: ${run.map((i) => read(block.words[i]!, block.box)).join(" ")}`);
+        if (run.length) lines.push(`${block.id} ${span("word", run[0]! + 1, run[run.length - 1]! + 1)}: ${run.map((i) => read(block.words[i]!)).join(" ")}`);
         run = [];
       };
       block.words.forEach((w, i) => (only.has(w) ? run.push(i) : flush()));
       flush();
-      return [[describeText(block, tag, operands) + PARTLY.text, ...lines].join("\n"), ...legend].join("\n\n");
+      return [describeText(block, tag, operands, hardToRead(tally)) + PARTLY.text, ...lines].join("\n");
     }
 
     // In part, a row with every entry selected is printed whole; otherwise only its selected cells are read.
     const wholeRow = block.rows.map((row) => !only || (row.cells.some((c) => c) && row.cells.every((c) => !c || only.has(c))));
     const cells = block.rows.map((row, r) => row.cells.map((c) => {
       if (!wholeRow[r] && !(c && only?.has(c))) return null;
-      return c ? read(c, row.box) : "_";
+      return c ? read(c) : "_";
     }));
     const widths = Array.from({ length: block.columns }, (_, c) => Math.max(2, ...cells.map((r) => r[c]?.length ?? 0)));
     // A bar sits before column `c` (0-based) when its afterColumn is c; one past the last column closes the row.
@@ -197,11 +229,11 @@ function normalizedBlock(doc: HandwritingDoc, reads: Map<Glyph, Recognition>, ro
       const parts = [...(barAt(0) ? ["|"] : []), ...r.flatMap((v, c) => [v!.padStart(widths[c]!), ...(barAt(c + 1) ? ["|"] : [])])];
       return `[ ${parts.join(" ")} ]`;
     };
-    if (!only) return [[describeMatrix(block, tag), ...cells.map(rowText)].join("\n"), ...legend].join("\n\n");
+    if (!only) return [describeMatrix(block, tag, hardToRead(tally)), ...cells.map(rowText)].join("\n");
 
     const lines = cells.flatMap((row, r) => (wholeRow[r]
       ? [`${block.id} row ${r + 1}: ${rowText(row)}`]
       : row.flatMap((v, c) => (v === null ? [] : [`${block.id} row ${r + 1} col ${c + 1}: ${v}`]))));
-    return [[describeMatrix(block, tag) + PARTLY.matrix, ...lines].join("\n"), ...legend].join("\n\n");
+    return [describeMatrix(block, tag, hardToRead(tally)) + PARTLY.matrix, ...lines].join("\n");
   };
 }
