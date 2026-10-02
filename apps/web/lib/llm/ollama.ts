@@ -6,7 +6,11 @@ import type { CompletionRequest, LLMProvider, Message } from "./types";
 // convention), which fetch()/URL reject outright — default it to http://.
 const rawHost = process.env.OLLAMA_HOST ?? "192.168.1.17:11434";
 export const HOST = /^https?:\/\//.test(rawHost) ? rawHost : `http://${rawHost}`;
-export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "qwen3.6:27b";
+// gemma4:26b, not qwen3.6:27b: the LAN box's GPU is a 12 GB RTX 5070, and
+// qwen3.6's ~18 GB of dense weights leave most of it on the CPU (minutes per
+// thinking turn). gemma4:26b is mixture-of-experts — ~4B active per token —
+// so it stays fast even partly offloaded.
+export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "gemma4:26b";
 
 /**
  * Inactivity timeout, not a total-duration cap.

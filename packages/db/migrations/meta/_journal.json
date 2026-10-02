@@ -71,6 +71,34 @@
       "when": 1788879292617,
       "tag": "0009_smooth_jubilee",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790235262074,
+      "tag": "0010_condemned_moira_mactaggert",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790793756043,
+      "tag": "0011_bright_kid_colt",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790794894602,
+      "tag": "0012_retire_non_gemma_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790816246875,
+      "tag": "0013_canvas_chat",
+      "breakpoints": true
     }
   ]
 }

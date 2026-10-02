@@ -7,7 +7,7 @@
 import { sql } from "drizzle-orm";
 import {
   index, integer, jsonb, pgEnum, pgTable, real, text,
-  timestamp, uniqueIndex, uuid, vector,
+  timestamp, uniqueIndex, uuid, vector, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { EMBEDDING } from "@mola/shared";
 
@@ -36,7 +36,7 @@ export const users = pgTable("users", {
   expectedGradDate: timestamp("expected_grad_date", { withTimezone: true }),
   phoneNumber: text("phone_number"),
   /** What a newly created chat starts with. Updated whenever the user changes either on any chat. */
-  defaultModel: text("default_model").notNull().default("qwen3.6:27b"),
+  defaultModel: text("default_model").notNull().default("gemma4:26b"),
   defaultThinkingEnabled: integer("default_thinking_enabled").notNull().default(1),
   /** What create_quiz falls back to when the student's prompt doesn't say
    * how many questions (§6, Agent G) — editable in Settings. */
@@ -94,11 +94,19 @@ export const chats = pgTable("chats", {
   title: text("title").notNull().default("New chat"),
   isPinned: integer("is_pinned").notNull().default(0),
   /** Snapshotted from the user's default at creation; overridable per chat (§ model switcher). */
-  model: text("model").notNull().default("qwen3.6:27b"),
+  model: text("model").notNull().default("gemma4:26b"),
   thinkingEnabled: integer("thinking_enabled").notNull().default(1),
+  /** Set on a canvas's own conversation (the chat panel on the canvas page). */
+  canvasId: uuid("canvas_id").references((): AnyPgColumn => artifacts.id, { onDelete: "set null" }),
+  /** The canvas reader's LabelMap, kept between turns so M1, Q2, … keep naming the same things. */
+  canvasLabels: jsonb("canvas_labels"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (t) => [index("chats_user_idx").on(t.userId), index("chats_course_idx").on(t.courseId)]);
+}, (t) => [
+  index("chats_user_idx").on(t.userId),
+  index("chats_course_idx").on(t.courseId),
+  index("chats_canvas_idx").on(t.canvasId),
+]);
 
 export const roleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool"]);
 
@@ -122,6 +130,9 @@ export const messages = pgTable("messages", {
   status: messageStatusEnum("status").notNull().default("done"),
   /** Set only when status is "error" — the message shown in the failure banner. */
   errorMessage: text("error_message"),
+  /** Canvas chats, on the user's message: { text, region } — the canvas as text that was sent
+   * with it, and the selected rectangle it was limited to (null: the whole board). */
+  canvasContext: jsonb("canvas_context"),
   createdAt: createdAt(),
 }, (t) => [
   index("messages_chat_idx").on(t.chatId, t.createdAt),
@@ -317,7 +328,7 @@ export const textbookSections = pgTable("textbook_sections", {
 
 // ── Artifacts (mirrors contract 6) ───────────────────────────────────────────
 
-export const artifactKindEnum = pgEnum("artifact_kind", ["flashcard_deck", "quiz", "mind_map"]);
+export const artifactKindEnum = pgEnum("artifact_kind", ["flashcard_deck", "quiz", "mind_map", "canvas"]);
 
 export const artifacts = pgTable("artifacts", {
   id: id(),

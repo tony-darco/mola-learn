@@ -2,7 +2,6 @@
  * system. Same vocabulary app/(shell)/courses/[id]/page.tsx defines locally. */
 export const card = "rounded-xl border border-border bg-surface p-4";
 export const cardTitle = "text-base font-semibold text-fg";
-export const sectionLabel = "text-sm font-medium uppercase tracking-wide text-fg-muted";
 export const primaryButton =
   "rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-fg disabled:cursor-default disabled:opacity-50";
 export const secondaryButton =

@@ -5,7 +5,7 @@
  * session and checks ownership itself — a server action is just another
  * request handler, so it gets no less scrutiny than a route (§9).
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { chats, courseMemory, courses, db, terms } from "@mola/db";
 import type { DocumentKind } from "@/lib/documents/ingest-handoff";
@@ -112,6 +112,7 @@ export async function listCourseChats(userId: string, courseId: string) {
   return db
     .select()
     .from(chats)
-    .where(and(eq(chats.courseId, courseId), eq(chats.userId, userId)))
+    // A canvas's own chat lives in that canvas's chat panel, not in the chat lists.
+    .where(and(eq(chats.courseId, courseId), eq(chats.userId, userId), isNull(chats.canvasId)))
     .orderBy(desc(chats.createdAt));
 }

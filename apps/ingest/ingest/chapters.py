@@ -257,7 +257,8 @@ class OllamaChapterSummarizer:
     def _generate(self, prompt: str) -> str:
         resp = httpx.post(
             f"{self.host}/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False},
+            # Short study-guide entries — see pointer.py for why thinking is off.
+            json={"model": self.model, "prompt": prompt, "stream": False, "think": False},
             timeout=600,
         )
         resp.raise_for_status()

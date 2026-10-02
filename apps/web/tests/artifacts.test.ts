@@ -3,7 +3,7 @@
  * yet, so the fixtures in components/chat/fixtures.ts are what the renderers
  * are built and manually verified against — this test locks down that they
  * stay valid against the frozen schema, and that the per-kind summary line
- * used in the collapsed artifact header covers all three kinds correctly.
+ * used in the collapsed artifact header covers all kinds correctly.
  */
 import { describe, expect, it } from "vitest";
 import { artifactRecordSchema } from "@mola/shared";
@@ -11,9 +11,9 @@ import { ARTIFACT_FIXTURES } from "../components/chat/fixtures";
 import { artifactIcon, summarizeArtifact } from "../components/chat/artifact-summary";
 
 describe("artifact fixtures", () => {
-  it("covers all three frozen artifact kinds", () => {
+  it("covers all four frozen artifact kinds", () => {
     expect(ARTIFACT_FIXTURES.map((a) => a.kind).sort()).toEqual(
-      ["flashcard_deck", "mind_map", "quiz"].sort(),
+      ["canvas", "flashcard_deck", "mind_map", "quiz"].sort(),
     );
   });
 
@@ -40,6 +40,11 @@ describe("summarizeArtifact — per-kind collapsed header", () => {
     expect(summarizeArtifact(map.payload)).toBe("6 nodes");
   });
 
+  it("summarizes a canvas by element count", () => {
+    const canvas = ARTIFACT_FIXTURES.find((a) => a.kind === "canvas")!;
+    expect(summarizeArtifact(canvas.payload)).toBe("2 elements");
+  });
+
   it("singularizes a one-item deck", () => {
     expect(summarizeArtifact({ kind: "flashcard_deck", cards: [
       { id: "00000000-0000-4000-8000-000000000000", front: "f", back: "b", chapter: null, section: null, week: null },
@@ -47,7 +52,7 @@ describe("summarizeArtifact — per-kind collapsed header", () => {
   });
 
   it("returns a distinct icon per kind", () => {
-    const icons = new Set(["flashcard_deck", "quiz", "mind_map"].map((k) => artifactIcon(k as never)));
-    expect(icons.size).toBe(3);
+    const icons = new Set(["flashcard_deck", "quiz", "mind_map", "canvas"].map((k) => artifactIcon(k as never)));
+    expect(icons.size).toBe(4);
   });
 });
