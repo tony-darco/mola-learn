@@ -41,3 +41,11 @@ apps/web/blob-report/
 # planning/handoff notes and other docs — not needed to run the app
 *.md
 !README.md
+
+# apps/ipad: the Xcode project is generated from project.yml (see its
+# README) — a build artifact, same reasoning as not committing .next/.
+apps/ipad/*.xcodeproj/
+apps/ipad/*.xcworkspace/
+apps/ipad/xcuserdata/
+apps/ipad/DerivedData/
+apps/ipad/.build/
