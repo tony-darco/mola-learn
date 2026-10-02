@@ -16,7 +16,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     TARGETED_DEVICE_FAMILY: "2" # iPad only — this is the iPadOS client
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "3R66L49NP5" # tony darco (Personal Team) — free provisioning, installs expire after 7 days
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
@@ -31,6 +31,11 @@ targets:
     info:
       path: Resources/Info.plist
       properties:
+        CFBundleDisplayName: Mola
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
         UILaunchScreen: {}
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
@@ -38,7 +43,11 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: false
+        # A real iPad reaches the dev server over the LAN (e.g.
+        # http://tonymbp-3.local:3000), not localhost.
+        NSLocalNetworkUsageDescription: Mola connects to your Mola server on the local network.
         NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
           NSExceptionDomains:
             localhost:
               NSExceptionAllowsInsecureHTTPLoads: true
