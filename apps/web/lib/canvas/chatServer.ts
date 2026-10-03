@@ -52,7 +52,9 @@ export async function lockChat(tx: Tx, chatId: string): Promise<ChatRow> {
  * kept, and writes each change as a message with role "event" — folded
  * into the newest message instead when that is an entry this one carries on
  * from. Then keeps the new labels and snapshot. A chat with no snapshot yet
- * only takes one: its first message read the whole board anyway.
+ * only takes one: its first message read the whole board anyway. The
+ * changes are `actor`'s, but for what the AI added — its annotations, saved
+ * by the canvas page like any change — which are the AI's (diffSnapshots).
  *
  * Call with `chat` locked in `tx` (lockChat), so two syncs never interleave.
  * Returns the entries written or rewritten, and the read when there was one

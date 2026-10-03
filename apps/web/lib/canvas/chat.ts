@@ -3,9 +3,11 @@
  * (app/api/canvas/[canvasId]/chat) and the panel on the canvas page.
  *
  * Its own small event set rather than the main chat's (contract 6): no
- * tools, artifacts or hints here, and the first event has to carry what the
+ * artifacts or hints here, its one tool's results are drawn on the board
+ * rather than shown in the chat, and the first event has to carry what the
  * model was shown. Same SSE framing — one JSON object per `data:` line.
  */
+import type { CanvasAnnotationElement } from "@mola/shared";
 import type { CanvasEdit } from "./editLog";
 import type { Rect } from "./marquee";
 
@@ -28,6 +30,8 @@ export type CanvasChatEvent =
    */
   | ({ type: "canvas_context"; userMessageId: string; messageId: string; edits: CanvasChatMessage[] } & CanvasContext)
   | { type: "text_delta"; text: string }
+  /** An annotation the model just placed (lib/canvas/annotate.ts), for the canvas page to put on the board and save. */
+  | { type: "annotation"; element: CanvasAnnotationElement }
   | { type: "message_end"; messageId: string }
   | { type: "error"; message: string };
 

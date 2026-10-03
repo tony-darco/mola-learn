@@ -16,3 +16,17 @@ export const BACKGROUND_COLORS = ["#ffffff", "#f7f5ee", "#f1f5f9", "#1c1b18"];
 /** Sticky-note paper is independent of the active ink color (a StylePanel
  * swatch of "black" would otherwise produce an unreadable all-black note). */
 export const NOTE_DEFAULT_COLOR = "#fef08a";
+
+/**
+ * The AI's ink — annotations are drawn in it, never in a palette color, so
+ * its marks can't pass for the student's. Mola's accent on a light board
+ * (about 14:1); on a dark one, like the #1c1b18 swatch where the accent is
+ * barely 1.2:1, a light tint of it (7.3:1). `fg` is a glyph drawn on a disc
+ * of the ink.
+ */
+export function aiInk(background: string): { ink: string; fg: string } {
+  const hex = /^#([0-9a-f]{6})$/i.exec(background)?.[1];
+  const [r, g, b] = hex ? [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)) : [255, 255, 255];
+  const dark = 0.2126 * r! + 0.7152 * g! + 0.0722 * b! < 128;
+  return dark ? { ink: "#e3958b", fg: "#1c1b18" } : { ink: "#481715", fg: "#f7f5ee" };
+}

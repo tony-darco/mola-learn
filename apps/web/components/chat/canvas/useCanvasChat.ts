@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import type { CanvasElement } from "@mola/shared";
 import {
   parseCanvasChatEvents, type CanvasChatMessage, type CanvasChatRequest, type CanvasContext, type CanvasEditsResponse,
 } from "@/lib/canvas/chat";
@@ -41,9 +42,12 @@ function withEntries(ts: CanvasTurn[], entries: CanvasChatMessage[], before?: st
 /**
  * The canvas's conversation (app/api/canvas/[canvasId]/chat): loaded once on
  * first use, then sent to and streamed into — and, after every save, its
- * edit log brought up to the board (syncEdits).
+ * edit log brought up to the board (syncEdits). What the AI puts on the
+ * board while it replies goes to `onAIElement`, with the reply's id.
  */
-export function useCanvasChat(canvasId: string) {
+export function useCanvasChat(canvasId: string, onAIElement: (messageId: string, element: CanvasElement) => void) {
+  const onAIElementRef = useRef(onAIElement);
+  onAIElementRef.current = onAIElement;
   const [turns, setTurns] = useState<CanvasTurn[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -152,6 +156,9 @@ export function useCanvasChat(canvasId: string) {
             }
             case "text_delta":
               patch(assistantId, (t) => ({ ...t, text: t.text + ev.text }));
+              break;
+            case "annotation":
+              onAIElementRef.current(assistantId, ev.element);
               break;
             case "message_end":
               patch(assistantId, (t) => ({ ...t, streaming: false }));

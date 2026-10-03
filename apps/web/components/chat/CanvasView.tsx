@@ -14,11 +14,12 @@ import { createSaveSerializer } from "@/lib/canvas/saveQueue";
 import { saveCanvasAction } from "@/lib/canvas/actions";
 import { uploadCanvasImageAction } from "@/lib/canvas/imageUpload";
 import { emptyHistory, pushHistory, redo as historyRedo, undo as historyUndo, type History } from "@/lib/canvas/history";
+import { applyAIElement, type AIStep } from "@/lib/canvas/aiEdits";
 import { eraseWholeObjects, erasePartial } from "@/lib/canvas/eraser";
 import { resizeBox, type ResizeCorner } from "@/lib/canvas/resize";
 import { cursorForTool } from "@/lib/canvas/cursors";
 import { boundsOf, elementsInRect, rectFromPoints, toScreenRect, unionRect, type Rect } from "@/lib/canvas/marquee";
-import { COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
+import { aiInk, COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
 import { Toolbar, type EraserMode, type ShapeKind, type Tool } from "./canvas/Toolbar";
 import { BottomPill } from "./canvas/BottomPill";
 import { StylePanel, type StyleContext } from "./canvas/StylePanel";
@@ -80,7 +81,7 @@ export function CanvasView({
   const [marqueeArea, setMarqueeArea] = useState<{ ids: Set<string>; rect: Rect } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
-  const chat = useCanvasChat(canvasId);
+  const chat = useCanvasChat(canvasId, applyFromAI);
   const syncEditsRef = useRef(chat.syncEdits);
   syncEditsRef.current = chat.syncEdits;
 
@@ -92,6 +93,7 @@ export function CanvasView({
   const versionRef = useRef(initialVersion);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRef = useRef<History<CanvasElement[]>>(emptyHistory());
+  const aiStepRef = useRef<AIStep | null>(null);
   const resizeRef = useRef<{ id: string; corner: ResizeCorner } | null>(null);
 
   const toolRef = useRef(tool); toolRef.current = tool;
@@ -206,6 +208,18 @@ export function CanvasView({
   function deleteSelected() {
     mutate((prev) => [...selectedIds].reduce((acc, id) => deleteElement(acc, id), prev));
     setSelectedIds(new Set());
+  }
+
+  /** An element the canvas chat's reply put on the board: on top, saved as usual, and the reply's changes one undo step (lib/canvas/aiEdits.ts). */
+  function applyFromAI(messageId: string, element: CanvasElement) {
+    const next = applyAIElement({ elements: elementsRef.current, history: historyRef.current, step: aiStepRef.current }, messageId, element);
+    if (next.elements === elementsRef.current) return;
+    historyRef.current = next.history;
+    aiStepRef.current = next.step;
+    // Now, not when React gets to the update: a reply's next element can arrive before it does.
+    elementsRef.current = next.elements;
+    setHistoryVersion((v) => v + 1);
+    applyMutation(() => next.elements);
   }
 
   useEffect(() => {
@@ -821,6 +835,7 @@ export function CanvasView({
   const showStylePanel = showAmbientStylePanel || isTextLikeSelected;
   const now = Date.now();
   const visibleLaser = laserPoints.filter((p) => now - p.t < LASER_FADE_MS);
+  const ink = aiInk(background.color);
 
   const panelColor = isTextLikeSelected ? getInkColor(selectedElement!) : color;
   const panelOnColorChange = isTextLikeSelected ? setSelectedFontColor : setColor;
@@ -909,7 +924,8 @@ export function CanvasView({
         ref={svgRef}
         width="100%" height="100%"
         className="flex-1 touch-none"
-        style={{ cursor: cursorForTool(tool) }}
+        // The AI's ink for this board's background, for its annotations (ElementRenderer.tsx).
+        style={{ cursor: cursorForTool(tool), "--ai-ink": ink.ink, "--ai-ink-fg": ink.fg } as React.CSSProperties}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

@@ -12,8 +12,10 @@
  * adding another. lib/canvas/chatServer.ts keeps each chat's snapshot and
  * writes the entries.
  *
- * An edit says who made it — the student for now; the AI later — so every
- * entry in the log has the same shape.
+ * An edit says who made it, so every entry in the log has the same shape:
+ * the AI's annotations are logged as its own ("Mola marked M8 row 1 col 4
+ * as an error (K1): …") by what they are made of — elements createdBy
+ * "ai" — whichever save brings them, and everything else as the student's.
  */
 import type { CanvasElement } from "@mola/shared";
 import { readCanvas, type CanvasDoc, type LabelMap, type ReadItem } from "./textSyntax";
@@ -32,9 +34,9 @@ export type ItemContent = {
   bars?: number[];
   /** Arrows and lines: what the tail and the head (a line's two ends) touch, null for a free end. */
   ends?: [string | null, string | null];
-  /** What a shape or a pen circle is around, an underline under, a highlight over, a frame holds. */
+  /** What a shape or a pen circle is around, an underline under, a highlight over, a frame holds, an annotation is on. */
   targets?: string[];
-  /** Shapes: "rectangle", "ellipse", …; an arrow with two heads: "double". */
+  /** Shapes: "rectangle", "ellipse", …; an arrow with two heads: "double"; annotations: their kind, "error", "hint", …. */
   form?: string;
   /** Pen drawings: the labels written by them, and how many strokes they are. */
   labels?: string[];
@@ -49,6 +51,8 @@ export type SnapshotItem = {
   kind: ItemKind;
   /** Read from pen strokes, not placed with a tool. */
   pen: boolean;
+  /** Made by the AI, all of it. */
+  ai?: true;
   content: ItemContent;
   /** The elements it was read from (a pen drawing's include its written labels), by id. */
   elements: Record<string, Placement>;
@@ -120,6 +124,7 @@ export function snapshotBoard(elements: CanvasElement[], doc: CanvasDoc): BoardS
       case "text": case "note": return { text: e.props.text };
       case "math": return { text: e.props.latex };
       case "frame": return { text: e.props.name, ...relations };
+      case "annotation": return { text: e.props.note, targets: [e.props.target], form: e.props.kind };
       case "shape": return { form: e.props.shapeKind, ...relations };
       case "line": return { ...relations, ...(e.props.startArrow && e.props.endArrow ? { form: "double" } : {}) };
       default: return relations;
@@ -128,7 +133,7 @@ export function snapshotBoard(elements: CanvasElement[], doc: CanvasDoc): BoardS
 
   return {
     items: doc.items.map((item) => ({
-      label: item.label, kind: item.kind, pen: item.pen, content: contentOf(item),
+      label: item.label, kind: item.kind, pen: item.pen, ...(item.madeByAI === true ? { ai: true as const } : {}), content: contentOf(item),
       elements: Object.fromEntries(item.elementIds.flatMap((id) => {
         const e = byId.get(id);
         return e ? [[id, placement(e)]] : [];
@@ -169,7 +174,8 @@ function howChanged(before: SnapshotItem, after: SnapshotItem): "same" | "moved"
 /**
  * The changes from one snapshot to the next, both read with the same labels:
  * first what was erased, then what was changed, moved or added, in reading
- * order. Something whose elements didn't change is left out even if it reads
+ * order. They are `actor`'s, but for something new the AI made, which is
+ * the AI's. Something whose elements didn't change is left out even if it reads
  * differently now — the student didn't touch it. A label that is gone while
  * most of what it was read from is still on the board wasn't erased: it was
  * taken into the one thing that now holds most of it (`took`), or, spread
@@ -205,7 +211,7 @@ export function diffSnapshots(before: BoardSnapshot, after: BoardSnapshot, actor
   const rest = after.items.flatMap((item): CanvasEdit[] => {
     const base = { actor, label: item.label, kind: item.kind, pen: item.pen, ...(took.has(item.label) ? { took: took.get(item.label)! } : {}) };
     const prev = was.get(item.label);
-    if (!prev) return [{ ...base, action: "added", after: item.content }];
+    if (!prev) return [{ ...base, ...(item.ai ? { actor: "ai" as const } : {}), action: "added", after: item.content }];
     const how = howChanged(prev, item);
     if (how === "same") return [];
     if (how === "other" && sameContent(prev.content, item.content) && !base.took) return [];
@@ -302,6 +308,12 @@ function added(who: string, e: CanvasEdit): string {
     case "circle": return c.targets?.length ? `${who} circled ${list(c.targets)} (${L})` : `${who} drew a circle ${L}`;
     case "underline": return c.targets?.length ? `${who} underlined ${list(c.targets)} (${L})` : `${who} drew an underline ${L}`;
     case "highlight": return c.targets?.length ? `${who} highlighted ${list(c.targets)} (${L})` : `${who} drew a highlighter stroke ${L}`;
+    case "annotation": {
+      const on = c.targets?.[0] ?? "the board";
+      const what = c.form === "error" ? `marked ${on} as an error` : c.form === "check" ? `marked ${on} as right`
+        : c.form === "hint" ? `left a hint on ${on}` : `left a note on ${on}`;
+      return `${who} ${what} (${L}): ${quote(c.text)}`;
+    }
   }
 }
 

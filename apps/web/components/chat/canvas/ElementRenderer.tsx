@@ -2,10 +2,10 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
-import { Move, MoveDiagonal2, Pencil } from "lucide-react";
+import { Check, Lightbulb, MessageSquare, Move, MoveDiagonal2, Pencil, X } from "lucide-react";
 import type { MathfieldElement } from "mathlive";
 import type { z } from "zod";
-import type { canvasShapeKindSchema, CanvasElement } from "@mola/shared";
+import type { canvasShapeKindSchema, CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
 import { elementBounds } from "@/lib/canvas/marquee";
 
@@ -283,12 +283,63 @@ export function ElementShape({
     );
   }
 
+  if (element.type === "annotation") return <AnnotationShape element={element} selected={selected} zoom={zoom} />;
+
   // text
   return (
     <TextShape
       element={element} editing={editing} soleSelected={soleSelected}
       onCommitText={onCommitText} onStartEdit={onStartEdit} zoom={zoom}
     />
+  );
+}
+
+const ANNOTATION_ICONS = { error: X, hint: Lightbulb, check: Check, note: MessageSquare };
+const ANNOTATION_TITLES = { error: "Mistake", hint: "Hint", check: "Looks right", note: "Note" };
+/** Canvas units: the gap between an annotation's place and the mark round it, the mark's width, and the icon's size. */
+const MARK_PAD = 6;
+const MARK_WIDTH = 2.5;
+const ICON_SIZE = 22;
+/** Screen pixels: the most room a note's card takes. */
+const NOTE_WIDTH = 260;
+const NOTE_HEIGHT = 160;
+
+/**
+ * A note the AI pinned to the board, in the AI's ink (--ai-ink, set on the
+ * canvas for its background): the mark round its place, and an icon at the
+ * place's top-right corner that opens the note — on hover, and while the
+ * annotation is selected (a click on the icon). Only the icon takes the
+ * pointer, so the work under the mark is as easy to reach as before. The
+ * note's card keeps one size on screen at any zoom.
+ */
+function AnnotationShape({ element, selected, zoom }: { element: CanvasAnnotationElement; selected: boolean; zoom: number }) {
+  const { x, y, width: w, height: h } = element;
+  const { kind, mark, note } = element.props;
+  const Icon = ANNOTATION_ICONS[kind];
+  const cx = x + w + MARK_PAD, cy = y - MARK_PAD;
+  return (
+    <g opacity={element.opacity} className="group">
+      <g fill="none" stroke="var(--ai-ink)" strokeWidth={MARK_WIDTH} strokeLinecap="round" pointerEvents="none">
+        {/* An ellipse through the corners of the place's box, and a little more. */}
+        {mark === "circle" && <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / Math.SQRT2 + MARK_PAD} ry={h / Math.SQRT2 + MARK_PAD} />}
+        {mark === "box" && <rect x={x - MARK_PAD} y={y - MARK_PAD} width={w + 2 * MARK_PAD} height={h + 2 * MARK_PAD} rx={MARK_PAD} />}
+        {mark === "underline" && <line x1={x - MARK_PAD / 2} y1={y + h + MARK_PAD} x2={x + w + MARK_PAD / 2} y2={y + h + MARK_PAD} />}
+      </g>
+      <g data-element-id={element.id} data-testid="ai-annotation" data-kind={kind} className="cursor-pointer">
+        <circle cx={cx} cy={cy} r={ICON_SIZE / 2} fill="var(--ai-ink)" />
+        <Icon x={cx - ICON_SIZE * 0.3} y={cy - ICON_SIZE * 0.3} width={ICON_SIZE * 0.6} height={ICON_SIZE * 0.6} color="var(--ai-ink-fg)" strokeWidth={3} />
+      </g>
+      <g
+        transform={`translate(${cx + ICON_SIZE / 2 + 4} ${cy - ICON_SIZE / 2}) scale(${1 / zoom})`}
+        className={selected ? undefined : "hidden group-hover:inline"} pointerEvents="none"
+      >
+        <foreignObject width={NOTE_WIDTH} height={NOTE_HEIGHT} overflow="visible">
+          <div data-testid="ai-annotation-note" className="w-fit rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs leading-snug text-fg shadow-md">
+            <span className="font-semibold text-accent">{ANNOTATION_TITLES[kind]}</span> {note}
+          </div>
+        </foreignObject>
+      </g>
+    </g>
   );
 }
 

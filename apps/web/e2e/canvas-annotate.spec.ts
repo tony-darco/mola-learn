@@ -1,0 +1,189 @@
+/**
+ * The canvas chat annotating the board, end to end: the student's "2 + 2 =
+ * 5" on a fresh canvas, "Check my work." from the chat panel, and the
+ * reply's annotations show up on the open canvas in the AI's ink, as one
+ * undo step; they are saved, so they survive a reload; the edit log tells
+ * them as Mola's; and nothing the student wrote is touched.
+ *
+ * The reply comes from a scripted model (lib/canvas/scripted.ts,
+ * "check-sum"), so it is the same every run: a check, an error sent with a
+ * wrong label and a kind for its mark, then fixed, then the answer.
+ *
+ * A second test asks the real model (the LAN Ollama host) to check the
+ * annotate eval's board, only when asked for:
+ *
+ *   E2E_PORT=3058 npx playwright test --no-deps e2e/canvas-annotate.spec.ts
+ *   E2E_REAL_MODEL=1 E2E_PORT=3058 npx playwright test --no-deps e2e/canvas-annotate.spec.ts
+ */
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { expect, test, type Page } from "@playwright/test";
+import { generateKeyBetween } from "fractional-indexing";
+import postgres from "postgres";
+import { ALICE, ALICE_STORAGE } from "./fixtures";
+import { LLM_TIMEOUT_MS } from "./helpers";
+import { textStrokes } from "./support/strokeFont";
+import { finalizeStroke } from "../lib/canvas/stroke";
+import type { CanvasChatEvent } from "../lib/canvas/chat";
+import type { CanvasElement } from "@mola/shared";
+import { makeBoard } from "../evals/canvas-annotate/fixtures";
+
+if (!process.env.DATABASE_URL) process.loadEnvFile(resolve(fileURLToPath(import.meta.url), "../../.env.local"));
+
+const parseEvents = (body: string) => body.split("\n\n").filter((f) => f.startsWith("data: ")).map((f) => JSON.parse(f.slice(6)) as CanvasChatEvent);
+
+/** Handwritten `text` as the pen tool saves it, one element a stroke. */
+function handwriting(text: string, x: number, y: number, size: number): CanvasElement[] {
+  let index: string | null = null;
+  return textStrokes(text, x, y, size).map((stroke, i) => {
+    const f = finalizeStroke(stroke)!;
+    index = generateKeyBetween(index, null);
+    return {
+      id: `sum-${i}`, parentId: null, index, x: f.x, y: f.y, width: f.width, height: f.height,
+      rotation: 0, opacity: 1, createdBy: "user", type: "draw",
+      props: { points: f.points, color: "#1c1b18", strokeWidth: 4, variant: "pen", dash: "solid" },
+    };
+  });
+}
+
+async function openChat(page: Page) {
+  await expect(async () => {
+    await page.getByRole("button", { name: "Canvas chat" }).click({ timeout: 1_000 });
+    await expect(page.getByTestId("canvas-chat")).toBeVisible({ timeout: 1_000 });
+  }).toPass();
+}
+
+/** Sends a message from the panel and waits for the whole reply; returns its stream's events. */
+async function ask(page: Page, canvasId: string, message: string, timeout: number): Promise<CanvasChatEvent[]> {
+  const reply = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/canvas/${canvasId}/chat` && r.request().method() === "POST",
+    { timeout },
+  );
+  const input = page.getByPlaceholder("Ask about this canvas…");
+  await input.fill(message);
+  await input.press("Enter");
+  const events = parseEvents(await (await reply).text());
+  await expect(input).toBeEnabled({ timeout: 10_000 });
+  return events;
+}
+
+const annotationsIn = (events: CanvasChatEvent[]) => events.flatMap((e) => (e.type === "annotation" ? [e.element] : []));
+
+/** A fresh canvas of Alice's holding `elements`, and — for a scripted reply — its chat, on that script. */
+async function plant(sql: postgres.Sql, title: string, elements: CanvasElement[], model?: string) {
+  const payload = { kind: "canvas", elements, viewport: { x: 0, y: 0, zoom: 1 }, background: { pattern: "dots", color: "#ffffff" } };
+  const [canvas] = await sql<{ id: string; user_id: string }[]>`
+    insert into artifacts (user_id, kind, title, payload)
+    values ((select id from users where email = ${ALICE.email}), 'canvas', ${title}, ${sql.json(payload)})
+    returning id, user_id`;
+  if (model) await sql`insert into chats (user_id, canvas_id, title, model) values (${canvas!.user_id}, ${canvas!.id}, ${title}, ${model})`;
+  return canvas!.id;
+}
+
+const saved = async (sql: postgres.Sql, canvasId: string) =>
+  (await sql<{ payload: { elements: CanvasElement[] } }[]>`select payload from artifacts where id = ${canvasId}`)[0]!.payload.elements;
+
+test.describe("canvas chat annotations", () => {
+  test.use({ storageState: ALICE_STORAGE, viewport: { width: 1600, height: 1000 } });
+
+  test("a scripted check puts its annotations on the board in the AI's ink, as one undo step, saved and logged as Mola's", async ({ page }, testInfo) => {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let canvasId: string | null = null;
+    try {
+      const work = handwriting("2 + 2 = 5", 300, 300, 40);
+      canvasId = await plant(sql, "E2E Annotate", work, "scripted:check-sum");
+      await page.goto(`/canvas/${canvasId}`);
+      await openChat(page);
+
+      const events = await ask(page, canvasId, "Check my work.", 30_000);
+      expect(events.map((e) => e.type).filter((t) => t !== "text_delta")).toEqual(["canvas_context", "annotation", "annotation", "message_end"]);
+      const placed = annotationsIn(events);
+      expect(placed.map((e) => [e.props.kind, e.props.mark, e.props.target])).toEqual([
+        ["check", "underline", "T1 words 1–3"],
+        ["error", "circle", "T1 word 5"],
+      ]);
+      await expect(page.getByTestId("canvas-turn-assistant")).toContainText("2 + 2 is 4, not 5");
+
+      // On the canvas, in Mola's accent (the board is white), the note a hover away.
+      const icons = page.getByTestId("ai-annotation");
+      await expect(icons).toHaveCount(2);
+      const error = page.locator('[data-testid="ai-annotation"][data-kind="error"]');
+      expect(await error.locator("circle").evaluate((el) => getComputedStyle(el).fill)).toBe("rgb(72, 23, 21)");
+      await error.hover();
+      await expect(page.getByTestId("ai-annotation-note").filter({ hasText: "2 + 2 is 4, not 5." })).toBeVisible();
+      await page.locator("svg.touch-none").screenshot({ path: testInfo.outputPath("annotated.png") });
+
+      // Saved, and logged as Mola's.
+      const entries = page.getByTestId("canvas-edit-entry");
+      await expect(entries.filter({ hasText: /^Mola marked T1 word 5 as an error \(K\d\): "2 \+ 2 is 4, not 5\."$/ })).toHaveCount(1, { timeout: 10_000 });
+      await expect(entries.filter({ hasText: /^Mola marked T1 words 1–3 as right \(K\d\): / })).toHaveCount(1);
+      const logged = await sql<{ content: string }[]>`
+        select m.content from messages m join chats c on c.id = m.chat_id
+        where c.canvas_id = ${canvasId} and m.role = 'event' order by m.created_at`;
+      expect(logged.map((m) => m.content.replace(/\(K\d\)/, "(K…)")).sort()).toEqual([
+        `Mola marked T1 word 5 as an error (K…): "2 + 2 is 4, not 5."`,
+        `Mola marked T1 words 1–3 as right (K…): "Right: 2 + 2 is the sum to work out."`,
+      ]);
+      const afterReply = await saved(sql, canvasId);
+      expect(afterReply.filter((e) => e.type === "annotation").map((e) => [e.id, e.createdBy])).toEqual(placed.map((e) => [e.id, "ai"]));
+      // Nothing the student wrote was touched.
+      expect(afterReply.filter((e) => e.type !== "annotation")).toEqual(work);
+
+      // The reply is one undo step: both annotations go together, and come back together.
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press("ControlOrMeta+z");
+      await expect(icons).toHaveCount(0);
+      await expect(page.locator('path[data-element-id^="sum-"]')).toHaveCount(work.length);
+      await page.keyboard.press("ControlOrMeta+Shift+z");
+      await expect(icons).toHaveCount(2);
+
+      // Still there after a reload: on the board, and in the log.
+      await expect.poll(async () => (await saved(sql, canvasId!)).filter((e) => e.type === "annotation").length).toBe(2);
+      await page.reload();
+      await expect(page.getByTestId("ai-annotation")).toHaveCount(2);
+      await openChat(page);
+      await expect(page.getByTestId("canvas-edit-entry").filter({ hasText: /^Mola marked T1 word 5 as an error/ })).toHaveCount(1);
+      expect((await saved(sql, canvasId)).filter((e) => e.type !== "annotation")).toEqual(work);
+    } finally {
+      if (canvasId) {
+        await sql`delete from chats where canvas_id = ${canvasId}`;
+        await sql`delete from artifacts where id = ${canvasId}`;
+      }
+      await sql.end();
+    }
+  });
+
+  test("the real model checks the annotate eval's board and annotates it", async ({ page }, testInfo) => {
+    test.skip(!process.env.E2E_REAL_MODEL, "a real round trip to the LAN Ollama host — run with E2E_REAL_MODEL=1");
+    test.setTimeout(3 * LLM_TIMEOUT_MS);
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let canvasId: string | null = null;
+    try {
+      const board = makeBoard("clean");
+      canvasId = await plant(sql, "E2E Annotate (real model)", board.elements);
+      await page.goto(`/canvas/${canvasId}`);
+      await openChat(page);
+
+      const events = await ask(page, canvasId, "Check my work.", 3 * LLM_TIMEOUT_MS);
+      const placed = annotationsIn(events);
+      const reply = events.flatMap((e) => (e.type === "text_delta" ? [e.text] : [])).join("");
+      await testInfo.attach("reply.json", { body: JSON.stringify({ reply, placed: placed.map((e) => e.props), planted: board.errors.map((e) => e.address) }, null, 2), contentType: "application/json" });
+      console.log(`real model: ${placed.length} annotations: ${placed.map((e) => `${e.props.kind} on ${e.props.target} (${e.props.mark}): ${e.props.note}`).join(" | ")}`);
+      console.log(`real model reply: ${reply}`);
+
+      expect(events.find((e) => e.type === "error")).toBeUndefined();
+      expect(placed.length).toBeGreaterThan(0);
+      expect(placed.length).toBeLessThanOrEqual(3);
+      await expect(page.getByTestId("ai-annotation")).toHaveCount(placed.length);
+      await expect(page.getByTestId("canvas-edit-entry").filter({ hasText: /^Mola / })).toHaveCount(placed.length, { timeout: 10_000 });
+      await page.locator("svg.touch-none").screenshot({ path: testInfo.outputPath("annotated-real.png") });
+      expect((await saved(sql, canvasId)).filter((e) => e.type !== "annotation")).toEqual(board.elements);
+    } finally {
+      if (canvasId) {
+        await sql`delete from chats where canvas_id = ${canvasId}`;
+        await sql`delete from artifacts where id = ${canvasId}`;
+      }
+      await sql.end();
+    }
+  });
+});

@@ -1,12 +1,15 @@
 /**
  * A canvas's own conversation — the chat panel on the canvas page.
  *
- * Read-only Q&A, no tools: each message goes to the model together with the
- * canvas as text (readCanvas) — the whole board, or only the rectangle the
- * student selected — and the reply streams back (lib/canvas/chat.ts has the
- * event format). The first event carries exactly the canvas text the model
- * was given and the region it was limited to; the same is stored on the
- * user's message, so "What the AI saw" survives a reload.
+ * Each message goes to the model together with the canvas as text
+ * (readCanvas) — the whole board, or only the rectangle the student
+ * selected — and the reply streams back (lib/canvas/chat.ts has the event
+ * format). The model has one tool, annotate_canvas: notes pinned to places
+ * on the board, which stream out with the reply for the open canvas to add
+ * and save (lib/canvas/chatTurn.ts runs the reply; this route never writes
+ * the canvas itself). The first event carries exactly the canvas text the
+ * model was given and the region it was limited to; the same is stored on
+ * the user's message, so "What the AI saw" survives a reload.
  *
  * Stored as an ordinary chat (chats.canvas_id) so it can later be opened as a
  * normal chat. Labels (M1, Q2, …) stay the same across turns: the reader's
@@ -25,9 +28,12 @@ import { artifacts, chats, db, messages, users } from "@mola/db";
 import { authzResponse, requireSession } from "@/lib/auth/ownership";
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL, getChatProvider, type Message } from "@/lib/llm";
 import { readCanvas, type LabelMap } from "@/lib/canvas/textSyntax";
+import { MAX_ANNOTATIONS_PER_TURN } from "@/lib/canvas/annotate";
 import { encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
 import { changesSection, type CanvasEdit } from "@/lib/canvas/editLog";
 import { findCanvasChat, lockChat, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
+import { runCanvasTurn } from "@/lib/canvas/chatTurn";
+import { scriptedProvider } from "@/lib/canvas/scripted";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +43,13 @@ const SYSTEM = [
     + "each of the student's messages comes with the board converted to text — all of it, or only the part they selected.",
   "Refer to things on the board by their labels (M1, Q2, T3, …), and to parts of handwriting by place (\"M1 row 2 col 3\"), as the text explains. "
     + "If something you need is unreadable or missing from the text, say so rather than guessing.",
+  "You can also mark the board with the annotate_canvas tool: each annotation pins a short note to one place on the board, beside the student's work. "
+    + "Use it when the student asks you to check their work, or when pointing at a spot makes your answer clearer — not for every reply.",
+  "Point each annotation at the smallest place that holds what you mean: the one matrix entry (\"M2 row 1 col 3\") or word (\"T3 word 5\") that is wrong, "
+    + `not the whole matrix or line. At most ${MAX_ANNOTATIONS_PER_TURN} annotations per reply, so mark what matters most — in worked steps, the first mistake, `
+    + "since every step after it carries it — and say the rest in your reply.",
+  "You can't change or erase anything on the board, your own annotations included. Your earlier annotations are in the board text, labelled K: "
+    + "don't mark the same thing again.",
 ].join("\n\n");
 
 /**
@@ -112,12 +125,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
     const chatId = ((await findCanvasChat(canvasId, session.userId)) ?? (await createCanvasChat(canvasId, canvas.title, session.userId))).id;
 
     // All under the chat's lock, so no entry can land between the ones this message folds in and the message itself.
-    const { chat, context, history, edits, userRow, assistantRow } = await db.transaction(async (tx) => {
+    const { chat, context, history, edits, userRow, assistantRow, board } = await db.transaction(async (tx) => {
       const chat = await lockChat(tx, chatId);
       const [current] = await tx.select({ payload: artifacts.payload, version: artifacts.version }).from(artifacts).where(eq(artifacts.id, canvasId));
       // The log catches up with the board as saved; that read is the one to send, unless only a region is wanted.
       const synced = await syncEditLog(tx, chat, current!);
-      const read = synced.read && !region ? synced.read : readCanvas(canvasPayloadSchema.parse(current!.payload).elements, {
+      const { elements } = canvasPayloadSchema.parse(current!.payload);
+      const read = synced.read && !region ? synced.read : readCanvas(elements, {
         labels: synced.read?.labels ?? (chat.canvasLabels as LabelMap | null) ?? undefined,
         ...(region ? { region } : {}),
       });
@@ -135,7 +149,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
       const [assistantRow] = await tx.insert(messages).values({
         userId: session.userId, chatId, role: "assistant", content: "", status: "streaming", createdAt: sql`clock_timestamp()`,
       }).returning();
-      return { chat, context, history, edits: synced.written, userRow: userRow!, assistantRow: assistantRow! };
+      // What annotations are placed by: the whole board, read with the same labels — the read just made, unless that was of a region.
+      const whole = region ? synced.read : read;
+      const board = () => ({ elements, doc: (whole ?? readCanvas(elements, { labels: read.labels })).doc });
+      return { chat, context, history, edits: synced.written, userRow: userRow!, assistantRow: assistantRow!, board };
     });
 
     const modelMessages: Message[] = [
@@ -159,17 +176,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
         let error: string | null = null;
         try {
           send({ type: "canvas_context", userMessageId: userRow.id, messageId, edits: edits.map(toClientMessage), ...context });
-          let stopReason = "end_turn";
-          const provider = getChatProvider(session.userId, { model: chat.model, think: chat.thinkingEnabled === 1 });
-          for await (const ev of provider.stream({ system: SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS })) {
-            if (ev.type === "text_delta") { text += ev.text; send(ev); }
-            if (ev.type === "done") stopReason = ev.stopReason;
-            if (ev.type === "error") { error = ev.message; break; }
-          }
-          // Same guard as the agent loop: a thinking model can spend its whole budget before saying anything.
-          if (!error && !text && stopReason === "max_tokens") {
-            error = "The model ran out of output budget before producing a visible answer. Try again.";
-          }
+          const provider = scriptedProvider(chat.model) ?? getChatProvider(session.userId, { model: chat.model, think: chat.thinkingEnabled === 1 });
+          error = await runCanvasTurn({
+            provider, system: SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS, board,
+            send: (ev) => {
+              if (ev.type === "text_delta") text += ev.text;
+              send(ev);
+            },
+          });
         } catch (err) {
           console.error(`canvas chat ${chatId} failed mid-turn:`, err);
           error = err instanceof Error ? err.message : String(err);

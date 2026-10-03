@@ -104,6 +104,7 @@ export function elementSvg(e: CanvasElement): string {
     case "image": return `<rect class="img" x="${e.x}" y="${e.y}" width="${e.width}" height="${e.height}"/>`
       + `<path class="img" d="M${e.x} ${e.y}L${e.x + e.width} ${e.y + e.height}M${e.x + e.width} ${e.y}L${e.x} ${e.y + e.height}"/>`;
     case "frame": return `<rect class="frame" x="${e.x}" y="${e.y}" width="${e.width}" height="${e.height}"/><text class="frame-name" x="${e.x + 30}" y="${e.y + e.height + 17}">${esc(e.props.name)}</text>`;
+    case "annotation": return `<rect class="frame" x="${e.x}" y="${e.y}" width="${e.width}" height="${e.height}"/>${typedText(e.x + e.width + 4, e.y - 18, e.props.kind, 14, "typed ai")}`;
   }
 }
 
