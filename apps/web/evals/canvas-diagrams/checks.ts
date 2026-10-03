@@ -4,7 +4,11 @@
  * drawings read in its rectangle, and whether they have the parts
  * that were drawn, the labels that were written (read right, and attached to
  * the right part, in the right place), the joins, and — for molecules — the
- * bonds between the right labels, of the right kind. No model involved.
+ * bonds between the right labels, of the right kind. And the facts the read
+ * states about them: which way each arrow points (one drawn in a single
+ * stroke too), which corners and meeting lines are right angles (and that
+ * none drawn clearly otherwise is called one), which lines close a ring, and
+ * what sits across a corner. No model involved.
  *
  * Everything is matched by strokes: what was drawn with plan strokes i, j, …
  * is what the reader found among canvas elements s{i}, s{j}, ….
@@ -14,6 +18,7 @@ import type { CanvasElement } from "@mola/shared";
 import { finalizeStroke } from "@/lib/canvas/stroke";
 import { COLOR_PALETTE, STROKE_WIDTHS } from "@/lib/canvas/styleConstants";
 import { readCanvas } from "@/lib/canvas/textSyntax";
+import type { Pt } from "@/lib/canvas/textSyntax/segment";
 import type { Drawing, GraphNode } from "@/lib/canvas/textSyntax/sketch";
 import type { DiagramBoardPlan } from "@/e2e/support/diagramBoard";
 import type { DiagramSection, LabelPlace } from "@/e2e/support/diagramTruth";
@@ -34,6 +39,8 @@ export function strokeElements(strokes: Stroke[]): CanvasElement[] {
 }
 
 type Count = { expected: number; right: number };
+/** Right angles drawn and read as such; angles drawn clearly not right (more than 15° off), and how many of those were called right. */
+type RightCount = Count & { notRight: number; falselyRight: number };
 export type SectionCheck = {
   section: string;
   /** Parts found with the strokes they were drawn with (`found`), and of those, of the right kind and count (`right`); parts found that weren't drawn as one. */
@@ -45,7 +52,21 @@ export type SectionCheck = {
   /** How many drawings the section came out as (one is what was drawn). */
   drawings: number;
   misses: string[];
+  /** Arrows read as arrows pointing the way they were drawn — within ARROW_DEG — of all, and of those drawn in one stroke. */
+  arrows: Count & { oneStroke: Count };
+  /** Corners of a part, and lines that meet, at a right angle. */
+  rightCorners: RightCount;
+  rightJoins: RightCount;
+  rings: Count;
+  cornerMarks: Count;
+  /** What was missed of the facts above — apart from `misses`, so a section is `perfect` by the same measure as before they were checked. */
+  factMisses: string[];
 };
+
+/** An arrow points the way it was drawn when its tail-to-head runs within this many degrees of the drawn one. */
+const ARROW_DEG = 20;
+/** A corner read within this many canvas units of where it was aimed is that corner. */
+const CORNER_NEAR = 15;
 
 const ids = (strokes: number[]) => new Set(strokes.map((n) => `s${n}`));
 const jaccard = (a: Set<string>, b: Set<string>) => {
@@ -141,6 +162,83 @@ export function checkSection(section: DiagramSection, drawings: Drawing[]): Sect
     else misses.push(`bond ${b.from}–${b.to} (${b.type}) ${edge ? `read as ${edge.type} between other ends` : "not in a graph"}`);
   }
 
+  // Arrows, and which way they point.
+  const factMisses: string[] = [];
+  const arrows = { expected: 0, right: 0, oneStroke: { expected: 0, right: 0 } };
+  for (const t of truth.primitives) {
+    if (!t.arrow) continue;
+    const p = match.get(t.id);
+    const oneStroke = t.strokes.length === 1;
+    arrows.expected++;
+    if (oneStroke) arrows.oneStroke.expected++;
+    const [tail, head] = p?.part.kind === "arrow" ? p.part.points as [Pt, Pt] : [null, null];
+    const off = tail && head ? degreesApart({ x: head.x - tail.x, y: head.y - tail.y }, { x: t.arrow.tip.x - t.arrow.tail.x, y: t.arrow.tip.y - t.arrow.tail.y }) : Infinity;
+    if (off <= ARROW_DEG) {
+      arrows.right++;
+      if (oneStroke) arrows.oneStroke.right++;
+    } else factMisses.push(`${t.id}: arrow${oneStroke ? " in one stroke" : ""} read as ${p ? (p.part.kind === "arrow" ? `an arrow ${Math.round(off)}° off` : p.part.kind) : "nothing"}`);
+  }
+
+  // Corners at a right angle.
+  const rightCorners = { expected: 0, right: 0, notRight: 0, falselyRight: 0 };
+  for (const t of truth.primitives) {
+    const p = match.get(t.id);
+    for (const c of t.corners ?? []) {
+      if (c.right === null) continue;
+      const read = !p ? [] : ["triangle", "rectangle", "polygon"].includes(p.part.kind) ? p.part.points.map((_, i) => i) : p.part.kind === "polyline" ? p.part.points.slice(1, -1).map((_, i) => i + 1) : [];
+      const near = read.find((i) => Math.hypot(p!.part.points[i]!.x - c.x, p!.part.points[i]!.y - c.y) <= CORNER_NEAR);
+      const called = near !== undefined && !!p!.part.right?.includes(near);
+      if (c.right) {
+        rightCorners.expected++;
+        if (called) rightCorners.right++;
+        else factMisses.push(`${t.id}: right angle at (${Math.round(c.x)}, ${Math.round(c.y)}) not called one`);
+      } else {
+        rightCorners.notRight++;
+        if (called) {
+          rightCorners.falselyRight++;
+          factMisses.push(`${t.id}: corner at (${Math.round(c.x)}, ${Math.round(c.y)}) called a right angle`);
+        }
+      }
+    }
+  }
+
+  // Lines that meet at a right angle.
+  const rightJoins = { expected: 0, right: 0, notRight: 0, falselyRight: 0 };
+  for (const c of truth.connections ?? []) {
+    if (c.how !== "meet" || c.right === undefined || c.right === null) continue;
+    const [a, b] = [match.get(c.a), match.get(c.b)];
+    const join = a && b && a.d === b.d ? a.d.joins.find((j) => j.how === "meet" && ((j.a === a.i && j.b === b.i) || (j.a === b.i && j.b === a.i))) : undefined;
+    if (c.right) {
+      rightJoins.expected++;
+      if (join?.right) rightJoins.right++;
+      else factMisses.push(`${c.a} should meet ${c.b} at a right angle`);
+    } else {
+      rightJoins.notRight++;
+      if (join?.right) {
+        rightJoins.falselyRight++;
+        factMisses.push(`${c.a} meets ${c.b} called a right angle`);
+      }
+    }
+  }
+
+  // Rings: the same parts, all in one of the drawing's rings.
+  let rings = 0;
+  for (const ring of truth.rings ?? []) {
+    const ps = ring.map((id) => match.get(id));
+    const d = ps[0]?.d;
+    const want = ps.every((p) => p && p.d === d) ? new Set(ps.map((p) => p!.i)) : null;
+    if (want && d!.rings.some((r) => r.parts.length === want.size && r.parts.every((i) => want.has(i)))) rings++;
+    else factMisses.push(`ring of ${ring.join(", ")} not found`);
+  }
+
+  // Corner marks.
+  let cornerMarks = 0;
+  for (const m of truth.cornerMarks ?? []) {
+    const [mark, of] = [match.get(m.mark), match.get(m.of)];
+    if (mark && of && mark.d === of.d && mark.d.cornerMarks.some((c) => c.mark === mark.i && c.part === of.i)) cornerMarks++;
+    else factMisses.push(`${m.mark} should sit across a corner of ${m.of}`);
+  }
+
   return {
     section: section.id,
     parts: { expected: truth.primitives.length, found: match.size, right, extra: extra.length },
@@ -149,7 +247,17 @@ export function checkSection(section: DiagramSection, drawings: Drawing[]): Sect
     bonds: { expected: graph?.bonds.length ?? 0, right: bonds },
     drawings: drawings.length,
     misses,
+    arrows, rightCorners, rightJoins,
+    rings: { expected: truth.rings?.length ?? 0, right: rings },
+    cornerMarks: { expected: truth.cornerMarks?.length ?? 0, right: cornerMarks },
+    factMisses,
   };
+}
+
+/** Degrees between two directions. */
+function degreesApart(u: Pt, v: Pt): number {
+  const n = Math.hypot(u.x, u.y) * Math.hypot(v.x, v.y);
+  return n === 0 ? 180 : (Math.acos(Math.max(-1, Math.min(1, (u.x * v.x + u.y * v.y) / n))) * 180) / Math.PI;
 }
 
 /**
@@ -170,6 +278,11 @@ export function checkBoard(plan: DiagramBoardPlan, elements = strokeElements(pla
   });
 }
 
+const rightSum = (rs: RightCount[]): RightCount => ({
+  expected: rs.reduce((n, r) => n + r.expected, 0), right: rs.reduce((n, r) => n + r.right, 0),
+  notRight: rs.reduce((n, r) => n + r.notRight, 0), falselyRight: rs.reduce((n, r) => n + r.falselyRight, 0),
+});
+
 /** Checks added up. */
 export function sumChecks(all: SectionCheck[]) {
   const add = (f: (c: SectionCheck) => number) => all.reduce((n, c) => n + f(c), 0);
@@ -181,5 +294,14 @@ export function sumChecks(all: SectionCheck[]) {
     joins: { expected: add((c) => c.joins.expected), right: add((c) => c.joins.right) },
     bonds: { expected: add((c) => c.bonds.expected), right: add((c) => c.bonds.right) },
     oneDrawing: all.filter((c) => c.drawings === 1).length,
+    arrows: {
+      expected: add((c) => c.arrows.expected), right: add((c) => c.arrows.right),
+      oneStroke: { expected: add((c) => c.arrows.oneStroke.expected), right: add((c) => c.arrows.oneStroke.right) },
+    },
+    rightCorners: rightSum(all.map((c) => c.rightCorners)),
+    rightJoins: rightSum(all.map((c) => c.rightJoins)),
+    rings: { expected: add((c) => c.rings.expected), right: add((c) => c.rings.right) },
+    cornerMarks: { expected: add((c) => c.cornerMarks.expected), right: add((c) => c.cornerMarks.right) },
+    factsPerfect: all.filter((c) => c.factMisses.length === 0).length,
   };
 }

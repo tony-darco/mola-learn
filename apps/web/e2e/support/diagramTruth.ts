@@ -16,7 +16,8 @@
  *   polyline   an open path of straight runs meeting at corners — an angle,
  *              a car's body drawn in one stroke, an L of two axes
  *   arrow      a line (straight or not) with a head at one end; drawn in
- *              one stroke, or a shaft and a separate V
+ *              one stroke, or a shaft and a separate V — and which way
+ *              it points
  *   circle     a closed, round loop — a wheel, a pulley (`round: false`
  *              for a clearly oval one)
  *   triangle, rectangle, polygon
@@ -40,6 +41,12 @@ export type PrimitiveKind =
   | "segment" | "polyline" | "arrow" | "circle" | "triangle" | "rectangle" | "polygon"
   | "arc" | "curve" | "zigzag" | "coil" | "wedge" | "dashed" | "parallel" | "dot";
 
+/** A point in board coordinates. */
+export type TruthPoint = { x: number; y: number };
+
+/** Whether an angle was drawn as a right angle (within 1°), as clearly not one (more than 15° off), or too near one to check (null). */
+export type RightAngle = boolean | null;
+
 /** One thing drawn, and the strokes it was drawn with. `id` is unique within its section ("wheel-front", "bond-C-H2"). */
 export type TruthPrimitive = {
   id: string;
@@ -52,6 +59,10 @@ export type TruthPrimitive = {
   lines?: number;
   /** circle: false for a clearly oval loop. */
   round?: boolean;
+  /** arrow: where its tail and tip were aimed. */
+  arrow?: { tail: TruthPoint; tip: TruthPoint };
+  /** polyline, triangle, rectangle, polygon: each corner where it was aimed, in drawing order, and whether it is a right angle. */
+  corners?: (TruthPoint & { right: RightAngle })[];
 };
 
 /** Where on a primitive a label sits. */
@@ -73,8 +84,11 @@ export type TruthLabel = {
   of?: { primitive: string; at: LabelPlace; side?: number; vertex?: number };
 };
 
-/** Two primitives that join: their ends (or an end and a side) `meet`, one `touch`es the other's side, or one lies `inside` the other. */
-export type TruthConnection = { a: string; b: string; how: "meet" | "touch" | "inside" };
+/**
+ * Two primitives that join: their ends (or an end and a side) `meet`, one `touch`es the other's side, or one lies `inside` the other.
+ * `right`: for two straight lines that meet, whether they run at a right angle there (unset: not checked).
+ */
+export type TruthConnection = { a: string; b: string; how: "meet" | "touch" | "inside"; right?: RightAngle };
 
 export type BondType = "single" | "double" | "triple" | "wedge" | "dashed";
 
@@ -95,6 +109,10 @@ export type DiagramTruth = {
   labels: TruthLabel[];
   connections?: TruthConnection[];
   graph?: TruthGraph;
+  /** Straight lines joined end to end into a closed ring, each ring's primitives in order round it. */
+  rings?: string[][];
+  /** A small primitive set across a corner of another, an end on each of the two sides that meet there — the arc of an angle, the square of a right angle. */
+  cornerMarks?: { mark: string; of: string; at: TruthPoint }[];
 };
 
 export type DiagramName = "co2" | "ch4" | "glucose" | "car" | "incline" | "circuit" | "supply-demand" | "right-triangle";

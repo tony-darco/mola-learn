@@ -7,7 +7,8 @@
  * exactly as drawn; drawn by many hands, as well as when it was tuned.
  */
 import { describe, expect, it } from "vitest";
-import { checkBoard, sumChecks } from "../evals/canvas-diagrams/checks";
+import { readCanvas } from "../lib/canvas/textSyntax";
+import { checkBoard, strokeElements, sumChecks } from "../evals/canvas-diagrams/checks";
 import { planDiagramBoard } from "../e2e/support/diagramBoard";
 
 const share = (c: { expected: number; right: number }) => c.right / c.expected;
@@ -37,6 +38,19 @@ describe("sketch layer on the diagram board", () => {
     const checks = checkBoard(planDiagramBoard({ clean: true }));
     expect(checks.filter((c) => c.misses.length).map((c) => `${c.section}: ${c.misses.join("; ")}`)).toEqual([]);
     expect(checks.every((c) => c.drawings === 1)).toBe(true);
+    // And states every fact about it: which way each arrow points, every right angle and none other, the ring, what sits across a corner.
+    expect(checks.filter((c) => c.factMisses.length).map((c) => `${c.section}: ${c.factMisses.join("; ")}`)).toEqual([]);
+  }, 60_000);
+
+  it("never says what a drawing depicts, only its parts and how they join", () => {
+    // The board as saved: molecules, a car, a slope, a circuit, a graph, a triangle — none of which may be named.
+    const plan = planDiagramBoard();
+    const { text } = readCanvas(strokeElements(plan.strokes));
+    expect(text).toMatch(/Closed ring of 6/);
+    expect(text).toMatch(/right angle/);
+    expect(text).toMatch(/pointing up/);
+    const depicted = /\b(car|wheels?|vehicle|molecules?|atoms?|bonds?|carbon|oxygen|hydrogen|methane|glucose|benzene|sugar|forces?|weight|gravity|ramp|incline|slope|ball|circuit|battery|resistor|wires?|current|voltage|axis|axes|graph|supply|demand|equilibrium|price|quantity|hypotenuse|pythagoras|velocity|speed)\b/i;
+    expect(text.match(depicted)).toBeNull();
   }, 60_000);
 
   it("reads the diagrams in the hands it was tuned on (seeds 1–20)", () => {

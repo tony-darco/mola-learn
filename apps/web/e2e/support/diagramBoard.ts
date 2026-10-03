@@ -13,7 +13,7 @@
  */
 import { arrowStrokes, penStroke, seededRandom, writeText, type Jitter, type Pt, type Stroke } from "./strokeFont";
 import type {
-  DiagramName, DiagramSection, DiagramStyle, DiagramTruth, PrimitiveKind, TruthConnection, TruthGraph, TruthLabel, TruthPrimitive,
+  DiagramName, DiagramSection, DiagramStyle, DiagramTruth, PrimitiveKind, RightAngle, TruthConnection, TruthGraph, TruthLabel, TruthPrimitive,
 } from "./diagramTruth";
 import type { Rect } from "./readerBoard";
 
@@ -114,8 +114,34 @@ function shape(s: Sheet, id: string, kind: PrimitiveKind, strokes: Stroke[], ext
   return id;
 }
 
-function connect(s: Sheet, a: string, b: string, how: TruthConnection["how"]) {
-  (s.truth.connections ??= []).push({ a, b, how });
+/** `right`: for two straight lines that meet, whether they were drawn at a right angle (see rightAngle). */
+function connect(s: Sheet, a: string, b: string, how: TruthConnection["how"], right?: RightAngle) {
+  (s.truth.connections ??= []).push({ a, b, how, ...(right !== undefined ? { right } : {}) });
+}
+
+/** An angle in degrees as the truth records it: within 1° of a right angle is one, more than 15° off clearly isn't, and between is left unchecked. */
+const rightAngle = (deg: number): RightAngle => (Math.abs(deg - 90) <= 1 ? true : Math.abs(deg - 90) > 15 ? false : null);
+
+/** The angle (0–180°) at `v` between the directions to `a` and to `b`. */
+function angleAt(v: XY, a: XY, b: XY): number {
+  const [ux, uy, wx, wy] = [a[0] - v[0], a[1] - v[1], b[0] - v[0], b[1] - v[1]];
+  return (Math.acos(Math.max(-1, Math.min(1, (ux * wx + uy * wy) / (Math.hypot(ux, uy) * Math.hypot(wx, wy))))) * 180) / Math.PI;
+}
+
+/** Whether the line through `a1` and `a2` and the one through `b1` and `b2` cross at a right angle (rightAngle). */
+function linesRight(a1: XY, a2: XY, b1: XY, b2: XY): RightAngle {
+  const deg = angleAt([0, 0], [a2[0] - a1[0], a2[1] - a1[1]], [b2[0] - b1[0], b2[1] - b1[1]]);
+  return rightAngle(Math.min(deg, 180 - deg));
+}
+
+/** A path's corners as aimed, for the truth (board coordinates): a closed one's every point, an open one's inner ones; each with its angle. */
+function cornersOf(s: Sheet, points: XY[], isClosed: boolean): NonNullable<TruthPrimitive["corners"]> {
+  const n = points.length;
+  const inner = isClosed ? points.map((_, i) => i) : points.slice(1, -1).map((_, i) => i + 1);
+  return inner.map((i) => {
+    const v = points[i]!;
+    return { ...at(s, ...v), right: rightAngle(angleAt(v, points[(i - 1 + n) % n]!, points[(i + 1) % n]!)) };
+  });
 }
 
 /**
@@ -220,7 +246,7 @@ function toward(a: XY, b: XY, d: number): XY {
 
 function arrow(s: Sheet, id: string, tail: XY, tip: XY, barb = 14): string {
   const strokes = arrowStrokes(at(s, ...tail), at(s, ...tip), s.head, s.clean ? undefined : s.trace, barb);
-  return shape(s, id, "arrow", strokes);
+  return shape(s, id, "arrow", strokes, { arrow: { tail: at(s, ...tail), tip: at(s, ...tip) } });
 }
 
 /** Writes `text` ("_" and "^" for scripts) with its ink centred on (cx, cy); the stroke indices. */
@@ -318,8 +344,10 @@ function glucose(s: Sheet): string[] {
     bonds.push({ from, to, type: "single", primitive });
     if (to !== "O") nodes.push({ id: to, label: null });
   }
-  // Ring bonds meet at every carbon: bond i ends where bond i + 1 starts.
-  for (let i = 0; i < 5; i++) connect(s, ringBonds[i]!, ringBonds[i + 1]!, "meet");
+  // Ring bonds meet at every carbon: bond i ends where bond i + 1 starts. All six close a ring (through the written O).
+  const ringBond = (k: number): [XY, XY] => [v[ring[k]!]!, v[ring[k + 1]!]!];
+  for (let i = 0; i < 5; i++) connect(s, ringBonds[i]!, ringBonds[i + 1]!, "meet", linesRight(...ringBond(i), ...ringBond(i + 1)));
+  s.truth.rings = [ringBonds];
 
   const groups: [string, -1 | 1, string][] = [
     ["C1", -1, "H"], ["C1", 1, "OH"], ["C2", -1, "H"], ["C2", 1, "OH"],
@@ -334,8 +362,8 @@ function glucose(s: Sheet): string[] {
     bonds.push({ from: carbon, to: id, type: "single", primitive });
     // The two ring bonds at this carbon.
     const k = ring.indexOf(carbon);
-    connect(s, primitive, ringBonds[k - 1]!, "meet");
-    connect(s, primitive, ringBonds[k]!, "meet");
+    connect(s, primitive, ringBonds[k - 1]!, "meet", linesRight([x, y], [x, end], ...ringBond(k - 1)));
+    connect(s, primitive, ringBonds[k]!, "meet", linesRight([x, y], [x, end], ...ringBond(k)));
   }
   s.truth.graph = { nodes, bonds };
   return [];
@@ -343,9 +371,8 @@ function glucose(s: Sheet): string[] {
 
 /** A car (body with a cabin, two wheels), a velocity arrow, a 100 m marker, and the speed worked out. */
 function car(s: Sheet): string[] {
-  const body = shape(s, "body", "polygon", [
-    line(s, closed([[50, 120], [50, 88], [105, 88], [130, 50], [200, 50], [230, 88], [285, 95], [285, 120]])),
-  ], { count: 8 });
+  const outline: XY[] = [[50, 120], [50, 88], [105, 88], [130, 50], [200, 50], [230, 88], [285, 95], [285, 120]];
+  const body = shape(s, "body", "polygon", [line(s, closed(outline))], { count: 8, corners: cornersOf(s, outline, true) });
   for (const [id, x] of [["wheel-rear", 100], ["wheel-front", 235]] as const) {
     shape(s, id, "circle", [circle(s, x, 125, 18)]);
     connect(s, id, body, "touch");
@@ -356,7 +383,7 @@ function car(s: Sheet): string[] {
   const distance = shape(s, "distance", "segment", [line(s, [[50, 170], [390, 170]])]);
   for (const [id, x] of [["tick-start", 50], ["tick-end", 390]] as const) {
     shape(s, id, "segment", [line(s, [[x, 160], [x, 180]], s.aim * 0.4)]);
-    connect(s, id, distance, "meet");
+    connect(s, id, distance, "meet", true);
   }
   label(s, "100 m", 220, 194, LABEL, { primitive: distance, at: "middle" });
   return [formula(s, "v = d/t = 100/5 = 20 m/s", 50, 225)];
@@ -365,7 +392,8 @@ function car(s: Sheet): string[] {
 /** A ball resting on a right-angled ramp, the base angle θ, the forces mg and N, and a = g sin θ. */
 function incline(s: Sheet): string[] {
   const A: XY = [50, 200]; // the θ corner
-  const ramp = shape(s, "ramp", "triangle", [line(s, closed([A, [370, 200], [370, 45]]))]);
+  const corners: XY[] = [A, [370, 200], [370, 45]];
+  const ramp = shape(s, "ramp", "triangle", [line(s, closed(corners))], { corners: cornersOf(s, corners, true) });
   const slope = Math.atan2(45 - A[1], 370 - A[0]); // up the slope, y-down radians (negative)
   const n: XY = [Math.sin(slope), -Math.cos(slope)]; // out of the slope, up and to the left
   const r = 24;
@@ -377,6 +405,7 @@ function incline(s: Sheet): string[] {
   const deg = (slope * 180) / Math.PI;
   shape(s, "angle", "arc", [arcLine(s, ...A, 48, 0, deg)]);
   connect(s, "angle", ramp, "meet");
+  (s.truth.cornerMarks ??= []).push({ mark: "angle", of: ramp, at: at(s, ...A) });
   label(s, "θ", A[0] + 66 * Math.cos(slope / 2), A[1] + 66 * Math.sin(slope / 2), 18, { primitive: "angle", at: "middle" });
 
   // Both forces drawn from the ball's centre.
@@ -396,13 +425,16 @@ function circuit(s: Sheet): string[] {
     line(s, [[left - 25, plus], [left + 25, plus]], s.aim * 0.4),
     line(s, [[left - 12, minus], [left + 12, minus]], s.aim * 0.4),
   ], { lines: 2 });
-  const wireIn = shape(s, "wire-1", "polyline", [line(s, [[left, plus], [left, top], [215, top]])], { count: 1 });
+  const inPath: XY[] = [[left, plus], [left, top], [215, top]];
+  const outPath: XY[] = [[305, top], [right, top], [right, bottom], [left, bottom], [left, minus]];
+  const wireIn = shape(s, "wire-1", "polyline", [line(s, inPath)], { count: 1, corners: cornersOf(s, inPath, false) });
   const resistor = shape(s, "resistor", "zigzag", [zigzag(s, [215, top], [305, top], 6, 11)], { count: 6 });
-  const wireOut = shape(s, "wire-2", "polyline", [line(s, [[305, top], [right, top], [right, bottom], [left, bottom], [left, minus]])], { count: 3 });
-  connect(s, wireIn, battery, "meet");
-  connect(s, wireIn, resistor, "meet");
-  connect(s, resistor, wireOut, "meet");
-  connect(s, wireOut, battery, "meet");
+  const wireOut = shape(s, "wire-2", "polyline", [line(s, outPath)], { count: 3, corners: cornersOf(s, outPath, false) });
+  // Each wire ends square on a plate; the resistor runs on in the wires' line.
+  connect(s, wireIn, battery, "meet", true);
+  connect(s, wireIn, resistor, "meet", false);
+  connect(s, resistor, wireOut, "meet", false);
+  connect(s, wireOut, battery, "meet", true);
   label(s, "9 V", 62, (plus + minus) / 2, LABEL, { primitive: battery, at: "near" });
   label(s, "R", 260, 30, LABEL, { primitive: resistor, at: "middle" });
   return [];
@@ -415,7 +447,7 @@ function supplyDemand(s: Sheet): string[] {
   label(s, "P", 66, 48, LABEL, { primitive: p, at: "head" });
   const q = arrow(s, "axis-Q", o, [430, 230], 12);
   label(s, "Q", 426, 256, LABEL, { primitive: q, at: "head" });
-  connect(s, p, q, "meet");
+  connect(s, p, q, "meet", true);
 
   const d: [XY, XY] = [[135, 70], [385, 200]];
   const sup: [XY, XY] = [[135, 195], [385, 65]];
@@ -437,9 +469,13 @@ function supplyDemand(s: Sheet): string[] {
 /** A right triangle, sides a, b, c, the right angle marked by a small square. */
 function rightTriangle(s: Sheet): string[] {
   // Sides in drawing order: 0 the base (b), 1 the upright (a), 2 the hypotenuse (c).
-  const tri = shape(s, "triangle", "triangle", [line(s, closed([[100, 225], [390, 225], [390, 45]]))]);
-  shape(s, "right-angle", "polyline", [line(s, [[368, 225], [368, 203], [390, 203]], s.aim * 0.4, steady(s))], { count: 1 });
-  connect(s, "right-angle", tri, "meet");
+  const corners: XY[] = [[100, 225], [390, 225], [390, 45]];
+  const tri = shape(s, "triangle", "triangle", [line(s, closed(corners))], { corners: cornersOf(s, corners, true) });
+  const square: XY[] = [[368, 225], [368, 203], [390, 203]];
+  shape(s, "right-angle", "polyline", [line(s, square, s.aim * 0.4, steady(s))], { count: 1, corners: cornersOf(s, square, false) });
+  // Its ends rest square on the two sides of the corner it sits in.
+  connect(s, "right-angle", tri, "meet", true);
+  (s.truth.cornerMarks ??= []).push({ mark: "right-angle", of: tri, at: at(s, 390, 225) });
   label(s, "b", 245, 250, LABEL, { primitive: tri, at: "side", side: 0 });
   label(s, "a", 412, 135, LABEL, { primitive: tri, at: "side", side: 1 });
   // Just outside the hypotenuse's middle, up and to the left.

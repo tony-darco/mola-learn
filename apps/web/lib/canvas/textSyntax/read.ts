@@ -195,7 +195,9 @@ const GUIDE = [
   `- "(made by the AI)" marks what the AI assistant put on the board; everything else was made by the user.`,
 ];
 const DRAWING_GUIDE = `- A drawing made with the pen is described by its parts, P1, P2, … — straight lines, corners, closed shapes, arcs, curves, arrows, and so on — `
-  + "with places given on a grid laid over the drawing; which parts join; and the short labels written beside them. Lines drawn between written labels are given as which label is joined to which, and by what kind of line. "
+  + "with places given on a grid laid over the drawing, which way each arrow points, and which corners are right angles (90°, as drawn by hand); "
+  + "which parts join, and how — at a right angle, end to end round a closed ring, a small part across another's corner; and the short labels written beside them. "
+  + "Lines drawn between written labels are given as which label is joined to which, and by what kind of line, and any closed ring they make. "
   + "What the drawing shows is not said: work it out from its parts.";
 
 // ── read ────────────────────────────────────────────────────────────────────
