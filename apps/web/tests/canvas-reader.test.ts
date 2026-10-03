@@ -10,9 +10,13 @@
 import { describe, expect, it } from "vitest";
 import type { CanvasElement } from "@mola/shared";
 import { readCanvas, type LabelMap } from "../lib/canvas/textSyntax";
+import { scriptedText, UNSURE_GUIDE } from "../lib/canvas/textSyntax/handwriting";
+import { DEFAULT_MIN_CONFIDENCE, recognizeDoc } from "../lib/canvas/textSyntax/recognize";
 import { drawn, line, makeBoard, SINGLES, written } from "../evals/canvas-reader/fixtures";
 import { checkBoard } from "../evals/canvas-reader/score";
+import { strokeElements } from "../evals/canvas-diagrams/checks";
 import { planElements } from "../evals/canvas-syntax/fixtures";
+import { planDiagramBoard } from "../e2e/support/diagramBoard";
 import { jitterFor, planReaderBoard, writeMatrix } from "../e2e/support/readerBoard";
 import { makeJitter, textStrokes } from "../e2e/support/strokeFont";
 
@@ -302,6 +306,56 @@ describe("readCanvas: determinism", () => {
     const b = readCanvas(makeBoard("b", { jitterSeed: 3 }).elements, { render });
     expect(a.text).toBe(b.text);
     expect(a.labels).toEqual(b.labels);
+  });
+});
+
+describe("readCanvas: characters the recognizer is unsure of", () => {
+  /** One section of the reader board as saved, on a canvas of its own. */
+  const section = (id: string) => {
+    const plan = planReaderBoard();
+    const { rect } = plan.sections.find((s) => s.id === id)!;
+    return planElements(plan).filter((e) => e.x >= rect.minX && e.x + e.width <= rect.maxX && e.y >= rect.minY && e.y + e.height <= rect.maxY);
+  };
+  const unsure = /«[^«»|\s]+(?:\|[^«»|\s]+)+»/g;
+
+  it("prints them in place as what they may be, most likely first, and says how in the guide", () => {
+    const { text, doc } = readCanvas(section("economics-shaky"));
+    expect(text).toContain(UNSURE_GUIDE);
+    expect(text).not.toMatch(/\?g\d/);
+    // No bitmaps: a normalized read prints characters only.
+    expect(text).not.toMatch(/^[.#]+$/m);
+    const lines = itemsOf(text).map((s) => s.split("\n")[1]!);
+    expect(lines.join("\n").match(unsure)?.length).toBeGreaterThan(5);
+    // Each unsure character leads with the recognizer's own reading.
+    const reads = recognizeDoc(doc.handwriting);
+    const t1 = doc.handwriting.blocks.find((b) => b.id === "T1")!;
+    const firsts = t1.kind === "text" ? t1.words.flatMap((w) => w.glyphs).map((g) => reads.get(g)!).filter((r) => r.confidence < DEFAULT_MIN_CONFIDENCE).map((r) => r.char) : [];
+    expect([...lines[0]!.matchAll(unsure)].map((m) => m[0].slice(1).split("|")[0])).toEqual(firsts);
+  });
+
+  it("reads a number's last 0 as a 0, not as an unsure oval (\"100\", not \"10«0|O»\")", () => {
+    expect(item(readCanvas(section("economics-shaky")).text, "T1")!.split("\n")[1]).toMatch(/ = 100 - /);
+  });
+
+  it("says once when a line is mostly guesswork, and never of a neat hand", () => {
+    const shaky = itemsOf(readCanvas(section("chemistry-shaky")).text);
+    expect(shaky.filter((s) => s.includes("hard to read: the recognizer is unsure of most of its characters"))).toHaveLength(1);
+    for (const id of ["economics-neat", "chemistry-neat", "physics-neat"]) expect(readCanvas(section(id)).text).not.toContain("hard to read");
+  });
+
+  it("prints a drawing's unsure labels the same way, with the guide to it even when no handwriting is shown", () => {
+    const plan = planDiagramBoard();
+    const { rect } = plan.sections.find((s) => s.id === "supply-demand-shaky")!;
+    const { text, doc } = readCanvas(strokeElements(plan.strokes), { region: rect });
+    expect(doc.items.map((i) => i.kind)).toEqual(["drawing"]);
+    expect(text).toContain(UNSURE_GUIDE);
+    expect(text).toMatch(/Labels: .*"«[^»]+»"/);
+    expect(text).not.toMatch(/read with doubt/);
+  });
+
+  it("keeps a script of one unsure character unbraced, and braces a run", () => {
+    expect(scriptedText([{ char: "C" }, { char: "«2|z»", script: "sub" }])).toBe("C_«2|z»");
+    expect(scriptedText([{ char: "x" }, { char: "1", script: "sup" }, { char: "«0|O»", script: "sup" }])).toBe("x^{1«0|O»}");
   });
 });
 

@@ -8,14 +8,15 @@
  *
  * Scored character by character, still with no model involved: was it read
  * right, flagged as unsure, or misread without a flag (the one failure that
- * must stay near zero)?
+ * must stay near zero)? And of the flagged ones, is what was written among
+ * the readings the read offers in its place ("«5|S|s»")?
  */
 import { generateKeyBetween } from "fractional-indexing";
 import type { CanvasElement } from "@mola/shared";
 import { finalizeStroke } from "@/lib/canvas/stroke";
 import { COLOR_PALETTE, STROKE_WIDTHS } from "@/lib/canvas/styleConstants";
 import { scriptedText } from "@/lib/canvas/textSyntax/handwriting";
-import { DEFAULT_MIN_CONFIDENCE, recognizeDoc } from "@/lib/canvas/textSyntax/recognize";
+import { DEFAULT_MIN_CONFIDENCE, offered, recognizeDoc } from "@/lib/canvas/textSyntax/recognize";
 import { inkFromElements, segmentHandwriting, type HandwritingDoc, type TextBlock } from "@/lib/canvas/textSyntax/segment";
 import { makeJitter, parseScripted, writeText } from "@/e2e/support/strokeFont";
 
@@ -78,7 +79,8 @@ export function makeAlphabet(seed?: number, lines = ALPHABET_LINES): AlphabetFix
 
 export type AlphabetMetrics = {
   /** `segmented`: came out of segmentation as exactly the strokes it was drawn with. */
-  glyphs: { expected: number; segmented: number; correct: number; flagged: number; confidentWrong: number };
+  /** `offered`: of the flagged, those whose character is among the readings offered in their place (recognize.ts's offered). */
+  glyphs: { expected: number; segmented: number; correct: number; flagged: number; confidentWrong: number; offered: number };
   /** Of the correctly segmented glyphs: scripts read as the right kind, and plain glyphs taken for scripts. */
   scripts: { expected: number; correct: number; falsePositives: number };
   /** Lines whose top reading, scripts marked, is exactly what was written. */
@@ -95,8 +97,14 @@ export function scoreAlphabet(fx: AlphabetFixture, lines = ALPHABET_LINES, minCo
   const doc: HandwritingDoc = segmentHandwriting(inkFromElements(fx.elements));
   const reads = recognizeDoc(doc);
   const byIds = new Map([...reads].map(([g, r]) => [key(g.strokes.map((s) => s.id)), r]));
+  // What each glyph would be offered as, in its word.
+  const offeredFor = new Map<string, () => string[]>();
+  for (const w of doc.blocks.flatMap((b) => (b.kind === "text" ? b.words : b.rows.flatMap((row) => row.cells.flatMap((c) => (c ? [c] : [])))))) {
+    const rs = w.glyphs.map((gl) => reads.get(gl)!);
+    w.glyphs.forEach((gl, i) => offeredFor.set(key(gl.strokes.map((s) => s.id)), () => offered(gl, rs, i)));
+  }
   const m: AlphabetMetrics = {
-    glyphs: { expected: fx.glyphs.length, segmented: 0, correct: 0, flagged: 0, confidentWrong: 0 },
+    glyphs: { expected: fx.glyphs.length, segmented: 0, correct: 0, flagged: 0, confidentWrong: 0, offered: 0 },
     scripts: { expected: fx.glyphs.filter((g) => g.script).length, correct: 0, falsePositives: 0 },
     lines: { expected: lines.length, correct: 0 },
     confusions: [],
@@ -108,6 +116,7 @@ export function scoreAlphabet(fx: AlphabetFixture, lines = ALPHABET_LINES, minCo
     if (r) m.glyphs.segmented++;
     const flagged = !!r && r.confidence < minConfidence;
     if (flagged) m.glyphs.flagged++;
+    if (flagged && offeredFor.get(key(g.ids))!().includes(g.char)) m.glyphs.offered++;
     if (r && (r.script ?? null) === g.script && g.script) m.scripts.correct++;
     if (r && r.script && !g.script) m.scripts.falsePositives++;
     if (r?.char === g.char) {

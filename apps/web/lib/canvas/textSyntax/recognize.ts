@@ -76,6 +76,13 @@ const NEAR_AXIS = 0.6;
 /** Where two strokes of a "+" cross, as a fraction along each: near the middle, not at an end (that's a "⊥" or an "L"). */
 const MIDDLE = [0.15, 0.85] as const;
 /**
+ * Level strokes that stray up to this × their length may be a shaky "-" or
+ * "=": never read as one, only offered (see offered). (Offering a "+" this
+ * way, on seeds 1–20 of the shaky alphabet, was right once in 55 — the rest
+ * were "t", "f" and "F" — so a "+" is only offered by its place.)
+ */
+const LOOSE_STRAIGHT = 0.4;
+/**
  * Below this confidence a glyph is shown to the reader as uncertain rather
  * than as a character. With the full alphabet, on tuning seeds 1–20 it
  * flags 2.4% of the matrix fixture's glyphs with no misread left unflagged,
@@ -333,13 +340,13 @@ function shapeDistance(g: Shape, variants: Shape[], scale = 1): number {
 
 type Chord = { a: Pt; b: Pt };
 
-function straightChord(points: Pt[]): Chord | null {
+function straightChord(points: Pt[], straight = STRAIGHT): Chord | null {
   const a = points[0]!;
   const b = points[points.length - 1]!;
   const length = Math.hypot(b.x - a.x, b.y - a.y);
   if (length === 0) return null;
   const stray = Math.max(...points.map((p) => Math.abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / length));
-  return stray <= STRAIGHT * length ? { a, b } : null;
+  return stray <= straight * length ? { a, b } : null;
 }
 
 const horizontal = (c: Chord) => Math.abs(c.b.y - c.a.y) <= NEAR_AXIS * Math.abs(c.b.x - c.a.x);
@@ -356,9 +363,12 @@ function crossing(p: Chord, q: Chord): [number, number] | null {
   return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? [t, u] : null;
 }
 
-/** "-", "=" or "+" if the glyph is exactly one of them, drawn in straight strokes; otherwise null. */
-function straightStrokeChar(glyph: Glyph): string | null {
-  const chords = glyph.strokes.map((s) => straightChord(s.points));
+/**
+ * "-", "=" or "+" if the glyph is exactly one of them, drawn in straight strokes; otherwise null.
+ * `straight`: how far a stroke may stray and still be straight (STRAIGHT; LOOSE_STRAIGHT, for what an unsure glyph is offered as).
+ */
+function straightStrokeChar(glyph: Glyph, straight = STRAIGHT): string | null {
+  const chords = glyph.strokes.map((s) => straightChord(s.points, straight));
   if (chords.some((c) => c === null)) return null;
   const [p, q] = chords as Chord[];
   if (chords.length === 1) return horizontal(p!) ? "-" : null;
@@ -391,9 +401,10 @@ export function recognizeGlyph(glyph: Glyph, at?: Placement, allowed?: RegExp, e
     return { char, confidence, candidates: [{ char, score: 1 }], ...(script ? { script } : {}) };
   };
   const box = glyph.box;
-  // A dot is a full stop; one off the baseline is something else (a multiplication dot), so it is shown as unsure.
+  // A dot is a full stop; one off the baseline may be something else (a multiplication dot), so it is shown as unsure.
   if (at && Math.max(box.maxX - box.minX, box.maxY - box.minY) <= DOT * at.cap) {
-    return sure(".", (at.baseline - box.maxY) / at.cap < 0.35 ? 1 : 0);
+    if ((at.baseline - box.maxY) / at.cap < 0.35) return sure(".");
+    return { char: ".", confidence: 0, candidates: [{ char: ".", score: 0.5 }, { char: "·", score: 0.5 }] };
   }
   // A "+" is certain on its own; right after a letter, or as tall as one, it may be a "t".
   const straight = straightStrokeChar(glyph);
@@ -597,7 +608,13 @@ export function recognizeDoc(doc: HandwritingDoc): Map<Glyph, Recognition> {
         const oval = OVALS.includes(r.char);
         const afterSubscriptedLetter = reads[i - 1]?.script === "sub" && kind(p) === "letter";
         const asLetter = !r.script && (reads[i + 1]?.script === "sub" || afterSubscriptedLetter);
-        const asDigit = oval && kind(p) === "digit" && kind(n) === "digit";
+        // A number so far: everything before it at its level in the word is surely digits (or a decimal point), "10" of "100";
+        // and it is as tall as the digit before it (a "°" isn't).
+        const before = reads.slice(0, i).filter((x) => !!x.script === !!r.script);
+        const numberSoFar = before.some((x) => DIGIT.test(x.char))
+          && before.every((x) => (DIGIT.test(x.char) || x.char === ".") && x.confidence >= DEFAULT_MIN_CONFIDENCE)
+          && p >= 0 && glyphHeight(g) >= 0.6 * glyphHeight(word.glyphs[p]!);
+        const asDigit = oval && ((kind(p) === "digit" && kind(n) === "digit") || (!asLetter && numberSoFar && kind(n) !== "letter"));
         // Context says which kind it is, not which character: it is the look-alike of that kind.
         const twins = [...LOOK_ALIKES.find((group) => group.includes(r.char))!].filter((c) => DIGIT.test(c) === asDigit).join("");
         if (asLetter || asDigit) reads[i] = recognizeGlyph(g, { baseline, cap, afterBase: i > 0 }, new RegExp(`^[${twins}]$`), exemplars);
@@ -625,10 +642,11 @@ function runsOf(words: Word[], lineHeight: number): Word[][] {
  * neighbours decide where they can, whatever its shape says: next to a
  * subscript it follows, or a script that follows it, it is a letter ("CO_2",
  * "H_2O" — but not "10^3": numbers take powers). An oval — "0", "O" or
- * "o", which most hands write alike — between digits is a digit ("101").
- * Elsewhere — "R1" is an index, "2S" a count, "20" a number, "H2O" written
- * without its subscript — the shape decides, and an oval is flagged if it
- * could be either.
+ * "o", which most hands write alike — between digits is a digit ("101"),
+ * and so is one going on with a number, sure digits back to the start of
+ * its word, unless a letter follows ("100", "20", "100/5"; not "H2O"). Elsewhere
+ * — "R1" is an index, "2S" a count, "H2O" written without its subscript —
+ * the shape decides, and an oval is flagged if it could be either.
  */
 const LOOK_ALIKES = ["0Oo", "1lI", "5Ss", "2Zz", "8B"];
 const OVALS = "0Oo";
@@ -645,4 +663,43 @@ function lookAlikeMargin(r: Recognition): number {
   const best = r.candidates.find((c) => c.char === r.char);
   const other = group && r.candidates.find((c) => group.includes(c.char) && DIGIT.test(c.char) !== DIGIT.test(r.char));
   return best && other ? 1 - Math.sqrt(other.score / best.score) : 1;
+}
+
+// ── what an unsure glyph is offered as ──────────────────────────────────────
+
+/** An unsure glyph's likeliest readings are offered: at least OFFER_MIN, and up to OFFER_MAX while they score at least OFFER_SHARE × the best… */
+const OFFER_MIN = 2;
+const OFFER_MAX = 5;
+const OFFER_SHARE = 0.6;
+/** …and its place can add one from this deep in its list. */
+const OFFER_DEPTH = 8;
+const OPERATOR_READINGS = /^[+\-=×÷/→←]$/;
+
+/**
+ * What a glyph is shown as when the recognizer is unsure of it: its
+ * likeliest readings, most likely first (see OFFER_MIN), then any its place
+ * makes likely that aren't among them — the likeliest operator for a glyph
+ * standing alone as a word (a "+" between terms), the likeliest digit for
+ * one beside a digit, and "-" or "=" for level strokes nearly straight
+ * enough to be one (a shaky hand's; see LOOSE_STRAIGHT). `word`: the
+ * readings of its word's glyphs; `i`: its place in it.
+ *
+ * Tuned on seeds 1–20 of the alphabet fixture (evals/canvas-syntax/
+ * alphabet.ts), in its own hand and in the reader board's shaky one: how
+ * often what was written is among what is offered, against how much is
+ * offered.
+ */
+export function offered(glyph: Glyph, word: Recognition[], i: number): string[] {
+  const r = word[i]!;
+  const best = r.candidates[0]!.score;
+  const out = r.candidates.filter((c, k) => k < OFFER_MIN || (k < OFFER_MAX && c.score >= OFFER_SHARE * best)).map((c) => c.char);
+  const deep = r.candidates.slice(0, OFFER_DEPTH).map((c) => c.char);
+  const add = (c: string | null | undefined) => {
+    if (c && !out.includes(c)) out.push(c);
+  };
+  if (word.length === 1) add(deep.find((c) => OPERATOR_READINGS.test(c)));
+  if ([word[i - 1], word[i + 1]].some((n) => n && DIGIT.test(n.char))) add(deep.find((c) => DIGIT.test(c)));
+  const level = straightStrokeChar(glyph, LOOSE_STRAIGHT);
+  if (level === "-" || level === "=") add(level);
+  return out;
 }

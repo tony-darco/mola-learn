@@ -127,9 +127,10 @@ function vee(ink: Ink, unit: number): Vee | null {
  * ever gets (the barbs come back toward the tail; the pen often returns to
  * the tip for the second barb a touch further out). Tried from both ends,
  * for an arrow drawn head first. `maxHeadShare`: how long the head may be,
- * as a share of the shaft.
+ * as a share of the shaft; `barbSpread`: how far (× the unit) each barb must
+ * reach out to its side.
  */
-export function arrowInOneStroke(points: Pt[], unit: number, maxHeadShare = 0.5): { tail: Pt; tip: Pt } | null {
+export function arrowInOneStroke(points: Pt[], unit: number, maxHeadShare = 0.5, barbSpread = BARB_SPREAD): { tail: Pt; tip: Pt } | null {
   for (const pts of [points, [...points].reverse()]) {
     const tail = pts[0]!;
     const out = pts.map((p) => dist(p, tail));
@@ -148,7 +149,7 @@ export function arrowInOneStroke(points: Pt[], unit: number, maxHeadShare = 0.5)
     // quick hand can overshoot its corner and turn back almost as sharply,
     // only ever goes to one side; a stroke that doubles back over itself, to neither.
     const sides = head.map((p) => cross(normal(arriving), sub(p, tip)));
-    if (Math.max(...sides) < BARB_SPREAD * unit || Math.min(...sides) > -BARB_SPREAD * unit) continue;
+    if (Math.max(...sides) < barbSpread * unit || Math.min(...sides) > -barbSpread * unit) continue;
     return { tail, tip };
   }
   return null;

@@ -20,7 +20,9 @@
  */
 import type { CanvasElement, CanvasShapeElement } from "@mola/shared";
 import { DEFAULT_BITMAP_ROWS } from "./bitmap";
-import { blockRenderer, BOXES_GUIDE, COORDINATES, describeBoxes, HANDWRITING_GUIDE, plural, scriptedText, topLeft, type SyntaxRender } from "./handwriting";
+import {
+  blockRenderer, BOXES_GUIDE, COORDINATES, describeBoxes, HANDWRITING_GUIDE, plural, printedWord, scriptedText, topLeft, UNSURE_GUIDE, type SyntaxRender,
+} from "./handwriting";
 import { assignLabels, EMPTY_LABELS, type Labelable, type LabelMap } from "./labels";
 import { detectPenMarks, type PenMark } from "./marks";
 import { DEFAULT_MIN_CONFIDENCE, recognizeDoc, type Recognition } from "./recognize";
@@ -196,7 +198,9 @@ const GUIDE = [
   `- "(made by the AI)" marks what the AI assistant put on the board; everything else was made by the user.`,
 ];
 const DRAWING_GUIDE = `- A drawing made with the pen is described by its parts, P1, P2, … — straight lines, corners, closed shapes, arcs, curves, arrows, and so on — `
-  + "with places given on a grid laid over the drawing; which parts join; and the short labels written beside them. Lines drawn between written labels are given as which label is joined to which, and by what kind of line. "
+  + "with places given on a grid laid over the drawing, which way each arrow points, and which corners are right angles (90°, as drawn by hand); "
+  + "which parts join, and how — at a right angle, end to end round a closed ring, a small part across another's corner; and the short labels written beside them. "
+  + "Lines drawn between written labels are given as which label is joined to which, and by what kind of line, and any closed ring they make. "
   + "What the drawing shows is not said: work it out from its parts.";
 
 // ── read ────────────────────────────────────────────────────────────────────
@@ -226,13 +230,11 @@ export function readCanvas(
   const marks = sketch.marks;
   const handwriting = segmentHandwriting(sketch.writing);
   const reads = recognizeDoc(handwriting);
-  // Short writing by a drawing is its label, and is printed with it.
+  // Short writing by a drawing is its label, and is printed with it, its unsure characters as what they may be.
   const labelText = (words: Word[]) => {
-    const unsure = words.flatMap((w) => w.glyphs).map((g) => reads.get(g)!).filter((r) => r.confidence < DEFAULT_MIN_CONFIDENCE);
-    return {
-      text: words.map((w) => scriptedText(w.glyphs.map((g) => reads.get(g)!))).join(" "),
-      ...(unsure.length ? { doubt: unsure.map((r) => `"${r.char}" may be ${r.candidates.slice(1, 3).map((c) => `"${c.char}"`).join(" or ")}`).join("; ") } : {}),
-    };
+    const text = words.map((w) => scriptedText(w.glyphs.map((g) => reads.get(g)!))).join(" ");
+    const shown = words.map((w) => printedWord(w, reads, DEFAULT_MIN_CONFIDENCE)).join(" ");
+    return { text, ...(shown !== text ? { shown } : {}) };
   };
   const { drawings, labels: labelBlocks } = attachLabels(sketch.drawings, handwriting.blocks.filter((b): b is TextBlock => b.kind === "text"), labelText, unit);
 
@@ -382,16 +384,20 @@ export function readCanvas(
     { title: "WRITTEN AND PLACED", entries: shown.filter((entry) => CONTENT.includes(entry.kind)), kinds: CONTENT },
     { title: "MARKS AND CONNECTIONS", entries: shown.filter((entry) => MARKS.includes(entry.kind)), kinds: MARKS },
   ].filter((p) => p.entries.length > 0);
+  const bodies = parts.map((p) => p.entries.map(itemText));
+  const handwritingGuide = shown.some((entry) => entry.block) ? HANDWRITING_GUIDE[render](rows) : [];
+  // A drawing's label can hold an unsure character where no handwriting guide says how one is printed.
+  const unsureGuide = !handwritingGuide.includes(UNSURE_GUIDE) && bodies.flat().some((t) => t.includes("«")) ? [UNSURE_GUIDE] : [];
   const text = parts.length === 0
     ? [header.join("\n"), selection ? "Nothing is inside the selection." : "Nothing is on this canvas."].join("\n\n")
     : [
       header.join("\n"),
       LABEL_KEY,
       [
-        "How to read it:", ...(shown.some((entry) => entry.block) ? HANDWRITING_GUIDE[render](rows) : []), ...(shown.some((entry) => entry.drawing) ? [DRAWING_GUIDE] : []),
+        "How to read it:", ...handwritingGuide, ...unsureGuide, ...(shown.some((entry) => entry.drawing) ? [DRAWING_GUIDE] : []),
         ...GUIDE, ...(opts.coordinates && shown.some((entry) => entry.block) ? [BOXES_GUIDE] : []), COORDINATES,
       ].join("\n"),
-      ...parts.flatMap((p) => [`${p.title}\n${counts(p.entries, p.kinds)}`, ...p.entries.map(itemText)]),
+      ...parts.flatMap((p, i) => [`${p.title}\n${counts(p.entries, p.kinds)}`, ...bodies[i]!]),
     ].join("\n\n");
 
   const items = shown.map((entry): ReadItem => {

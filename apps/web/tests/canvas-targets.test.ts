@@ -9,6 +9,8 @@ import type { CanvasElement } from "@mola/shared";
 import { readCanvas, resolveTarget, type ResolvedTarget } from "../lib/canvas/textSyntax";
 import { makeBoard } from "../evals/canvas-annotate/fixtures";
 import { textBox } from "../evals/canvas-reader/fixtures";
+import { planElements } from "../evals/canvas-syntax/fixtures";
+import { planReaderBoard } from "../e2e/support/readerBoard";
 
 // The annotate eval's clean board: the 8-step reduction (M1–M8, row operations T1–T7) and "2 + 2 = 5" (T8), plus a text box.
 const board = makeBoard("clean");
@@ -73,6 +75,24 @@ describe("resolveTarget: addresses", () => {
     expect(error(resolveTarget("X1 word 2", read))).toMatch(/^X1 is not handwriting/);
     expect(error(resolveTarget("the five", read))).toMatch(/^can't read "the five" as a place on the board/);
     expect(error(resolveTarget("M8 the 5", read))).toMatch(/^can't read "M8 the 5"/);
+  });
+});
+
+describe("resolveTarget: words printed with unsure characters", () => {
+  // The reader board's shaky hand, as saved: its lines print many characters as "«5|S|s»".
+  const plan = planReaderBoard();
+  const { rect } = plan.sections.find((s) => s.id === "chemistry-shaky")!;
+  const shaky = readCanvas(planElements(plan).filter((e) => e.x >= rect.minX && e.x + e.width <= rect.maxX && e.y >= rect.minY && e.y + e.height <= rect.maxY));
+
+  it("counts the words a line prints as the words it can address", () => {
+    const lines = [...shaky.text.matchAll(/^(T\d+): (.*)$/gm)];
+    expect(lines.length).toBeGreaterThan(0);
+    expect(shaky.text).toMatch(/«/);
+    for (const [, label, printed] of lines) {
+      const words = printed!.split(" ");
+      expect(ok(resolveTarget(`${label} word ${words.length}`, shaky)).address).toBe(`${label} word ${words.length}`);
+      expect(error(resolveTarget(`${label} word ${words.length + 1}`, shaky))).toBe(`${label} has ${words.length} words`);
+    }
   });
 });
 

@@ -1,6 +1,8 @@
 /**
- * A pen drawing (sketch.ts) as text: what its parts are and where, which
- * join, and what is written beside them — never what it is a drawing of.
+ * A pen drawing (sketch.ts) as text: what its parts are and where (which
+ * way an arrow points, which corners are right angles), which join and how,
+ * which lines close a ring, and what is written beside them — never what it
+ * is a drawing of.
  *
  * Places are given on a grid laid over the drawing, so the reader can picture
  * its layout: the drawing's longer side runs from 0 to 100, the other on the
@@ -10,9 +12,16 @@
  */
 import { plural, topLeft } from "./handwriting";
 import type { Box, Pt } from "./segment";
-import type { Drawing, GraphNode, Part } from "./sketch";
+import { sidesOf, type Drawing, type GraphNode, type Part } from "./sketch";
 
 const list = (items: string[]) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+
+/** Which way an arrow from `tail` to `head` points, to the nearest eighth of a turn: "up", "down and to the left", … (y downward). */
+function pointing(tail: Pt, head: Pt): string {
+  const ways = ["right", "down and to the right", "down", "down and to the left", "left", "up and to the left", "up", "up and to the right"];
+  const turn = Math.atan2(head.y - tail.y, head.x - tail.x) / (Math.PI / 4);
+  return ways[((Math.round(turn) % 8) + 8) % 8]!;
+}
 
 /** Which way `p` lies from `q`: "above", "below", "left of", "right of", or a mix. */
 function bearing(p: Pt, q: Pt): string {
@@ -33,19 +42,28 @@ export function describeDrawing(d: Drawing, label: string, tag = ""): string {
   const down = Math.round((box.maxY - box.minY) * scale);
   const name = (i: number) => `P${i + 1}`;
 
+  /** Which of a part's corners are right angles, to follow its description. */
+  const rightText = (p: Part): string => {
+    const right = p.right ?? [];
+    const corners = p.kind === "polyline" ? p.points.length - 2 : p.points.length;
+    if (right.length === 0) return "";
+    if (right.length === corners) return corners === 1 ? "; the corner is a right angle" : `; ${corners === 2 ? "both" : `all ${corners}`} corners are right angles`;
+    return `; ${right.length === 1 ? "a right angle" : "right angles"} at ${list(right.map((i) => g(p.points[i]!)))}`;
+  };
+
   const partText = (p: Part): string => {
     const [a, z] = [p.points[0]!, p.points[p.points.length - 1]!];
     switch (p.kind) {
       case "segment": return `straight line from ${g(a)} to ${g(z)}`;
-      case "polyline": return `line with ${plural(p.count!, "corner", "corners")}, through ${p.points.map(g).join(" → ")}`;
-      case "arrow": return `arrow from ${g(a)} to its head at ${g(z)}`;
+      case "polyline": return `line with ${plural(p.count!, "corner", "corners")}, through ${p.points.map(g).join(" → ")}${rightText(p)}`;
+      case "arrow": return `arrow from ${g(a)} to its head at ${g(z)}, pointing ${pointing(a, z)}`;
       case "circle": {
         const [w, h] = p.across!;
         return Math.min(w, h) >= 0.8 * Math.max(w, h) ? `circle, centre ${g(p.centre!)}, ${span((w + h) / 2)} across` : `oval, centre ${g(p.centre!)}, ${span(w)} across and ${span(h)} down`;
       }
-      case "triangle": return `triangle, corners ${list(p.points.map(g))}`;
-      case "rectangle": return `four-sided shape, corners ${list(p.points.map(g))}`;
-      case "polygon": return `closed shape of ${p.count} straight sides, corners ${list(p.points.map(g))}`;
+      case "triangle": return `triangle, corners ${list(p.points.map(g))}${rightText(p)}`;
+      case "rectangle": return `four-sided shape, corners ${list(p.points.map(g))}${rightText(p)}`;
+      case "polygon": return `closed shape of ${p.count} straight sides, corners ${list(p.points.map(g))}${rightText(p)}`;
       case "arc": return `arc from ${g(a)} through ${g(p.points[1]!)} to ${g(z)}`;
       case "curve": return `curve from ${g(a)} through ${p.points.slice(1, -1).map(g).join(", ")} to ${g(z)}`;
       case "zigzag": return `zigzag line of ${p.count} sharp turns, from ${g(a)} to ${g(z)}`;
@@ -57,7 +75,7 @@ export function describeDrawing(d: Drawing, label: string, tag = ""): string {
     }
   };
 
-  const labelText = (l: Drawing["labels"][number]) => `"${l.text}"${l.doubt ? ` (read with doubt: ${l.doubt})` : ""}`;
+  const labelText = (l: Drawing["labels"][number]) => `"${l.shown ?? l.text}"`;
   const where = (l: Drawing["labels"][number]): string => {
     if (l.part === null) return "";
     const p = d.parts[l.part]!;
@@ -91,7 +109,7 @@ export function describeDrawing(d: Drawing, label: string, tag = ""): string {
     const corners = nodes.map((n, i) => ("corner" in n ? i : -1)).filter((i) => i >= 0);
     const nodeName = (i: number) => {
       const n: GraphNode = nodes[i]!;
-      return "label" in n ? `"${d.labels[n.label]!.text}" ${g({ x: (d.labels[n.label]!.box.minX + d.labels[n.label]!.box.maxX) / 2, y: (d.labels[n.label]!.box.minY + d.labels[n.label]!.box.maxY) / 2 })}`
+      return "label" in n ? `${labelText(d.labels[n.label]!)} ${g({ x: (d.labels[n.label]!.box.minX + d.labels[n.label]!.box.maxX) / 2, y: (d.labels[n.label]!.box.minY + d.labels[n.label]!.box.maxY) / 2 })}`
         : `corner ${corners.indexOf(i) + 1} ${g(n.corner)}`;
     };
     const how = (e: (typeof edges)[number], from: number): string => {
@@ -117,30 +135,48 @@ export function describeDrawing(d: Drawing, label: string, tag = ""): string {
       mine.forEach((e) => said.add(e.part));
       lines.push(`- ${nodeName(i)} joined to ${list(mine.map((e) => `${nodeName(e.from === i ? e.to : e.from)} by ${how(e, i)}`))}.`);
     });
+    // Rings, each from its first label (or else its first corner), named the way the lines above name them.
+    const shortName = (i: number) => {
+      const n = nodes[i]!;
+      return "label" in n ? labelText(d.labels[n.label]!) : `corner ${corners.indexOf(i) + 1}`;
+    };
+    const ringLines = d.rings.map((r) => {
+      const ns = r.nodes!;
+      const labelled = ns.filter((n) => "label" in nodes[n]!);
+      const first = ns.indexOf(labelled.length ? Math.min(...labelled) : ns.reduce((x, y) => (corners.indexOf(x) < corners.indexOf(y) ? x : y)));
+      const order = [...ns.slice(first), ...ns.slice(0, first)];
+      return `- Closed ring of ${order.length}, in order round it: ${list(order.map(shortName))}.`;
+    });
     const loose = d.parts.map((p, i) => ({ p, i })).filter(({ i }) => !edges.some((e) => e.part === i));
     const unattached = d.labels.filter((_, n) => !edges.some((e) => e.from === n || e.to === n));
     return [
       head,
       "Written labels and the lines between them:",
       ...lines,
+      ...ringLines,
       ...loose.map(({ p, i }) => `- Also ${name(i)}: ${partText(p)}.`),
       ...(unattached.length ? [`Also written: ${list(unattached.map((l) => `${labelText(l)} at ${g({ x: (l.box.minX + l.box.maxX) / 2, y: (l.box.minY + l.box.maxY) / 2 })}`))}.`] : []),
-      ...d.labels.filter((l) => l.doubt && !unattached.includes(l)).map((l) => `"${l.text}" was read with doubt: ${l.doubt}.`),
     ].join("\n");
   }
 
   const joins = d.joins.map((j) => {
     switch (j.how) {
-      case "meet": return `${name(j.a)} meets ${name(j.b)} at ${g(j.at!)}`;
+      case "meet": return `${name(j.a)} meets ${name(j.b)} at ${g(j.at!)}${j.right ? ", at a right angle" : ""}`;
       case "touch": return `${name(j.a)} touches ${name(j.b)}`;
       case "inside": return j.at ? `${name(j.a)} has an end inside ${name(j.b)}, at ${g(j.at)}` : `${name(j.a)} lies inside ${name(j.b)}`;
     }
+  });
+  const spans = d.cornerMarks.map((m) => `${name(m.mark)} sits across the corner ${g(m.at)} of ${name(m.part)}, an end on each side of it`);
+  const rings = d.rings.map((r) => {
+    const sides = r.parts.reduce((n, i) => n + sidesOf(d.parts[i]!), 0);
+    return `${list(r.parts.map(name))} join end to end in a closed ring of ${sides} straight sides, corners ${list(r.corners.map(g))}.`;
   });
   return [
     head,
     "Parts:",
     ...d.parts.map((p, i) => `- ${name(i)}: ${partText(p)}.`),
-    ...(joins.length ? [`Joins: ${joins.join("; ")}.`] : []),
+    ...(joins.length || spans.length ? [`Joins: ${[...joins, ...spans].join("; ")}.`] : []),
+    ...rings,
     ...(d.labels.length ? [`Labels: ${d.labels.map((l) => `${labelText(l)} ${where(l)}`.trim()).join("; ")}.`] : []),
   ].join("\n");
 }

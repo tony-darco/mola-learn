@@ -38,6 +38,94 @@ describe("sketch: parts", () => {
     expect(d!.labels.map((l) => [l.place, l.index])).toEqual([["side", 2], ["side", 1], ["side", 0]]);
   });
 
+  it("says which corners are right angles, that the square sits across the triangle's, and that it meets the side square on", () => {
+    const elements = [
+      line("tri", [100, 300], [400, 300], [400, 100], [100, 300]),
+      line("mark", [378, 300], [378, 278], [400, 278]),
+      ...write("b", "b", 250, 325), ...write("a", "a", 425, 200), ...write("c", "c", 230, 185),
+    ];
+    const [d] = drawingsOf(elements);
+    const tri = d!.parts.findIndex((p) => p.kind === "triangle");
+    const mark = d!.parts.findIndex((p) => p.kind === "polyline");
+    expect(d!.parts[tri]!.right).toEqual([1]);
+    expect(d!.parts[mark]!.right).toEqual([1]);
+    expect(d!.cornerMarks.map((c) => [c.mark, c.part, Math.round(c.at.x), Math.round(c.at.y)])).toEqual([[mark, tri, 400, 300]]);
+    expect(d!.joins.map((j) => j.right)).toEqual([true]);
+    const text = readCanvas([...elements, ...aside()]).text;
+    expect(text).toMatch(/triangle, corners \(0, 61\), \(92, 61\) and \(92, 0\); a right angle at \(92, 61\)\./);
+    expect(text).toMatch(/line with 1 corner, through [^;]*; the corner is a right angle\./);
+    expect(text).toMatch(/P\d sits across the corner \(92, 61\) of P\d, an end on each side of it/);
+    expect(text).toMatch(/P\d meets P\d at \(\d+, \d+\), at a right angle/);
+  });
+
+  it("calls no corner of an equilateral triangle, or of a zigzag, a right angle", () => {
+    const [d] = drawingsOf([
+      line("tri", [100, 300], [300, 300], [200, 127], [100, 300]),
+      line("zig", [340, 140], [350, 126], [360, 154], [370, 126], [380, 154], [390, 126], [400, 140]),
+    ]);
+    expect(d!.parts.flatMap((p) => p.right ?? [])).toEqual([]);
+  });
+
+  it("finds lines drawn one by one that close a ring, and lists them round it", () => {
+    // A hexagon of six separate strokes, and a square of four that also meet at right angles.
+    const hex = Array.from({ length: 6 }, (_, i): [number, number] => [200 + 80 * Math.cos((i * Math.PI) / 3), 200 + 80 * Math.sin((i * Math.PI) / 3)]);
+    const square: [number, number][] = [[400, 120], [520, 120], [520, 240], [400, 240]];
+    const elements = [
+      ...hex.map((p, i) => line(`h${i}`, p, hex[(i + 1) % 6]!)),
+      ...square.map((p, i) => line(`q${i}`, p, square[(i + 1) % 4]!)),
+    ];
+    const ds = drawingsOf(elements).sort((a, b) => a.parts.length - b.parts.length);
+    expect(ds.map((d) => d.rings.map((r) => r.parts.length))).toEqual([[4], [6]]);
+    // In order round it: each part meets the next.
+    for (const d of ds) {
+      const [r] = d.rings;
+      r!.parts.forEach((p, k) => {
+        const q = r!.parts[(k + 1) % r!.parts.length]!;
+        expect(d.joins.some((j) => j.how === "meet" && ((j.a === p && j.b === q) || (j.a === q && j.b === p)))).toBe(true);
+      });
+    }
+    expect(ds[0]!.joins.filter((j) => j.right)).toHaveLength(4);
+    expect(ds[1]!.joins.filter((j) => j.right)).toHaveLength(0);
+    const text = readCanvas([...elements, ...aside()]).text;
+    expect(text).toMatch(/^P\d, P\d, P\d, P\d, P\d and P\d join end to end in a closed ring of 6 straight sides, corners \(\d+, \d+\)(, \(\d+, \d+\)){4} and \(\d+, \d+\)\.$/m);
+    expect(text).toMatch(/^P\d, P\d, P\d and P\d join end to end in a closed ring of 4 straight sides/m);
+  });
+
+  it("finds a ring among lines drawn between labels, and lists it round from its label", () => {
+    // Six lines round a hexagon, one corner a written "O" the lines stop short of; a label off two other corners.
+    const c = { x: 250, y: 250 };
+    const v = Array.from({ length: 6 }, (_, i) => ({ x: c.x + 90 * Math.cos((i * Math.PI) / 3 - Math.PI / 2), y: c.y + 90 * Math.sin((i * Math.PI) / 3 - Math.PI / 2) }));
+    const toward = (a: { x: number; y: number }, b: { x: number; y: number }, d: number): [number, number] => {
+      const l = Math.hypot(b.x - a.x, b.y - a.y);
+      return [a.x + ((b.x - a.x) * d) / l, a.y + ((b.y - a.y) * d) / l];
+    };
+    const elements = [
+      ...write("o", "O", v[0]!.x, v[0]!.y),
+      ...v.map((p, i) => {
+        const q = v[(i + 1) % 6]!;
+        return line(`r${i}`, i === 0 ? toward(p, q, 18) : [p.x, p.y], i === 5 ? toward(q, p, 18) : [q.x, q.y]);
+      }),
+      line("s1", [v[2]!.x, v[2]!.y], [v[2]!.x + 40, v[2]!.y]), ...write("h", "H", v[2]!.x + 58, v[2]!.y),
+      line("s2", [v[4]!.x, v[4]!.y], [v[4]!.x - 40, v[4]!.y]), ...write("n", "N", v[4]!.x - 58, v[4]!.y),
+    ];
+    const [d] = drawingsOf(elements);
+    expect(d!.graph).not.toBeNull();
+    expect(d!.rings.map((r) => r.parts.length)).toEqual([6]);
+    expect(readCanvas([...elements, ...aside()]).text).toMatch(/^- Closed ring of 6, in order round it: "O", corner \d, corner \d, corner \d, corner \d and corner \d\.$/m);
+  });
+
+  it("reads an arrow drawn in one stroke, a small head on a long shaft, as an arrow, and says which way it points", () => {
+    const elements = [
+      ...arrowStrokes({ x: 100, y: 400 }, { x: 100, y: 120 }, "joined", undefined, 12).map((s, i) => drawn(`up${i}`, s)),
+      line("base", [100, 400], [400, 400]),
+    ];
+    const [d] = drawingsOf(elements);
+    expect(kinds(d!)).toEqual(["arrow", "segment"]);
+    const text = readCanvas([...elements, ...aside()]).text;
+    expect(text).toMatch(/arrow from \(\d+, 92\) to its head at \(\d+, 0\), pointing up\./);
+    expect(text).toMatch(/at a right angle/);
+  });
+
   it("finds a box with two circles crossing its bottom edge, a wire, a zigzag, and an arrow", () => {
     const [d] = drawingsOf([
       line("box", [100, 100], [300, 100], [300, 180], [100, 180], [100, 100]),
