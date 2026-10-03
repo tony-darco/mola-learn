@@ -11,17 +11,23 @@
  * Stored as an ordinary chat (chats.canvas_id) so it can later be opened as a
  * normal chat. Labels (M1, Q2, …) stay the same across turns: the reader's
  * LabelMap is kept on the chat row (chats.canvas_labels) and handed back in.
+ *
+ * Between the turns sits the edit log (lib/canvas/editLog.ts): every change
+ * to the board as an entry, role "event" (edits/route.ts writes them after
+ * each save). A message first brings the log up to the board as saved, and
+ * the model reads the entries since the student's last message as a section
+ * before the board — they are never turns of their own.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { canvasPayloadSchema } from "@mola/shared";
-import { chats, db, messages, users } from "@mola/db";
-import { AuthzError, authzResponse, requireOwned, requireSession, type Session } from "@/lib/auth/ownership";
+import { artifacts, chats, db, messages, users } from "@mola/db";
+import { authzResponse, requireSession } from "@/lib/auth/ownership";
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL, getChatProvider, type Message } from "@/lib/llm";
 import { readCanvas, type LabelMap } from "@/lib/canvas/textSyntax";
-import {
-  encodeCanvasChatEvent, type CanvasChatEvent, type CanvasChatMessage, type CanvasContext,
-} from "@/lib/canvas/chat";
+import { encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
+import { changesSection, type CanvasEdit } from "@/lib/canvas/editLog";
+import { findCanvasChat, lockChat, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,20 +59,6 @@ const requestSchema = z.object({
   selection: z.object({ rect: rectSchema }).optional(),
 });
 
-/** The canvas, if the caller owns it — the same check the canvas actions make (lib/canvas/actions.ts). */
-async function requireOwnCanvas(canvasId: string, session: Session) {
-  const row = await requireOwned("artifact", canvasId, session);
-  if (row.kind !== "canvas") throw new AuthzError(404, "canvas not found");
-  return row;
-}
-
-async function findCanvasChat(canvasId: string, userId: string) {
-  const [chat] = await db.select().from(chats)
-    .where(and(eq(chats.canvasId, canvasId), eq(chats.userId, userId)))
-    .orderBy(asc(chats.createdAt)).limit(1);
-  return chat ?? null;
-}
-
 /** Created on first use, with the model and thinking setting a new chat would get (app/api/chat/route.ts). */
 async function createCanvasChat(canvasId: string, title: string, userId: string) {
   const [user] = await db.select({ defaultModel: users.defaultModel, defaultThinkingEnabled: users.defaultThinkingEnabled })
@@ -81,16 +73,11 @@ async function createCanvasChat(canvasId: string, title: string, userId: string)
   return chat!;
 }
 
-/** What the model reads for one of the student's messages: the board as text, then what they wrote. */
+/** What the model reads for one of the student's messages: what changed on the board since their last one, the board as text, then what they wrote. */
 function forModel(context: CanvasContext | null, message: string): string {
-  return context ? `${context.text}\n\nTHE STUDENT'S MESSAGE\n${message}` : message;
-}
-
-function toClient(m: typeof messages.$inferSelect): CanvasChatMessage {
-  return {
-    id: m.id, role: m.role === "user" ? "user" : "assistant", content: m.content,
-    status: m.status, errorMessage: m.errorMessage, canvasContext: m.canvasContext as CanvasContext | null,
-  };
+  return context
+    ? [...(context.changes ? [context.changes] : []), context.text, `THE STUDENT'S MESSAGE\n${message}`].join("\n\n")
+    : message;
 }
 
 /** The conversation so far; `chatId` is null until the first message creates it. */
@@ -104,7 +91,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ canvasI
     const rows = chat
       ? await db.select().from(messages).where(eq(messages.chatId, chat.id)).orderBy(asc(messages.createdAt))
       : [];
-    return Response.json({ chatId: chat?.id ?? null, messages: rows.map(toClient) });
+    return Response.json({ chatId: chat?.id ?? null, messages: rows.map(toClientMessage) });
   } catch (err) {
     return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });
   }
@@ -122,17 +109,35 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
     const { message } = parsed.data;
     const region = parsed.data.selection?.rect ?? null;
 
-    const chat = (await findCanvasChat(canvasId, session.userId)) ?? (await createCanvasChat(canvasId, canvas.title, session.userId));
-    const chatId = chat.id;
+    const chatId = ((await findCanvasChat(canvasId, session.userId)) ?? (await createCanvasChat(canvasId, canvas.title, session.userId))).id;
 
-    const { elements } = canvasPayloadSchema.parse(canvas.payload);
-    const read = readCanvas(elements, {
-      labels: (chat.canvasLabels as LabelMap | null) ?? undefined,
-      ...(region ? { region } : {}),
+    // All under the chat's lock, so no entry can land between the ones this message folds in and the message itself.
+    const { chat, context, history, edits, userRow, assistantRow } = await db.transaction(async (tx) => {
+      const chat = await lockChat(tx, chatId);
+      const [current] = await tx.select({ payload: artifacts.payload, version: artifacts.version }).from(artifacts).where(eq(artifacts.id, canvasId));
+      // The log catches up with the board as saved; that read is the one to send, unless only a region is wanted.
+      const synced = await syncEditLog(tx, chat, current!);
+      const read = synced.read && !region ? synced.read : readCanvas(canvasPayloadSchema.parse(current!.payload).elements, {
+        labels: synced.read?.labels ?? (chat.canvasLabels as LabelMap | null) ?? undefined,
+        ...(region ? { region } : {}),
+      });
+
+      const history = await tx.select().from(messages).where(eq(messages.chatId, chatId)).orderBy(asc(messages.createdAt));
+      let since = history.length;
+      while (since > 0 && history[since - 1]!.role !== "user") since--;
+      const entries = history.slice(since).filter((m) => m.role === "event").map((m) => m.event as CanvasEdit);
+      const context: CanvasContext = { text: read.text, region, ...(entries.length > 0 ? { changes: changesSection(entries) } : {}) };
+
+      await tx.update(chats).set({ canvasLabels: read.labels, updatedAt: new Date() }).where(eq(chats.id, chatId));
+      const [userRow] = await tx.insert(messages).values({
+        userId: session.userId, chatId, role: "user", content: message, canvasContext: context, createdAt: sql`clock_timestamp()`,
+      }).returning();
+      const [assistantRow] = await tx.insert(messages).values({
+        userId: session.userId, chatId, role: "assistant", content: "", status: "streaming", createdAt: sql`clock_timestamp()`,
+      }).returning();
+      return { chat, context, history, edits: synced.written, userRow: userRow!, assistantRow: assistantRow! };
     });
-    const context: CanvasContext = { text: read.text, region };
 
-    const history = await db.select().from(messages).where(eq(messages.chatId, chatId)).orderBy(asc(messages.createdAt));
     const modelMessages: Message[] = [
       ...history.flatMap((m): Message[] => {
         if (m.role === "user") return [{ role: "user", content: forModel(m.canvasContext as CanvasContext | null, m.content) }];
@@ -141,15 +146,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
       }),
       { role: "user", content: forModel(context, message) },
     ];
-
-    await db.update(chats).set({ canvasLabels: read.labels, updatedAt: new Date() }).where(eq(chats.id, chatId));
-    const [userRow] = await db.insert(messages).values({
-      userId: session.userId, chatId, role: "user", content: message, canvasContext: context,
-    }).returning();
-    const [assistantRow] = await db.insert(messages).values({
-      userId: session.userId, chatId, role: "assistant", content: "", status: "streaming",
-    }).returning();
-    const messageId = assistantRow!.id;
+    const messageId = assistantRow.id;
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -161,7 +158,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
         let text = "";
         let error: string | null = null;
         try {
-          send({ type: "canvas_context", userMessageId: userRow!.id, messageId, ...context });
+          send({ type: "canvas_context", userMessageId: userRow.id, messageId, edits: edits.map(toClientMessage), ...context });
           let stopReason = "end_turn";
           const provider = getChatProvider(session.userId, { model: chat.model, think: chat.thinkingEnabled === 1 });
           for await (const ev of provider.stream({ system: SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS })) {

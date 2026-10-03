@@ -100,6 +100,8 @@ export const chats = pgTable("chats", {
   canvasId: uuid("canvas_id").references((): AnyPgColumn => artifacts.id, { onDelete: "set null" }),
   /** The canvas reader's LabelMap, kept between turns so M1, Q2, … keep naming the same things. */
   canvasLabels: jsonb("canvas_labels"),
+  /** The board as the edit log last saw it, read with canvas_labels: { version, items } (lib/canvas/editLog.ts). */
+  canvasSnapshot: jsonb("canvas_snapshot"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -108,7 +110,12 @@ export const chats = pgTable("chats", {
   index("chats_canvas_idx").on(t.canvasId),
 ]);
 
-export const roleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool"]);
+/**
+ * "event": something that happened in the conversation that is no one's turn —
+ * so far, an entry in a canvas chat's edit log ("You added M9 (a 3×4 matrix)").
+ * Never sent to a model as a turn of its own.
+ */
+export const roleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool", "event"]);
 
 /**
  * Turn lifecycle, so a reload can distinguish "still generating" / "failed"
@@ -133,6 +140,9 @@ export const messages = pgTable("messages", {
   /** Canvas chats, on the user's message: { text, region } — the canvas as text that was sent
    * with it, and the selected rectangle it was limited to (null: the whole board). */
   canvasContext: jsonb("canvas_context"),
+  /** Role "event": what happened, structured — for a canvas edit, a CanvasEdit (lib/canvas/editLog.ts).
+   * `content` holds the same as one sentence. */
+  event: jsonb("event"),
   createdAt: createdAt(),
 }, (t) => [
   index("messages_chat_idx").on(t.chatId, t.createdAt),

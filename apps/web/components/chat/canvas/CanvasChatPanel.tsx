@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { SquareDashed, X } from "lucide-react";
+import { PencilLine, SquareDashed, X } from "lucide-react";
 import type { CanvasContext } from "@/lib/canvas/chat";
 import type { Rect } from "@/lib/canvas/marquee";
 import { Markdown } from "../Markdown";
@@ -21,7 +21,9 @@ function WhatTheAISaw({ context }: { context: CanvasContext }) {
         <div className="mb-1">
           {region ? `Selection from ${pt(region.minX, region.minY)} to ${pt(region.maxX, region.maxY)}` : "The whole canvas"}
         </div>
-        <pre className="max-h-80 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-snug text-fg">{context.text}</pre>
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-snug text-fg">
+          {context.changes ? `${context.changes}\n\n${context.text}` : context.text}
+        </pre>
       </div>
     </details>
   );
@@ -84,7 +86,13 @@ export function CanvasChatPanel({
             Select part of the board and choose Ask AI, or just ask — without a selection the AI reads the whole canvas.
           </p>
         )}
-        {turns.map((t) => (t.role === "user" ? (
+        {turns.map((t) => (t.role === "event" ? (
+          // An entry in the edit log: a change to the board, told by label — not a message.
+          <div key={t.id} data-testid="canvas-edit-entry" className="mb-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-fg-muted">
+            <PencilLine size={11} className="mt-px shrink-0" aria-hidden />
+            <span>{t.text}</span>
+          </div>
+        ) : t.role === "user" ? (
           <div key={t.id} data-testid="canvas-turn-user" className="mb-4 flex flex-col items-end">
             <div className="max-w-[90%] rounded-2xl border border-border bg-bg px-3 py-2 text-sm">
               <Markdown text={t.text} />

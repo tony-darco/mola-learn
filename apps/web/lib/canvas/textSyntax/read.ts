@@ -23,7 +23,7 @@ import { DEFAULT_BITMAP_ROWS } from "./bitmap";
 import { blockRenderer, BOXES_GUIDE, COORDINATES, describeBoxes, HANDWRITING_GUIDE, plural, scriptedText, topLeft, type SyntaxRender } from "./handwriting";
 import { assignLabels, EMPTY_LABELS, type Labelable, type LabelMap } from "./labels";
 import { detectPenMarks, type PenMark } from "./marks";
-import { DEFAULT_MIN_CONFIDENCE, recognizeDoc } from "./recognize";
+import { DEFAULT_MIN_CONFIDENCE, recognizeDoc, type Recognition } from "./recognize";
 import { blockGlyphs, blockWords, coveredBy, enclosedBy, touching, underlinedBy, type Board, type Target } from "./relations";
 import {
   boxOf, centerX, centerY, height, inkFromElements, inReadingOrder, median, segmentHandwriting, strokeUnit, width,
@@ -59,9 +59,12 @@ export type ReadItem = {
 /**
  * `handwriting` is the whole board's, with blocks carrying their stable
  * labels (less the writing taken as drawings' labels); `items` are the ones
- * printed, in order; `drawings`, every pen drawing on the board, by label.
+ * printed, in order; `drawings`, every pen drawing on the board, by label;
+ * `reads`, the recognizer's reading of every handwritten character.
  */
-export type CanvasDoc = { handwriting: HandwritingDoc; items: ReadItem[]; drawings: { label: string; drawing: Drawing }[] };
+export type CanvasDoc = {
+  handwriting: HandwritingDoc; items: ReadItem[]; drawings: { label: string; drawing: Drawing }[]; reads: Map<Glyph, Recognition>;
+};
 
 const PREFIX: Record<ItemKind, string> = {
   matrix: "M", writing: "T", drawing: "D", text: "X", note: "N", math: "Q", image: "I",
@@ -403,5 +406,5 @@ export function readCanvas(
     };
   });
   const pictures = entries.flatMap((entry) => (entry.drawing ? [{ label: labelOf.get(entry)!, drawing: entry.drawing }] : []));
-  return { text, doc: { handwriting: { blocks }, items, drawings: pictures }, labels: map };
+  return { text, doc: { handwriting: { blocks }, items, drawings: pictures, reads }, labels: map };
 }

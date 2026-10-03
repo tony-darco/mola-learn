@@ -14,13 +14,15 @@
  * see compactionBoundaries), so every summary hit carries `upToMessageId`
  * pointing back into the raw turns it was condensed from.
  */
-import { and, desc, eq, ilike, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, ne, sql } from "drizzle-orm";
 import { chats, compactionBoundaries, db, messages } from "@mola/db";
 
 const DEFAULT_LIMIT = 10;
 
 /** A canvas's own chat lives in that canvas's chat panel, and isn't searched with the other chats. */
 const notCanvasChat = isNull(chats.canvasId);
+/** Nor is its edit log — not even once the chat outlives its canvas (canvas_id is set null then). */
+const notEvent = ne(messages.role, "event");
 
 export type ChatHit = {
   source: "message" | "summary";
@@ -62,7 +64,7 @@ export async function grepChats(pattern: string, scope: ChatSearchScope): Promis
     })
     .from(messages)
     .innerJoin(chats, eq(chats.id, messages.chatId))
-    .where(and(eq(messages.userId, userId), notCanvasChat, ilike(messages.content, `%${pattern}%`)))
+    .where(and(eq(messages.userId, userId), notCanvasChat, notEvent, ilike(messages.content, `%${pattern}%`)))
     .orderBy(desc(sql`similarity(${messages.content}, ${pattern})`))
     .limit(limit);
 
@@ -103,7 +105,7 @@ export async function bm25Chats(query: string, scope: ChatSearchScope): Promise<
     })
     .from(messages)
     .innerJoin(chats, eq(chats.id, messages.chatId))
-    .where(and(eq(messages.userId, userId), notCanvasChat, sql`to_tsvector('english', ${messages.content}) @@ ${tsq}`))
+    .where(and(eq(messages.userId, userId), notCanvasChat, notEvent, sql`to_tsvector('english', ${messages.content}) @@ ${tsq}`))
     .orderBy(desc(messageRank))
     .limit(limit);
 

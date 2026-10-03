@@ -81,6 +81,8 @@ export function CanvasView({
   const [chatOpen, setChatOpen] = useState(false);
   const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
   const chat = useCanvasChat(canvasId);
+  const syncEditsRef = useRef(chat.syncEdits);
+  syncEditsRef.current = chat.syncEdits;
 
   const elementsRef = useRef(elements);
   elementsRef.current = elements;
@@ -114,8 +116,12 @@ export function CanvasView({
           setSaving(true);
           const result = await saveCanvasAction(canvasId, args.elements, args.viewport, args.background, args.expectedVersion);
           setSaving(false);
-          if (result.ok) { versionRef.current = result.version; setConflict(false); }
-          else setConflict(true);
+          if (result.ok) {
+            versionRef.current = result.version;
+            setConflict(false);
+            // The chat's edit log reads the board as saved — but not while more edits wait to be saved: the save after them will.
+            if (!saveTimerRef.current) syncEditsRef.current();
+          } else setConflict(true);
           return result;
         },
       ),

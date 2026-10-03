@@ -6,12 +6,17 @@
  * search box and the /chats landing are checked end to end in
  * e2e/canvas-selection.spec.ts.
  *
+ * Its edit log (messages with role "event") stays out of search and of a
+ * normal chat's history too, even in a chat that has outlived its canvas.
+ *
  * Runs against the seeded local stack, like chat-search.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { artifacts, chats, compactionBoundaries, courses, db, messages, users } from "@mola/db";
 import { bm25Chats, grepChats } from "../lib/agent/chat-search/queries";
+import { buildRegistry } from "../lib/agent/tools";
+import { assembleContext } from "../lib/context/assemble";
 import { listCourseChats } from "../lib/courses/actions";
 
 let aliceId: string;
@@ -48,6 +53,11 @@ beforeAll(async () => {
     if (canvas) canvasChatId = chat!.id;
     else normalChatId = chat!.id;
   }
+  // An edit-log entry left in a chat whose canvas is gone (chats.canvas_id is set null then).
+  await db.insert(messages).values({
+    userId: aliceId, chatId: normalChatId, role: "event", content: "You wrote T1: \"CANVASEVENTMARK\"",
+    event: { actor: "user", action: "added", label: "T1", kind: "writing", pen: true, after: { text: "CANVASEVENTMARK" } },
+  });
 });
 
 afterAll(async () => {
@@ -77,5 +87,18 @@ describe("a canvas's own chat stays out of", () => {
     const ids = (await listCourseChats(aliceId, courseId)).map((c) => c.id);
     expect(ids).toContain(normalChatId);
     expect(ids).not.toContain(canvasChatId);
+  });
+});
+
+describe("a canvas chat's edit log stays out of", () => {
+  it("grep and BM25 chat search", async () => {
+    expect(await grepChats("CANVASEVENTMARK", { userId: aliceId })).toEqual([]);
+    expect(await bm25Chats("CANVASEVENTMARK", { userId: aliceId })).toEqual([]);
+  });
+
+  it("the history a normal chat sends the model", async () => {
+    const ctx = await assembleContext({ userId: aliceId, chatId: normalChatId, courseId, tools: buildRegistry(), hintRung: null });
+    expect(ctx.messages.map((m) => m.role)).toEqual(["system", "user"]); // the compaction summary, then the turn
+    expect(ctx.messages.some((m) => m.content.includes("CANVASEVENTMARK"))).toBe(false);
   });
 });

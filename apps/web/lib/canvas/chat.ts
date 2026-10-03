@@ -6,34 +6,45 @@
  * tools, artifacts or hints here, and the first event has to carry what the
  * model was shown. Same SSE framing — one JSON object per `data:` line.
  */
+import type { CanvasEdit } from "./editLog";
 import type { Rect } from "./marquee";
 
 /** POST body. Without a selection the server reads the whole board. */
 export type CanvasChatRequest = { message: string; selection?: { rect: Rect } };
 
 /**
- * What the model was shown with one message: the canvas as text, and the
- * selected rectangle it was limited to (null: the whole board). Stored on
- * the user's message (messages.canvas_context).
+ * What the model was shown with one message: the canvas as text, the
+ * selected rectangle it was limited to (null: the whole board), and what
+ * changed on the board since the student's last message — the edit log's
+ * entries, as the section before the board (absent when nothing did).
+ * Stored on the user's message (messages.canvas_context).
  */
-export type CanvasContext = { text: string; region: Rect | null };
+export type CanvasContext = { text: string; region: Rect | null; changes?: string };
 
 export type CanvasChatEvent =
-  /** Always first: the stored user message, the assistant message being generated, and exactly what the model was given. */
-  | ({ type: "canvas_context"; userMessageId: string; messageId: string } & CanvasContext)
+  /**
+   * Always first: the stored user message, the assistant message being generated, and exactly what
+   * the model was given — and the edit-log entries the message caught up on, which come before it.
+   */
+  | ({ type: "canvas_context"; userMessageId: string; messageId: string; edits: CanvasChatMessage[] } & CanvasContext)
   | { type: "text_delta"; text: string }
   | { type: "message_end"; messageId: string }
   | { type: "error"; message: string };
 
-/** A stored message, as GET returns it. */
-export type CanvasChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  status: "streaming" | "done" | "error";
-  errorMessage: string | null;
-  canvasContext: CanvasContext | null;
-};
+/** A stored message, as GET returns it: a turn, or an entry in the edit log (`content` is its sentence). */
+export type CanvasChatMessage =
+  | {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    status: "streaming" | "done" | "error";
+    errorMessage: string | null;
+    canvasContext: CanvasContext | null;
+  }
+  | { id: string; role: "event"; content: string; event: CanvasEdit };
+
+/** POST …/chat/edits: the edit log brought up to the canvas as saved — the entries written or rewritten. `chatId` is null when there's no chat to log into. */
+export type CanvasEditsResponse = { chatId: string | null; entries: CanvasChatMessage[] };
 
 export function encodeCanvasChatEvent(event: CanvasChatEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
