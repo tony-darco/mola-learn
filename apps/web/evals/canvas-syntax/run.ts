@@ -138,7 +138,7 @@ const alphabet = {
 write("recognition-alphabet.json", alphabet);
 for (const [name, m] of [["clean", alphabet.clean], ["seeds 1–20", alphabet.tuning], ["held out, seeds 300–349", alphabet.heldOut]] as const) {
   const g = m.glyphs;
-  console.log(`alphabet ${name}: read ${g.correct}/${g.expected} (segmented ${g.segmented}), flagged ${g.flagged}, misread unflagged ${g.confidentWrong}, `
+  console.log(`alphabet ${name}: read ${g.correct}/${g.expected} (segmented ${g.segmented}), flagged ${g.flagged} (written offered for ${g.offered}), misread unflagged ${g.confidentWrong}, `
     + `scripts ${m.scripts.correct}/${m.scripts.expected} (+${m.scripts.falsePositives} false), lines ${m.lines.correct}/${m.lines.expected}`);
 }
 const mh = alphabet.matrixHeldOut.reduce((t, m) => ({ n: t.n + m.glyphs.expected, ok: t.ok + m.glyphs.correct, flagged: t.flagged + m.glyphs.fallback, wrong: t.wrong + m.glyphs.confidentWrong }), { n: 0, ok: 0, flagged: 0, wrong: 0 });

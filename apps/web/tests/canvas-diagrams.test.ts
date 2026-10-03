@@ -31,6 +31,16 @@ function expectFloors(sum: ReturnType<typeof sumChecks>) {
   expect(share(sum.bonds)).toBeGreaterThanOrEqual(0.975);
   expect(sum.oneDrawing / sum.sections).toBeGreaterThanOrEqual(0.995);
   expect(sum.perfect / sum.sections).toBeGreaterThanOrEqual(0.65);
+  // The facts the read states about the drawings: which way arrows point (drawn in one stroke too), right angles — and few
+  // called so that were drawn clearly otherwise — closed rings, and what sits across a corner.
+  expect(share(sum.arrows)).toBeGreaterThanOrEqual(0.99);
+  expect(share(sum.arrows.oneStroke)).toBeGreaterThanOrEqual(0.99);
+  expect(share(sum.rightCorners)).toBeGreaterThanOrEqual(0.97);
+  expect(sum.rightCorners.falselyRight / sum.rightCorners.notRight).toBeLessThanOrEqual(0.01);
+  expect(share(sum.rightJoins)).toBeGreaterThanOrEqual(0.985);
+  expect(sum.rightJoins.falselyRight / sum.rightJoins.notRight).toBeLessThanOrEqual(0.002);
+  expect(share(sum.rings)).toBeGreaterThanOrEqual(0.99);
+  expect(share(sum.cornerMarks)).toBeGreaterThanOrEqual(0.985);
 }
 
 describe("sketch layer on the diagram board", () => {
@@ -58,6 +68,14 @@ describe("sketch layer on the diagram board", () => {
     // found, 1741 of the right kind, 1 extra; labels 1271/1280 found, 1086
     // read right, 549/560 attached right; joins 1475/1480; bonds 828/840; one
     // drawing per section in 319; 213 sections perfect.
+    //
+    // Once the read stated rings, right angles and one-stroke arrows (tuned
+    // on these seeds only), measured again: 1743 parts of the right kind,
+    // 551 labels attached right, 215 sections perfect, the rest as above;
+    // arrows 200/200 pointing the way drawn (100/100 drawn in one stroke);
+    // right-angle corners 390/400, and 2 of 320 corners drawn clearly
+    // otherwise called right; lines meeting at a right angle 438/440, none of
+    // 800 falsely; rings 40/40; corner marks 80/80.
     expectFloors(overSeeds(Array.from({ length: 20 }, (_, i) => i + 1)));
   }, 180_000);
 
@@ -71,6 +89,15 @@ describe("sketch layer on the diagram board", () => {
     // "5", "v" as "u"); of the drawing itself, a small angle's arc as shaky as
     // a straight line, a car body's eight corners miscounted, and a hashed
     // bond's short strokes taken for writing beside its label.
+    //
+    // With rings, right angles and one-stroke arrows stated, these seeds were
+    // run once more, after tuning on seeds 1–20 was frozen: parts 4350 of the
+    // right kind, labels 2733 read right and 1373 attached right, 564
+    // sections perfect, the rest as above; arrows 500/500 (250/250 in one
+    // stroke); right-angle corners 974/1000 (most misses the shaky car body's
+    // again), 1 of 800 falsely; lines meeting at a right angle 1090/1100, 2
+    // of 2000 falsely; rings 100/100; corner marks 198/200. The new floors
+    // sit just under (or over) the worse of the two measurements.
     expectFloors(overSeeds(Array.from({ length: 50 }, (_, i) => i + 300)));
   }, 300_000);
 });

@@ -112,6 +112,7 @@ export function alphabetSection(a: AlphabetFile): string {
     ${row("Segmented as written", (m) => share(m.glyphs.segmented, m.glyphs.expected))}
     ${row("Read correctly", (m) => share(m.glyphs.correct, m.glyphs.expected))}
     ${row("Flagged as unsure", (m) => share(m.glyphs.flagged, m.glyphs.segmented))}
+    ${row("Flagged, and what was written offered in place", (m) => share(m.glyphs.offered ?? 0, m.glyphs.flagged))}
     ${row("Misread and not flagged", (m) => `<span class="${m.glyphs.confidentWrong ? "bad" : "ok"}">${share(m.glyphs.confidentWrong, m.glyphs.segmented)}</span>`)}
     ${row("Sub/superscripts read as such", (m) => `${share(m.scripts.correct, m.scripts.expected)}${m.scripts.falsePositives ? ` <small>+${m.scripts.falsePositives} taken for scripts</small>` : ""}`)}
     ${row("Lines exact", (m) => share(m.lines.correct, m.lines.expected))}
