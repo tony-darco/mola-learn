@@ -2,12 +2,13 @@
  * The AI's changes as the canvas page applies them (lib/canvas/aiEdits.ts):
  * each streamed element goes on top of the board, and a reply's changes are
  * one undo step — undone together with the canvas's own undo
- * (lib/canvas/history.ts).
+ * (lib/canvas/history.ts). And the ink they are drawn in.
  */
 import { describe, expect, it } from "vitest";
 import type { CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import { applyAIElement, type AIStep } from "../lib/canvas/aiEdits";
 import { emptyHistory, pushHistory, undo, type History } from "../lib/canvas/history";
+import { aiInk, BACKGROUND_COLORS } from "../lib/canvas/styleConstants";
 import { frame, textBox } from "../evals/canvas-reader/fixtures";
 
 const annotation = (id: string, x: number, y: number): CanvasAnnotationElement => ({
@@ -54,5 +55,13 @@ describe("the AI's changes on the canvas page (applyAIElement)", () => {
   it("doesn't add an element that is already on the board", () => {
     const s = applyAIElement(start(work), "reply-1", annotation("k1", 150, 100));
     expect(applyAIElement(s, "reply-1", annotation("k1", 150, 100))).toBe(s);
+  });
+});
+
+describe("the AI's ink (aiInk)", () => {
+  it("is Mola's accent on every light background, and its light tint on the dark one", () => {
+    for (const bg of BACKGROUND_COLORS.slice(0, 3)) expect(aiInk(bg)).toEqual({ ink: "#481715", fg: "#f7f5ee" });
+    expect(aiInk("#1c1b18")).toEqual({ ink: "#e3958b", fg: "#1c1b18" });
+    expect(aiInk("not a color")).toEqual(aiInk("#ffffff"));
   });
 });
