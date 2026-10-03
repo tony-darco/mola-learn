@@ -196,7 +196,8 @@ export function annotate(
   const already: string[] = [];
   const problems: string[] = [];
   checked.forEach((c, i) => {
-    const which = `annotation ${i + 1}${typeof (given[i] as { target?: unknown })?.target === "string" ? ` ("${(given[i] as { target: string }).target}")` : ""}`;
+    const asked = (given[i] as { target?: unknown } | null)?.target;
+    const which = `annotation ${i + 1}${typeof asked === "string" ? ` ("${asked}")` : ""}`;
     if ("problem" in c) return void problems.push(`${which}: ${c.problem}`);
     const p = c.place;
     if ([...turn.placed, ...placed].some(sameAs(p))) return void already.push(told(p));
