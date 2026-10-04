@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Deterministic entrypoint for all Docker operations against the remote
-# Docker host at 192.168.1.17 (SSH alias: mola-docker, a restricted `claude`
-# account whose key can only run /home/claude/docker-gate.sh). This is the
-# ONLY sanctioned way for agents/scripts to talk to that host's Docker
-# daemon — no raw `ssh ... docker ...`, no local `docker` calls.
+# Docker host molaserver at 192.168.1.58 (SSH alias: mola-docker, a
+# restricted `claude` account whose key can only run
+# /usr/local/bin/mola-docker-gate). This is the ONLY sanctioned way for
+# agents/scripts to talk to that host's Docker daemon — no raw
+# `ssh ... docker ...`, no local `docker` calls. Ollama is not part of this
+# stack; it stays on the GPU box at 192.168.1.17.
 set -euo pipefail
 
 HOST="mola-docker"
@@ -23,7 +25,7 @@ Actions:
   logs [service...] [-f] [--tail N] Show service logs
   exec <service> <cmd...>          Run a command inside a running container
 
-Runs against the Docker daemon on 192.168.1.17 (SSH host: $HOST). Syncs
+Runs against the Docker daemon on molaserver, 192.168.1.58 (SSH host: $HOST). Syncs
 infra/ to the remote host before every command, so the compose file and
 init scripts are always current.
 EOF
