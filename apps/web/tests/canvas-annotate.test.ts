@@ -155,36 +155,53 @@ async function reply(steps: ScriptStep[]) {
 }
 
 describe("a reply with the tool (runCanvasTurn)", () => {
-  it("sends each annotation out as it is placed, gives the model the result, and lets it fix what wasn't placed", async () => {
+  it("sends each annotation out as it is placed, and gives the model back what it has to fix", async () => {
     const r = await reply([
-      [say("Let me look."), toolCall([error("M8 row 1 col 4", "3 − 2 = 1."), { ...error("T9 word 5"), mark: "check" }]), end],
-      [toolCall([error("T8 word 5", "4, not 5.")]), end],
-      [say("Two slips: M8 row 1 col 4 should be 1, and 2 + 2 is 4."), end],
+      [say("Two slips."), toolCall([error("M8 row 1 col 4", "3 − 2 = 1."), { ...error("T9 word 5"), mark: "check" }]), end],
+      [say("And 2 + 2 is 4."), toolCall([error("T8 word 5", "4, not 5.")]), end],
+      [say("Never asked for."), end],
     ]);
     expect(r.error).toBeNull();
-    expect(r.events.map((e) => e.type)).toEqual(["text_delta", "annotation", "annotation", "text_delta", "text_delta"]);
+    expect(r.events.map((e) => e.type)).toEqual(["text_delta", "annotation", "text_delta", "text_delta", "annotation"]);
     expect(r.annotations.map((e) => [e.props.target, e.props.note])).toEqual([["M8 row 1 col 4", "3 − 2 = 1."], ["T8 word 5", "4, not 5."]]);
-    expect(r.text).toBe("Let me look.\n\nTwo slips: M8 row 1 col 4 should be 1, and 2 + 2 is 4.");
+    expect(r.text).toBe("Two slips.\n\nAnd 2 + 2 is 4.");
     expect(r.reads).toBe(1);
 
-    // The second call saw its first call, and what came of it.
+    // The second call saw its first call and what came of it — and that its words are on screen already.
+    expect(r.requests).toHaveLength(2);
     const [, second] = r.requests;
     expect(second!.messages.slice(1, 3)).toEqual([
-      { role: "assistant", content: "Let me look.", toolCalls: [expect.objectContaining({ name: "annotate_canvas" })] },
+      { role: "assistant", content: "Two slips.", toolCalls: [expect.objectContaining({ name: "annotate_canvas" })] },
       { role: "tool", toolCallId: "call-2-annotate_canvas", content: expect.stringContaining(`- annotation 2 ("T9 word 5"): mark "check" is a kind, not a mark`) },
     ]);
     expect(second!.messages[2]!.content).toContain("; no T9 on this canvas (its T labels are T1,");
+    expect(second!.messages[2]!.content).toMatch(/\nWhat you wrote before is already shown to the student: send only the annotations to fix/);
     expect(r.requests.every((q) => q.tools?.[0]?.name === "annotate_canvas")).toBe(true);
   });
 
+  it("ends once all it asked for is on the board and it has said something — if it hasn't, it gets one call to, without the tool", async () => {
+    const spoke = await reply([[say("The 5 is wrong."), toolCall([error("T8 word 5")]), end], [say("Never asked for."), end]]);
+    expect(spoke.requests).toHaveLength(1);
+    expect(spoke.text).toBe("The 5 is wrong.");
+
+    // The call to answer in offers no tool, and a call written anyway is ignored.
+    const silent = await reply([[toolCall([error("T8 word 5")]), end], [toolCall([error("T8 word 4")]), say("2 + 2 is 4."), end]]);
+    expect(silent.requests.map((q) => q.tools?.length ?? 0)).toEqual([1, 0]);
+    expect(silent.annotations.map((e) => e.props.target)).toEqual(["T8 word 5"]);
+    expect(silent.text).toBe("2 + 2 is 4.");
+  });
+
   it(`stops at ${MAX_MODEL_CALLS} calls, the last without the tool, so the reply ends in words`, async () => {
-    const again = [toolCall([error("M8")]), end];
-    const r = await reply([again, again, again, [say("M8 is wrong throughout."), end]]);
-    expect(r.requests).toHaveLength(MAX_MODEL_CALLS);
+    const wrong = [toolCall([error("T9 word 5")]), end];
+    const r = await reply([wrong, wrong, wrong, [say("T8 word 5 should be 4."), end]]);
     expect(r.requests.map((q) => q.tools?.length ?? 0)).toEqual([1, 1, 1, 0]);
-    // Asked once to narrow it down, then placed; the third time it is already there.
-    expect(r.annotations.map((e) => e.props.target)).toEqual(["M8"]);
-    expect(r.text).toBe("M8 is wrong throughout.");
+    expect(r.annotations).toEqual([]);
+    expect(r.text).toBe("T8 word 5 should be 4.");
+
+    // An error on a whole matrix: asked once to narrow it down, then placed as sent.
+    const whole = await reply([[toolCall([error("M8")]), end], [toolCall([error("M8")]), end], [say("All of M8 is off."), end]]);
+    expect(whole.annotations.map((e) => e.props.target)).toEqual(["M8"]);
+    expect(whole.text).toBe("All of M8 is off.");
   });
 
   it("answers a made-up tool with an error, and doesn't read the board for a reply that doesn't annotate", async () => {

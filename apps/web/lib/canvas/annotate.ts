@@ -171,14 +171,19 @@ const told = (p: Place) => `${p.kind} on ${p.target.address}, ${MARKED[p.mark]}`
  * One annotate_canvas call: the annotations placed — each a new element, on
  * top of the board as the model saw it — and the tool's result for the
  * model, saying what was placed, what wasn't and why, and how many more
- * this reply can place. Records what it placed in `turn`.
+ * this reply can place. `settled`: nothing is left for the model to fix —
+ * all it asked for is on the board, or was already. Records what it placed
+ * in `turn`.
  */
 export function annotate(
   input: unknown, board: AnnotateBoard, turn: AnnotateTurn, makeId: () => string = () => crypto.randomUUID(),
-): { placed: CanvasAnnotationElement[]; result: string } {
+): { placed: CanvasAnnotationElement[]; result: string; settled: boolean } {
   const given = annotationsOf(input);
   if (!given) {
-    return { placed: [], result: `error: send the annotations as {"annotations": [{"target": "…", "kind": "…", "mark": "…", "note": "…"}]}, one or more of them` };
+    return {
+      placed: [], settled: false,
+      result: `error: send the annotations as {"annotations": [{"target": "…", "kind": "…", "mark": "…", "note": "…"}]}, one or more of them`,
+    };
   }
 
   const checked = given.map((a) => check(a, board.doc));
@@ -186,7 +191,7 @@ export function annotate(
   const fresh = checked.filter((c) => !("place" in c && turn.placed.some(sameAs(c.place)))).length;
   if (fresh > left) {
     return {
-      placed: [],
+      placed: [], settled: false,
       result: `error: nothing was placed. A reply can place at most ${MAX_ANNOTATIONS_PER_TURN} annotations, and ${left === 0 ? "this one has placed them all" : `${plural(left, "is", "are")} left`}, `
         + `but this call asked for ${fresh}. ${left === 0 ? "Say anything else in your reply." : "Choose the ones that matter most — in worked steps, the first mistake — and send only those."}`,
     };
@@ -228,5 +233,5 @@ export function annotate(
       ? `${plural(remaining, "more annotation", "more annotations")} can be placed in this reply.`
       : "That is all the annotations this reply can place; say anything else in your reply.",
   ];
-  return { placed, result: lines.join("\n") };
+  return { placed, result: lines.join("\n"), settled: problems.length === 0 };
 }
