@@ -136,6 +136,7 @@ export class OllamaProvider implements LLMProvider {
     // done_reason "length" with this still false (below) is known to be
     // fully silent, safe to retry rather than surface as a failed turn.
     let sawOutput = false;
+    const leak = new ChannelLeakFilter();
 
     try {
     while (true) {
@@ -176,13 +177,18 @@ export class OllamaProvider implements LLMProvider {
           };
         }
 
-        const text = chunk.message?.content;
+        const text = chunk.message?.content && leak.push(chunk.message.content);
         if (text) {
           sawOutput = true;
           yield { type: "text_delta", text };
         }
 
         if (chunk.done) {
+          const rest = leak.end();
+          if (rest) {
+            sawOutput = true;
+            yield { type: "text_delta", text: rest };
+          }
           // A thinking-capable model can spend its entire output budget on
           // hidden reasoning and stop with done_reason "length" having
           // never emitted a single visible token or tool call — confirmed
@@ -220,6 +226,52 @@ export class OllamaProvider implements LLMProvider {
     } finally {
       stall.clear();
     }
+  }
+}
+
+/**
+ * gemma4:26b now and then opens a call's visible text with its thinking
+ * channel's header: "thought\n<channel|>" (an empty thought), or "thought\n"
+ * in front of what is plainly the answer — 3 of the canvas annotate eval's
+ * later calls, 2026-10-04. The start of each attempt is held until it shows
+ * whether it opens that way; if it does, the rest is held until the
+ * channel's close marker (what came before it was thinking) or the end of
+ * the call (all of it was the answer), and the header never shows.
+ */
+export class ChannelLeakFilter {
+  private static readonly HEADERS = ["thought\n", "<|channel>thought\n"];
+  private static readonly CLOSE = "<channel|>";
+  /** null once the text is passing straight through. */
+  private held: string | null = "";
+  private inThought = false;
+
+  push(text: string): string {
+    if (this.held === null) return text;
+    this.held += text;
+    if (!this.inThought) {
+      const start = this.held.trimStart();
+      const header = ChannelLeakFilter.HEADERS.find((h) => start.startsWith(h));
+      if (!header) {
+        // Could it still become one? Then keep holding.
+        if (ChannelLeakFilter.HEADERS.some((h) => h.startsWith(start))) return "";
+        return this.release(this.held);
+      }
+      this.inThought = true;
+      this.held = start.slice(header.length);
+    }
+    const close = this.held.indexOf(ChannelLeakFilter.CLOSE);
+    return close < 0 ? "" : this.release(this.held.slice(close + ChannelLeakFilter.CLOSE.length).trimStart());
+  }
+
+  /** What is still held when the call ends. */
+  end(): string {
+    if (this.held === null) return "";
+    return this.release(this.inThought ? this.held.trimStart() : this.held);
+  }
+
+  private release(text: string): string {
+    this.held = null;
+    return text;
   }
 }
 

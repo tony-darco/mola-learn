@@ -159,10 +159,7 @@ const HOLD = 40;
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
 /**
  * A later call's first words, held: the start of what was already shown,
- * over again — or its thinking, leaked into the reply under its channel's
- * name, which gemma4:26b's last call gave instead of words now and then
- * ("thought\n<channel|>", "thought\n探"). The provider's to filter, really
- * (lib/llm/ollama.ts); here only once the reply has said something.
+ * over again. (A leaked thinking-channel header is the provider's to drop:
+ * lib/llm/ollama.ts, ChannelLeakFilter.)
  */
-const notForTheStudent = (held: string, shown: string) =>
-  squash(shown).startsWith(squash(held).slice(0, HOLD)) || /^\s*thought\s*(?:\n|<)/.test(held);
+const notForTheStudent = (held: string, shown: string) => squash(shown).startsWith(squash(held).slice(0, HOLD));
