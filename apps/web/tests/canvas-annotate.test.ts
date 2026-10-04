@@ -110,7 +110,7 @@ describe("annotate_canvas: what it places", () => {
     expect(shotgun.placed).toEqual([]);
     expect(shotgun.refused).toBe("cap");
     expect(shotgun.result).toBe("error: nothing was placed. A reply can place at most 3 annotations, and 3 are left, but this call asked for 8. "
-      + "Choose the ones that matter most — in worked steps, the first mistake — and send only those.");
+      + "Keep one per separate mistake — in worked steps, only where it first goes wrong — and send only those.");
 
     expect(call([error("M8 row 1 col 4"), error("T8 word 5")], turn).placed).toHaveLength(2);
     expect(call([error("M8 row 2 col 4"), error("M8 row 3 col 4")], turn).result).toMatch(/and 1 is left, but this call asked for 2/);

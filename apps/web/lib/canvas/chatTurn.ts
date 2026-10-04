@@ -32,8 +32,8 @@ export const CANVAS_CHAT_SYSTEM = [
     + "When the student asks you to check their work, mark the mistakes you find with it, beside telling them; use it too when pointing at a spot makes "
     + "your answer clearer — but not for every reply.",
   "Point each annotation at the smallest place that holds what you mean: the one matrix entry (\"M2 row 1 col 3\") or word (\"T3 word 5\") that is wrong, "
-    + `not the whole matrix or line. At most ${MAX_ANNOTATIONS_PER_TURN} annotations per reply, so mark what matters most — in worked steps, the first mistake, `
-    + "since every step after it carries it — and say the rest in your reply.",
+    + "not the whole matrix or line. Mark every separate mistake — unrelated work each gets its own mark — but in worked steps mark only where it first "
+    + `goes wrong, since every step after it carries the mistake. At most ${MAX_ANNOTATIONS_PER_TURN} annotations per reply; say anything beyond that in your reply.`,
   "You can't change or erase anything on the board, your own annotations included. Your earlier annotations are in the board text, labelled K: "
     + "don't mark the same thing again.",
 ].join("\n\n");

@@ -36,8 +36,8 @@ import { blockWords } from "./textSyntax/relations";
 /**
  * Three: what a reply marks is what the student looks at first, and a few
  * marks say more than many. The eval boards hold one or two mistakes; in
- * worked steps the first mistake carries into every step after it, so it
- * is the one worth marking; and three leaves room for a mistake, a hint
+ * worked steps the first mistake carries into every step after it, so only
+ * it is marked; and three leaves room for a mistake, a hint
  * and a check without covering the board.
  */
 export const MAX_ANNOTATIONS_PER_TURN = 3;
@@ -194,7 +194,7 @@ export function annotate(
     return {
       placed: [], settled: false, refused: "cap",
       result: `error: nothing was placed. A reply can place at most ${MAX_ANNOTATIONS_PER_TURN} annotations, and ${left === 0 ? "this one has placed them all" : `${plural(left, "is", "are")} left`}, `
-        + `but this call asked for ${fresh}. ${left === 0 ? "Say anything else in your reply." : "Choose the ones that matter most — in worked steps, the first mistake — and send only those."}`,
+        + `but this call asked for ${fresh}. ${left === 0 ? "Say anything else in your reply." : "Keep one per separate mistake — in worked steps, only where it first goes wrong — and send only those."}`,
     };
   }
 
