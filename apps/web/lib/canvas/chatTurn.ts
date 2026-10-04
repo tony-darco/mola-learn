@@ -17,10 +17,11 @@
  * annotation over and over. At most MAX_MODEL_CALLS calls; the last offers
  * no tool, so a reply ends in words.
  */
-import type { CanvasAnnotationElement } from "@mola/shared";
+import type { CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import type { LLMProvider, Message } from "@/lib/llm/types";
 import { annotate, ANNOTATE_TOOL, MAX_ANNOTATIONS_PER_TURN, newAnnotateTurn, type AnnotateBoard } from "./annotate";
-import type { CanvasChatEvent, CanvasContext } from "./chat";
+import { replySection, type CanvasChatEvent, type CanvasContext, type RepliedAnnotation } from "./chat";
+import type { LabelMap } from "./textSyntax";
 
 /** The canvas chat's system prompt — here rather than in the route, so the annotate eval sends exactly what ships. */
 export const CANVAS_CHAT_SYSTEM = [
@@ -49,11 +50,28 @@ export const CANVAS_CHAT_SYSTEM = [
  */
 export const MAX_OUTPUT_TOKENS = 3072;
 
-/** What the model reads for one of the student's messages: what changed on the board since their last one, the board as text, then what they wrote. */
+/**
+ * What the model reads for one of the student's messages: what changed on the board since their last one, the board as text,
+ * the annotation of its own it replies to when it is a reply, then what they wrote.
+ */
 export function forModel(context: CanvasContext | null, message: string): string {
   return context
-    ? [...(context.changes ? [context.changes] : []), context.text, `THE STUDENT'S MESSAGE\n${message}`].join("\n\n")
+    ? [
+      ...(context.changes ? [context.changes] : []), context.text, ...(context.replyTo ? [replySection(context.replyTo)] : []),
+      `THE STUDENT'S MESSAGE\n${message}`,
+    ].join("\n\n")
     : message;
+}
+
+/**
+ * The AI annotation `annotationId` as a reply to it is told to the model: its label in `labels` (from a read of the board),
+ * its kind, place and note. Null when it isn't an AI annotation on the board — erased since, or one of the student's own elements.
+ */
+export function repliedAnnotation(elements: CanvasElement[], labels: LabelMap, annotationId: string): RepliedAnnotation | null {
+  const annotation = elements.find((e) => e.id === annotationId);
+  const label = labels.elements[annotationId];
+  if (annotation?.type !== "annotation" || !label) return null;
+  return { label, kind: annotation.props.kind, target: annotation.props.target, note: annotation.props.note };
 }
 
 /**

@@ -11,17 +11,34 @@ import type { CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import type { CanvasEdit } from "./editLog";
 import type { Rect } from "./marquee";
 
-/** POST body. Without a selection the server reads the whole board. */
-export type CanvasChatRequest = { message: string; selection?: { rect: Rect } };
+/**
+ * POST body. Without a selection the server reads the whole board. `annotationId`: the message is a reply
+ * to that AI annotation, sent from its note on the board (stored as messages.annotation_id).
+ */
+export type CanvasChatRequest = { message: string; selection?: { rect: Rect }; annotationId?: string };
+
+/** The AI annotation a message replies to, as the model was told it: its K label, and what it said where. */
+export type RepliedAnnotation = { label: string; kind: CanvasAnnotationElement["props"]["kind"]; target: string; note: string };
 
 /**
  * What the model was shown with one message: the canvas as text, the
- * selected rectangle it was limited to (null: the whole board), and what
+ * selected rectangle it was limited to (null: the whole board), what
  * changed on the board since the student's last message — the edit log's
- * entries, as the section before the board (absent when nothing did).
+ * entries, as the section before the board (absent when nothing did) — and,
+ * for a reply to one of the AI's annotations, that annotation (replySection).
  * Stored on the user's message (messages.canvas_context).
  */
-export type CanvasContext = { text: string; region: Rect | null; changes?: string };
+export type CanvasContext = { text: string; region: Rect | null; changes?: string; replyTo?: RepliedAnnotation };
+
+/** What an annotation of each kind did to its place, as the edit log tells it (lib/canvas/editLog.ts). */
+const ANNOTATED: Record<RepliedAnnotation["kind"], (on: string) => string> = {
+  error: (on) => `marked ${on} as an error`, check: (on) => `marked ${on} as right`, hint: (on) => `left a hint on ${on}`, note: (on) => `left a note on ${on}`,
+};
+
+/** What the model reads, after the board, when the student's message is a reply to one of its annotations. */
+export function replySection({ label, kind, target, note }: RepliedAnnotation): string {
+  return `WHAT THE STUDENT IS REPLYING TO\nTheir message is a reply to your annotation ${label}, where you ${ANNOTATED[kind](target)}: "${note}"`;
+}
 
 export type CanvasChatEvent =
   /**
@@ -35,7 +52,10 @@ export type CanvasChatEvent =
   | { type: "message_end"; messageId: string }
   | { type: "error"; message: string };
 
-/** A stored message, as GET returns it: a turn, or an entry in the edit log (`content` is its sentence). */
+/**
+ * A stored message, as GET returns it: a turn, or an entry in the edit log (`content` is its sentence).
+ * `annotationId`: the AI annotation a user's message replies to, kept after the annotation is gone; null otherwise.
+ */
 export type CanvasChatMessage =
   | {
     id: string;
@@ -44,6 +64,7 @@ export type CanvasChatMessage =
     status: "streaming" | "done" | "error";
     errorMessage: string | null;
     canvasContext: CanvasContext | null;
+    annotationId: string | null;
   }
   | { id: string; role: "event"; content: string; event: CanvasEdit };
 

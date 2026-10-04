@@ -113,6 +113,13 @@
       "when": 1791082791404,
       "tag": "0015_canvas_ai_edits",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791134447180,
+      "tag": "0016_canvas_annotation_replies",
+      "breakpoints": true
     }
   ]
 }

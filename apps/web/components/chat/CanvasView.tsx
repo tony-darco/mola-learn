@@ -26,7 +26,7 @@ import { StylePanel, type StyleContext } from "./canvas/StylePanel";
 import { ElementShape, SelectionOutline, ShapeOutline } from "./canvas/ElementRenderer";
 import { SelectionMenu } from "./canvas/SelectionMenu";
 import { CanvasChatPanel, type ChatAttachment } from "./canvas/CanvasChatPanel";
-import { useCanvasChat } from "./canvas/useCanvasChat";
+import { annotationThreads, useCanvasChat } from "./canvas/useCanvasChat";
 import { useConfirm } from "./shell-context";
 
 type Payload = z.infer<typeof canvasPayloadSchema>;
@@ -245,6 +245,8 @@ export function CanvasView({
   // What the AI placed while no page could add it — the tab closed mid-reply, the stream dropped, the save failed.
   useEffect(() => {
     if (pendingAIEdits.length > 0) applyFromAI("pending", pendingAIEdits);
+    // An annotation's thread is in the chat: a board with annotations loads it with the page.
+    if (elementsRef.current.some((e) => e.type === "annotation")) void chat.ensureLoaded();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the page opens.
   }, []);
 
@@ -292,6 +294,8 @@ export function CanvasView({
   }, [laserPoints.length > 0]);
 
   function panFilter(event: Event): boolean {
+    // An annotation's open note is its own: scrolling its thread, selecting or typing in it never pans or zooms the board.
+    if ((event.target as Element | null)?.closest?.("[data-annotation-card]")) return false;
     if (event.type === "wheel") return true;
     const me = event as MouseEvent;
     if (me.button === 1) return true;
@@ -616,9 +620,10 @@ export function CanvasView({
     void chat.ensureLoaded();
   }
 
-  async function sendToChat(message: string, rect: Rect | null) {
+  /** `annotationId`: the message is a reply to that AI annotation, sent from its note on the board. */
+  async function sendToChat(message: string, rect: Rect | null, annotationId: string | null = null) {
     await flushSave();
-    await chat.send(message, rect);
+    await chat.send(message, rect, annotationId);
   }
 
   /** Ask AI / Check my work: attach the selection to the chat, and for a check, ask straight away. */
@@ -843,6 +848,8 @@ export function CanvasView({
   const canUndo = useMemo(() => historyRef.current.past.length > 0, [historyVersion]);
   const canRedo = useMemo(() => historyRef.current.future.length > 0, [historyVersion]);
   const sorted = useMemo(() => [...elements].sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : 0)), [elements]);
+  const threads = useMemo(() => annotationThreads(chat.turns), [chat.turns]);
+  const annotationsOnBoard = useMemo(() => new Set(elements.flatMap((e) => (e.type === "annotation" ? [e.id] : []))), [elements]);
 
   const selectedElement = selectedId ? elements.find((e) => e.id === selectedId) ?? null : null;
   const isTextLikeSelected = selectedElement?.type === "text" || selectedElement?.type === "note";
@@ -974,6 +981,9 @@ export function CanvasView({
               onRenameFrame={renameFrame}
               onStartEdit={startEdit}
               zoom={transform.k}
+              replies={el.type === "annotation"
+                ? { thread: threads.get(el.id) ?? [], busy: chat.busy, onReply: (text) => void sendToChat(text, null, el.id) }
+                : undefined}
             />
           ))}
 
@@ -1018,7 +1028,7 @@ export function CanvasView({
 
     {chatOpen && (
       <CanvasChatPanel
-        turns={chat.turns} busy={chat.busy} loadError={chat.loadError}
+        turns={chat.turns} busy={chat.busy} loadError={chat.loadError} annotationsOnBoard={annotationsOnBoard}
         attachment={attachment} onRemoveAttachment={() => setAttachment(null)}
         onSend={(text) => void sendToChat(text, attachment?.rect ?? null)}
         onClose={() => setChatOpen(false)}

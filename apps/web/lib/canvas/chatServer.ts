@@ -37,7 +37,7 @@ export function toClientMessage(m: MessageRow): CanvasChatMessage {
   if (m.role === "event") return { id: m.id, role: "event", content: m.content, event: m.event as CanvasEdit };
   return {
     id: m.id, role: m.role === "user" ? "user" : "assistant", content: m.content,
-    status: m.status, errorMessage: m.errorMessage, canvasContext: m.canvasContext as CanvasContext | null,
+    status: m.status, errorMessage: m.errorMessage, canvasContext: m.canvasContext as CanvasContext | null, annotationId: m.annotationId,
   };
 }
 

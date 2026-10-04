@@ -10,8 +10,12 @@
 import type { ProviderStreamEvent } from "@mola/shared";
 import type { CompletionRequest, LLMProvider } from "@/lib/llm/types";
 
-/** What one model call streams, and where it pauses (`{ wait: ms }`) — a model thinking. */
-export type ScriptStep = (ProviderStreamEvent | { wait: number })[];
+type ScriptEvents = (ProviderStreamEvent | { wait: number })[];
+/**
+ * What one model call streams, and where it pauses (`{ wait: ms }`) — a model thinking. Or made from the
+ * request, for a call whose answer depends on what it was sent.
+ */
+export type ScriptStep = ScriptEvents | ((req: CompletionRequest) => ScriptEvents);
 
 /** Streams `steps` in turn: a reply's first call gets the first, the call after a tool result the next, and so on. */
 export class ScriptedProvider implements LLMProvider {
@@ -25,7 +29,8 @@ export class ScriptedProvider implements LLMProvider {
     // How many calls this reply has made: the assistant messages since the student's last one.
     let step = 0;
     for (let i = req.messages.length - 1; i >= 0 && req.messages[i]!.role !== "user"; i--) if (req.messages[i]!.role === "assistant") step++;
-    for (const ev of this.steps[step] ?? [{ type: "error", message: `the script has no step ${step + 1}` }]) {
+    const script = this.steps[step];
+    for (const ev of (typeof script === "function" ? script(req) : script) ?? [{ type: "error", message: `the script has no step ${step + 1}` }]) {
       if ("wait" in ev) await new Promise((resolve) => setTimeout(resolve, ev.wait));
       else yield ev;
     }
@@ -60,6 +65,19 @@ const SCRIPTS: Record<string, ScriptStep[]> = {
   /** The same board: three seconds' thought, time for the page to go before the error on the 5 is placed; then the answer. */
   "check-sum-slowly": [
     [{ wait: 3_000 }, annotateCall([{ target: "T1 word 5", kind: "error", mark: "circle", note: "2 + 2 is 4, not 5." }]), { type: "done", stopReason: "end_turn" }],
+    [{ type: "text_delta", text: "2 + 2 is 4, not 5 — I've circled the 5 on your board." }, { type: "done", stopReason: "end_turn" }],
+  ],
+  /**
+   * The same board: a message gets the error on the 5, then the answer. A reply to one of its annotations gets,
+   * after a second and a half's thought, an answer saying which annotation its request named, and what it said.
+   */
+  "check-sum-then-answer": [
+    (req) => {
+      const told = /a reply to your annotation (K\d+), where you (.+?): "/.exec(req.messages[req.messages.length - 1]!.content);
+      return told
+        ? [{ wait: 1_500 }, { type: "text_delta", text: `On ${told[1]}, where I ${told[2]}: count on 2 from 2 and you get 4.` }, { type: "done", stopReason: "end_turn" }]
+        : [annotateCall([{ target: "T1 word 5", kind: "error", mark: "circle", note: "2 + 2 is 4, not 5." }]), { type: "done", stopReason: "end_turn" }];
+    },
     [{ type: "text_delta", text: "2 + 2 is 4, not 5 — I've circled the 5 on your board." }, { type: "done", stopReason: "end_turn" }],
   ],
 };
