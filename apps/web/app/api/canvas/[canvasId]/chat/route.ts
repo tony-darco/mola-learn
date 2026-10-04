@@ -29,40 +29,14 @@ import { artifacts, chats, db, messages, users } from "@mola/db";
 import { authzResponse, requireSession } from "@/lib/auth/ownership";
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL, getChatProvider, type Message } from "@/lib/llm";
 import { readCanvas, type LabelMap } from "@/lib/canvas/textSyntax";
-import { MAX_ANNOTATIONS_PER_TURN } from "@/lib/canvas/annotate";
 import { encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
 import { changesSection, type CanvasEdit } from "@/lib/canvas/editLog";
 import { findCanvasChat, lockChat, recordAIEdits, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
-import { runCanvasTurn } from "@/lib/canvas/chatTurn";
+import { CANVAS_CHAT_SYSTEM, forModel, MAX_OUTPUT_TOKENS, runCanvasTurn } from "@/lib/canvas/chatTurn";
 import { scriptedProvider } from "@/lib/canvas/scripted";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SYSTEM = [
-  "You are Mola, a tutor looking at a student's whiteboard. You can't see the board itself: "
-    + "each of the student's messages comes with the board converted to text — all of it, or only the part they selected.",
-  "Refer to things on the board by their labels (M1, Q2, T3, …), and to parts of handwriting by place (\"M1 row 2 col 3\"), as the text explains. "
-    + "If something you need is unreadable or missing from the text, say so rather than guessing.",
-  "You can also mark the board with the annotate_canvas tool: each annotation pins a short note to one place on the board, beside the student's work. "
-    + "Use it when the student asks you to check their work, or when pointing at a spot makes your answer clearer — not for every reply.",
-  "Point each annotation at the smallest place that holds what you mean: the one matrix entry (\"M2 row 1 col 3\") or word (\"T3 word 5\") that is wrong, "
-    + `not the whole matrix or line. At most ${MAX_ANNOTATIONS_PER_TURN} annotations per reply, so mark what matters most — in worked steps, the first mistake, `
-    + "since every step after it carries it — and say the rest in your reply.",
-  "You can't change or erase anything on the board, your own annotations included. Your earlier annotations are in the board text, labelled K: "
-    + "don't mark the same thing again.",
-].join("\n\n");
-
-/**
- * The model's whole output for one reply, thinking included. On a clean board
- * read, thinking is short and helps a little; on a garbled one it runs away,
- * fills the provider's default 8192 tokens, and only then does OllamaProvider
- * silently retry with thinking off. Capping it here makes that fallback come
- * after about 40 s instead of about 2 minutes. The cap also bounds the
- * visible answer (the retry gets the same budget), which is plenty for a
- * question about the board.
- */
-const MAX_OUTPUT_TOKENS = 3072;
 
 const rectSchema = z.object({
   minX: z.number().finite(), minY: z.number().finite(), maxX: z.number().finite(), maxY: z.number().finite(),
@@ -85,13 +59,6 @@ async function createCanvasChat(canvasId: string, title: string, userId: string)
     thinkingEnabled: user!.defaultThinkingEnabled,
   }).returning();
   return chat!;
-}
-
-/** What the model reads for one of the student's messages: what changed on the board since their last one, the board as text, then what they wrote. */
-function forModel(context: CanvasContext | null, message: string): string {
-  return context
-    ? [...(context.changes ? [context.changes] : []), context.text, `THE STUDENT'S MESSAGE\n${message}`].join("\n\n")
-    : message;
 }
 
 /** The conversation so far; `chatId` is null until the first message creates it. */
@@ -179,7 +146,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
           send({ type: "canvas_context", userMessageId: userRow.id, messageId, edits: edits.map(toClientMessage), ...context });
           const provider = scriptedProvider(chat.model) ?? getChatProvider(session.userId, { model: chat.model, think: chat.thinkingEnabled === 1 });
           error = await runCanvasTurn({
-            provider, system: SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS, board,
+            provider, system: CANVAS_CHAT_SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS, board,
             record: (placed) => recordAIEdits(canvasId, session.userId, messageId, placed),
             send: (ev) => {
               if (ev.type === "text_delta") text += ev.text;

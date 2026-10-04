@@ -59,6 +59,7 @@ describe("annotate_canvas: what it places", () => {
       const r = annotate(input, board, newAnnotateTurn());
       expect(r.placed).toEqual([]);
       expect(r.result).toMatch(/^error: send the annotations as \{"annotations": \[/);
+      expect(r.refused).toBe("shape");
     }
   });
 
@@ -85,7 +86,9 @@ describe("annotate_canvas: what it places", () => {
     const turn = newAnnotateTurn();
     const first = call([error("M8"), error("T8"), error("M8 col 4")], turn);
     expect(first.placed).toEqual([]);
-    expect(first.result).toContain(`- annotation 1 ("M8"): M8 is a whole matrix of 12 entries: point at the entry that is wrong, as "M8 row … col …" — or, if all of M8 is wrong, send this annotation again unchanged`);
+    expect(first.settled).toBe(false);
+    expect(first.result).toContain("Not placed yet — send these again now, pointed at the part that is wrong, or unchanged if all of it is:\n"
+      + `- annotation 1 ("M8"): M8 is a whole matrix of 12 entries: point at the entry that is wrong, as "M8 row … col …" — or, if all of M8 is wrong, send this annotation again unchanged`);
     expect(first.result).toContain(`- annotation 2 ("T8"): T8 is a whole line of 5 words: point at the word or words that are wrong`);
     expect(first.result).toContain(`- annotation 3 ("M8 col 4"): M8 col 4 is 3 entries: point at the one that is wrong`);
     expect(call([error("M8")], turn).placed.map((e) => e.props.target)).toEqual(["M8"]);
@@ -105,6 +108,7 @@ describe("annotate_canvas: what it places", () => {
     // The eval's shotgun: column 4 of every step.
     const shotgun = call(Array.from({ length: 8 }, (_, i) => error(`M${i + 1} row 1 col 4`)), turn);
     expect(shotgun.placed).toEqual([]);
+    expect(shotgun.refused).toBe("cap");
     expect(shotgun.result).toBe("error: nothing was placed. A reply can place at most 3 annotations, and 3 are left, but this call asked for 8. "
       + "Choose the ones that matter most — in worked steps, the first mistake — and send only those.");
 
@@ -166,36 +170,46 @@ describe("a reply with the tool (runCanvasTurn)", () => {
     const r = await reply([
       [say("Two slips."), toolCall([error("M8 row 1 col 4", "3 − 2 = 1."), { ...error("T9 word 5"), mark: "check" }]), end],
       [say("And 2 + 2 is 4."), toolCall([error("T8 word 5", "4, not 5.")]), end],
+      [say("Both are marked."), end],
       [say("Never asked for."), end],
     ]);
     expect(r.error).toBeNull();
-    expect(r.events.map((e) => e.type)).toEqual(["text_delta", "annotation", "text_delta", "text_delta", "annotation"]);
+    expect(r.events.map((e) => e.type)).toEqual(["text_delta", "annotation", "text_delta", "text_delta", "annotation", "text_delta", "text_delta"]);
     expect(r.annotations.map((e) => [e.props.target, e.props.note])).toEqual([["M8 row 1 col 4", "3 − 2 = 1."], ["T8 word 5", "4, not 5."]]);
-    expect(r.text).toBe("Two slips.\n\nAnd 2 + 2 is 4.");
+    expect(r.text).toBe("Two slips.\n\nAnd 2 + 2 is 4.\n\nBoth are marked.");
     expect(r.reads).toBe(1);
     // Each kept as pending before it goes out, so one the page never gets isn't lost.
     expect(r.order).toEqual(["recorded M8 row 1 col 4", "sent M8 row 1 col 4", "recorded T8 word 5", "sent T8 word 5"]);
 
     // The second call saw its first call and what came of it — and that its words are on screen already.
-    expect(r.requests).toHaveLength(2);
+    expect(r.requests.map((q) => q.tools?.length ?? 0)).toEqual([1, 1, 0]);
     const [, second] = r.requests;
     expect(second!.messages.slice(1, 3)).toEqual([
       { role: "assistant", content: "Two slips.", toolCalls: [expect.objectContaining({ name: "annotate_canvas" })] },
       { role: "tool", toolCallId: "call-2-annotate_canvas", content: expect.stringContaining(`- annotation 2 ("T9 word 5"): mark "check" is a kind, not a mark`) },
     ]);
     expect(second!.messages[2]!.content).toContain("; no T9 on this canvas (its T labels are T1,");
-    expect(second!.messages[2]!.content).toMatch(/\nWhat you wrote before is already shown to the student: send only the annotations to fix/);
-    expect(r.requests.every((q) => q.tools?.[0]?.name === "annotate_canvas")).toBe(true);
+    expect(second!.messages[2]!.content).toMatch(/\nWhat you wrote before is already on the student's screen: carry on from it, without repeating it\.$/);
   });
 
-  it("ends once all it asked for is on the board and it has said something — if it hasn't, it gets one call to, without the tool", async () => {
-    const spoke = await reply([[say("The 5 is wrong."), toolCall([error("T8 word 5")]), end], [say("Never asked for."), end]]);
-    expect(spoke.requests).toHaveLength(1);
-    expect(spoke.text).toBe("The 5 is wrong.");
+  it("once all it asked for is on the board, gives the model one last call, without the tool, to finish its reply", async () => {
+    // A lead-in, then the call: the reply goes on after it.
+    const spoke = await reply([[say("Look at T8:"), toolCall([error("T8 word 5")]), end], [say("2 + 2 is 4, not 5."), end], [say("Never asked for."), end]]);
+    expect(spoke.requests.map((q) => q.tools?.length ?? 0)).toEqual([1, 0]);
+    expect(spoke.text).toBe("Look at T8:\n\n2 + 2 is 4, not 5.");
+    expect(spoke.requests[1]!.messages[2]!.content).toMatch(/\nAll of it is on the board\. Now finish your reply to the student, in words\. What you wrote before is already on the student's screen/);
 
-    // The call to answer in offers no tool, and a call written anyway is ignored.
+    // Its whole answer written out again, word for word, or only a thinking channel's marker: neither reaches the student.
+    const answer = "You've done a great job with the row reduction, but 3 − 2 is 1, not 5.";
+    for (const last of [`${answer} Fix that and you're done.`, "thought\n<channel|>"]) {
+      const again = await reply([[say(answer), toolCall([error("M8 row 1 col 4")]), end], [say(last), end]]);
+      expect(again.text).toBe(answer);
+    }
+
+    // Nothing said yet; and a call written anyway, with no tool offered, is ignored.
     const silent = await reply([[toolCall([error("T8 word 5")]), end], [toolCall([error("T8 word 4")]), say("2 + 2 is 4."), end]]);
     expect(silent.requests.map((q) => q.tools?.length ?? 0)).toEqual([1, 0]);
+    expect(silent.requests[1]!.messages[2]!.content).toMatch(/\nAll of it is on the board\. Now finish your reply to the student, in words\.$/);
     expect(silent.annotations.map((e) => e.props.target)).toEqual(["T8 word 5"]);
     expect(silent.text).toBe("2 + 2 is 4.");
   });

@@ -172,16 +172,17 @@ const told = (p: Place) => `${p.kind} on ${p.target.address}, ${MARKED[p.mark]}`
  * top of the board as the model saw it — and the tool's result for the
  * model, saying what was placed, what wasn't and why, and how many more
  * this reply can place. `settled`: nothing is left for the model to fix —
- * all it asked for is on the board, or was already. Records what it placed
- * in `turn`.
+ * all it asked for is on the board, or was already. `refused`: why the
+ * whole call placed nothing, when it did — not in the tool's shape, or more
+ * than are left. Records what it placed in `turn`.
  */
 export function annotate(
   input: unknown, board: AnnotateBoard, turn: AnnotateTurn, makeId: () => string = () => crypto.randomUUID(),
-): { placed: CanvasAnnotationElement[]; result: string; settled: boolean } {
+): { placed: CanvasAnnotationElement[]; result: string; settled: boolean; refused?: "shape" | "cap" } {
   const given = annotationsOf(input);
   if (!given) {
     return {
-      placed: [], settled: false,
+      placed: [], settled: false, refused: "shape",
       result: `error: send the annotations as {"annotations": [{"target": "…", "kind": "…", "mark": "…", "note": "…"}]}, one or more of them`,
     };
   }
@@ -191,7 +192,7 @@ export function annotate(
   const fresh = checked.filter((c) => !("place" in c && turn.placed.some(sameAs(c.place)))).length;
   if (fresh > left) {
     return {
-      placed: [], settled: false,
+      placed: [], settled: false, refused: "cap",
       result: `error: nothing was placed. A reply can place at most ${MAX_ANNOTATIONS_PER_TURN} annotations, and ${left === 0 ? "this one has placed them all" : `${plural(left, "is", "are")} left`}, `
         + `but this call asked for ${fresh}. ${left === 0 ? "Say anything else in your reply." : "Choose the ones that matter most — in worked steps, the first mistake — and send only those."}`,
     };
@@ -200,6 +201,7 @@ export function annotate(
   const placed: CanvasAnnotationElement[] = [];
   const already: string[] = [];
   const problems: string[] = [];
+  const narrowing: string[] = [];
   checked.forEach((c, i) => {
     const asked = (given[i] as { target?: unknown } | null)?.target;
     const which = `annotation ${i + 1}${typeof asked === "string" ? ` ("${asked}")` : ""}`;
@@ -209,7 +211,7 @@ export function annotate(
     const narrow = tooCoarse(p, board.doc);
     if (narrow && !turn.askedToNarrow.has(p.target.address)) {
       turn.askedToNarrow.add(p.target.address);
-      return void problems.push(`${which}: ${narrow}`);
+      return void narrowing.push(`${which}: ${narrow}`);
     }
     const { box, address, elementIds } = p.target;
     placed.push({
@@ -229,9 +231,11 @@ export function annotate(
     ...placed.map((e) => `- ${e.props.kind} on ${e.props.target}, ${MARKED[e.props.mark]}`),
     ...(already.length > 0 ? ["Already on the board from earlier in this reply, so not placed again:", ...already.map((t) => `- ${t}`)] : []),
     ...(problems.length > 0 ? ["Not placed — fix these and send them again if they still matter:", ...problems.map((t) => `- ${t}`)] : []),
+    // Told to send them, not asked: offered "if they still matter", gemma4:26b dropped all 3 in the eval, and the mistake went unmarked.
+    ...(narrowing.length > 0 ? ["Not placed yet — send these again now, pointed at the part that is wrong, or unchanged if all of it is:", ...narrowing.map((t) => `- ${t}`)] : []),
     remaining > 0
       ? `${plural(remaining, "more annotation", "more annotations")} can be placed in this reply.`
       : "That is all the annotations this reply can place; say anything else in your reply.",
   ];
-  return { placed, result: lines.join("\n"), settled: problems.length === 0 };
+  return { placed, result: lines.join("\n"), settled: problems.length === 0 && narrowing.length === 0 };
 }
