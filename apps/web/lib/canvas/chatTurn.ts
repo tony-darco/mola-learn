@@ -58,8 +58,9 @@ export function forModel(context: CanvasContext | null, message: string): string
 
 /**
  * Four: annotating, sending again what wasn't placed (a label fixed, an
- * entry instead of the whole matrix), and the answer, with one call to
- * spare. Each call sends the whole board again, so more costs real time.
+ * entry instead of the whole matrix) or marking a second, separate mistake,
+ * and the answer. Each call sends the whole board again, so more costs real
+ * time.
  */
 export const MAX_MODEL_CALLS = 4;
 
@@ -126,6 +127,7 @@ export async function runCanvasTurn(opts: {
 
     messages.push({ role: "assistant", content: text, toolCalls: calls });
     let settled = true;
+    let placedNow = 0;
     const results: Message[] = [];
     for (const c of calls) {
       if (c.name !== ANNOTATE_TOOL.name) {
@@ -136,12 +138,19 @@ export async function runCanvasTurn(opts: {
       const done = annotate(c.input, (board ??= opts.board()), turn);
       await opts.record(done.placed);
       for (const element of done.placed) send({ type: "annotation", element });
+      placedNow += done.placed.length;
       settled &&= done.settled;
       results.push({ role: "tool", content: done.result, toolCallId: c.id });
     }
     // What it wrote is on the student's screen already: the next call should carry on from it, not write it out again.
     const shown = saidNow ? " What you wrote before is already on the student's screen: carry on from it, without repeating it." : "";
-    if (settled) {
+    // All of it placed, with room for more: the tool stays, so a second, separate mistake gets its own mark — gemma4:26b
+    // marked the first in one call and, with the tool gone, could only mention the other (0 of 9 marked, eval 2026-10-04).
+    // A call that placed nothing new, or a reply with no room left, gets one last call in words.
+    if (settled && placedNow > 0 && turn.placed.length < MAX_ANNOTATIONS_PER_TURN) {
+      results[results.length - 1]!.content += "\nAll of it is on the board. If the board has another, separate mistake you haven't marked, mark it now; "
+        + `otherwise finish your reply to the student, in words.${shown}`;
+    } else if (settled) {
       answerOnly = true;
       results[results.length - 1]!.content += `\nAll of it is on the board. Now finish your reply to the student, in words.${shown}`;
     } else if (saidNow) results[results.length - 1]!.content += `\n${shown.trim()}`;

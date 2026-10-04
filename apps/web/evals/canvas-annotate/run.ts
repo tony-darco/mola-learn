@@ -17,6 +17,7 @@
  *
  *   pnpm --filter @mola/web eval:canvas-annotate --max-reply-minutes 10
  *   pnpm --filter @mola/web eval:canvas-annotate --boards clean --repeats 1   # a single probe reply
+ *   pnpm --filter @mola/web eval:canvas-annotate --model gemma4:12b            # another model
  */
 // First: it loads .env.local before anything can import lib/llm/ollama.ts.
 import { ask, OllamaProvider } from "../ollama";
@@ -33,7 +34,7 @@ import { writeReport, type BoardFile, type ReplyFile } from "./report";
 import { scoreReply, type ModelCall } from "./score";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const MODEL = "gemma4:26b";
+const DEFAULT_MODEL = "gemma4:26b";
 const MESSAGE = "Check my work.";
 
 function readOptions() {
@@ -46,7 +47,7 @@ function readOptions() {
   const boards = (value("--boards")?.split(",").map((s) => s.trim()).filter(Boolean) ?? BOARDS) as BoardName[];
   for (const b of boards) if (!BOARDS.includes(b)) throw new Error(`unknown board "${b}" (have: ${BOARDS.join(", ")})`);
   const maxMinutes = value("--max-reply-minutes");
-  return { boards, repeats: Number(value("--repeats") ?? 3), maxReplyMs: maxMinutes === undefined ? undefined : Number(maxMinutes) * 60_000 };
+  return { model: value("--model") ?? DEFAULT_MODEL, boards, repeats: Number(value("--repeats") ?? 3), maxReplyMs: maxMinutes === undefined ? undefined : Number(maxMinutes) * 60_000 };
 }
 
 const describeError = (err: unknown) => {
@@ -82,6 +83,7 @@ function recorded(signal: AbortSignal | undefined): { provider: LLMProvider; cal
 }
 
 const opts = readOptions();
+const MODEL = opts.model;
 const stamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
 const outDir = join(here, "output", stamp);
 mkdirSync(outDir, { recursive: true });
