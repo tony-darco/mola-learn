@@ -199,9 +199,9 @@ describe("a reply with the tool (runCanvasTurn)", () => {
     expect(spoke.text).toBe("Look at T8:\n\n2 + 2 is 4, not 5.");
     expect(spoke.requests[1]!.messages[2]!.content).toMatch(/\nAll of it is on the board\. Now finish your reply to the student, in words\. What you wrote before is already on the student's screen/);
 
-    // Its whole answer written out again, word for word, or only a thinking channel's marker: neither reaches the student.
+    // Its whole answer written out again, word for word, or its thinking leaked under the channel's name: none of it reaches the student.
     const answer = "You've done a great job with the row reduction, but 3 − 2 is 1, not 5.";
-    for (const last of [`${answer} Fix that and you're done.`, "thought\n<channel|>"]) {
+    for (const last of [`${answer} Fix that and you're done.`, "thought\n<channel|>", "thought\n探"]) {
       const again = await reply([[say(answer), toolCall([error("M8 row 1 col 4")]), end], [say(last), end]]);
       expect(again.text).toBe(answer);
     }

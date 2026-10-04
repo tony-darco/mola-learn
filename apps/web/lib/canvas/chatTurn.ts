@@ -106,7 +106,7 @@ export async function runCanvasTurn(opts: {
         if (repeat) continue;
         if (held === null) show(ev.text);
         else if ((held += ev.text).length >= HOLD) {
-          repeat = startsOver(held, shownSoFar);
+          repeat = notForTheStudent(held, shownSoFar);
           if (!repeat) show(held);
           held = null;
         }
@@ -115,7 +115,7 @@ export async function runCanvasTurn(opts: {
       if (ev.type === "done") stopReason = ev.stopReason;
       if (ev.type === "error") return ev.message;
     }
-    if (held && !startsOver(held, shownSoFar) && !onlyChannelMarkers(held)) show(held);
+    if (held && !notForTheStudent(held, shownSoFar)) show(held);
     const saidNow = shownSoFar !== "";
 
     // A call written out when no tool was offered is not acted on.
@@ -157,11 +157,12 @@ export async function runCanvasTurn(opts: {
  */
 const HOLD = 40;
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
-/** `held` is the start of what was already shown, over again. */
-const startsOver = (held: string, shown: string) => squash(shown).startsWith(squash(held).slice(0, HOLD));
 /**
- * Nothing but the marker of a thinking channel, which gemma4:26b's last call
- * gave as its whole text once in 9 eval replies ("thought\n<channel|>") —
- * the provider's to filter, really (lib/llm/ollama.ts).
+ * A later call's first words, held: the start of what was already shown,
+ * over again — or its thinking, leaked into the reply under its channel's
+ * name, which gemma4:26b's last call gave instead of words now and then
+ * ("thought\n<channel|>", "thought\n探"). The provider's to filter, really
+ * (lib/llm/ollama.ts); here only once the reply has said something.
  */
-const onlyChannelMarkers = (text: string) => squash(text.replace(/<\|?channel\|?>/g, "").replace(/\bthought\b/g, "")) === "";
+const notForTheStudent = (held: string, shown: string) =>
+  squash(shown).startsWith(squash(held).slice(0, HOLD)) || /^\s*thought\s*(?:\n|<)/.test(held);
