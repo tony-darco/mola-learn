@@ -130,8 +130,9 @@ test.describe("signed-out access to protected routes", () => {
     // of the app. The persistent-shell rewrite's `(shell)/layout.tsx` now
     // gates every route in the group the same way, root included — verified
     // live: a signed-out `/` visit 302s straight to `/sign-in`. Asserting
-    // the corrected behavior here, not the old bug.
-    const resp = await page.goto("/");
+    // the corrected behavior here, not the old bug. Since the marketing
+    // site took over `/` (public, even signed out), the chat root is `/chat`.
+    const resp = await page.goto("/chat");
     expect(resp?.status()).toBe(200); // final response, after following the redirect, is the sign-in page's own 200
     expect(new URL(page.url()).pathname).toBe("/sign-in");
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();

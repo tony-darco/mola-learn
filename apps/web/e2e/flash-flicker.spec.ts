@@ -26,7 +26,7 @@ test.describe("chat switching: flash, flicker, and content jumping", () => {
   test("revisiting an already-loaded chat this session shows no blank loading state, and rendered messages never surface raw markdown/LaTeX", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/chat");
 
     await page.getByRole("link", { name: FLICKER_CHAT_A }).click();
     await expect(page.locator('[data-testid="turn-assistant"] .markdown').last()).toContainText("CPU burst", { timeout: 15_000 });

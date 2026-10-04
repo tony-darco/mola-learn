@@ -19,7 +19,7 @@ test.use({ storageState: ALICE_STORAGE });
 test("older turns collapse behind a summary by default, and the raw transcript expands without a request", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/chat");
   await page.getByRole("link", { name: COMPACTION_CHAT }).click();
 
   const banner = page.locator('[data-testid="compacted-banner"]');

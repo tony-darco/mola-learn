@@ -13,7 +13,7 @@ test.setTimeout(5 * 60_000);
 test("a course-fact lookup renders as a collapsed, expand-on-demand activity row — not inline chat text", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/chat");
   await newCourseChat(page);
 
   const response = await sendMessage(page, "What is this course's number, and who teaches it?");
