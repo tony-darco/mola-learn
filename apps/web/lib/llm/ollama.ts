@@ -96,7 +96,15 @@ export class OllamaProvider implements LLMProvider {
       signal,
       body: JSON.stringify({
         model: this.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        // A tool call and its result go back as Ollama's own fields. Sent as
+        // bare text, gemma4:26b reads an empty turn of its own followed by a
+        // result it never asked for: it calls the same tool again, or writes
+        // a call out as text (the canvas chat's annotate tool, measured).
+        messages: messages.map((m) => ({
+          role: m.role, content: m.content,
+          ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((c) => ({ function: { name: c.name, arguments: c.input } })) } : {}),
+          ...(m.role === "tool" && m.toolCallId ? { tool_name: messages.flatMap((x) => x.toolCalls ?? []).find((c) => c.id === m.toolCallId)?.name } : {}),
+        })),
         stream: true,
         think,
         options: {
