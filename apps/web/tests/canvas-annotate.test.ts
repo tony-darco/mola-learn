@@ -144,14 +144,21 @@ const end: ProviderStreamEvent = { type: "done", stopReason: "end_turn" };
 async function reply(steps: ScriptStep[]) {
   const provider = new ScriptedProvider(steps);
   const events: CanvasChatEvent[] = [];
+  /** What was recorded as pending, and what was sent, in order. */
+  const order: string[] = [];
   let reads = 0;
   const error = await runCanvasTurn({
     provider, system: "SYSTEM", messages: [{ role: "user", content: "Check my work." }], maxTokens: 100,
-    board: () => (reads++, board), send: (ev) => events.push(ev),
+    board: () => (reads++, board),
+    record: async (placed) => { for (const e of placed) order.push(`recorded ${e.props.target}`); },
+    send: (ev) => {
+      events.push(ev);
+      if (ev.type === "annotation") order.push(`sent ${ev.element.props.target}`);
+    },
   });
   const text = events.flatMap((e) => (e.type === "text_delta" ? [e.text] : [])).join("");
   const annotations = events.flatMap((e) => (e.type === "annotation" ? [e.element] : []));
-  return { error, events, text, annotations, requests: provider.requests, reads };
+  return { error, events, text, annotations, requests: provider.requests, reads, order };
 }
 
 describe("a reply with the tool (runCanvasTurn)", () => {
@@ -166,6 +173,8 @@ describe("a reply with the tool (runCanvasTurn)", () => {
     expect(r.annotations.map((e) => [e.props.target, e.props.note])).toEqual([["M8 row 1 col 4", "3 − 2 = 1."], ["T8 word 5", "4, not 5."]]);
     expect(r.text).toBe("Two slips.\n\nAnd 2 + 2 is 4.");
     expect(r.reads).toBe(1);
+    // Each kept as pending before it goes out, so one the page never gets isn't lost.
+    expect(r.order).toEqual(["recorded M8 row 1 col 4", "sent M8 row 1 col 4", "recorded T8 word 5", "sent T8 word 5"]);
 
     // The second call saw its first call and what came of it — and that its words are on screen already.
     expect(r.requests).toHaveLength(2);

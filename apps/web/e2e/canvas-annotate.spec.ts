@@ -9,6 +9,10 @@
  * "check-sum"), so it is the same every run: a check, an error sent with a
  * wrong label and a kind for its mark, then fixed, then the answer.
  *
+ * Then the page closes mid-reply ("check-sum-slowly"), before its
+ * annotation is placed: opened again, the canvas gets it, saved and logged
+ * as Mola's; erased, it stays gone.
+ *
  * A second test asks the real model (the LAN Ollama host) to check the
  * annotate eval's board, only when asked for:
  *
@@ -83,6 +87,10 @@ async function plant(sql: postgres.Sql, title: string, elements: CanvasElement[]
 const saved = async (sql: postgres.Sql, canvasId: string) =>
   (await sql<{ payload: { elements: CanvasElement[] } }[]>`select payload from artifacts where id = ${canvasId}`)[0]!.payload.elements;
 
+/** The AI's edits on the canvas no save has acknowledged yet, by id. */
+const pending = async (sql: postgres.Sql, canvasId: string) =>
+  (await sql<{ id: string }[]>`select id from canvas_ai_edits where canvas_id = ${canvasId} and applied_at is null`).map((r) => r.id);
+
 test.describe("canvas chat annotations", () => {
   test.use({ storageState: ALICE_STORAGE, viewport: { width: 1600, height: 1000 } });
 
@@ -126,8 +134,9 @@ test.describe("canvas chat annotations", () => {
       ]);
       const afterReply = await saved(sql, canvasId);
       expect(afterReply.filter((e) => e.type === "annotation").map((e) => [e.id, e.createdBy])).toEqual(placed.map((e) => [e.id, "ai"]));
-      // Nothing the student wrote was touched.
+      // Nothing the student wrote was touched; and the save acknowledged both, so neither is pending any more.
       expect(afterReply.filter((e) => e.type !== "annotation")).toEqual(work);
+      expect(await pending(sql, canvasId)).toEqual([]);
 
       // The reply is one undo step: both annotations go together, and come back together.
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -144,6 +153,64 @@ test.describe("canvas chat annotations", () => {
       await openChat(page);
       await expect(page.getByTestId("canvas-edit-entry").filter({ hasText: /^Mola marked T1 word 5 as an error/ })).toHaveCount(1);
       expect((await saved(sql, canvasId)).filter((e) => e.type !== "annotation")).toEqual(work);
+    } finally {
+      if (canvasId) {
+        await sql`delete from chats where canvas_id = ${canvasId}`;
+        await sql`delete from artifacts where id = ${canvasId}`;
+      }
+      await sql.end();
+    }
+  });
+
+  test("an annotation placed after the page closed lands when the canvas opens again, and once erased stays gone", async ({ page, context }) => {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let canvasId: string | null = null;
+    try {
+      const work = handwriting("2 + 2 = 5", 300, 300, 40);
+      canvasId = await plant(sql, "E2E Annotate (page closed)", work, "scripted:check-sum-slowly");
+      await page.goto(`/canvas/${canvasId}`);
+      await openChat(page);
+
+      // The reply starts; the page goes while the model is still thinking, before the annotation is placed.
+      const started = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/canvas/${canvasId}/chat` && r.request().method() === "POST");
+      const input = page.getByPlaceholder("Ask about this canvas…");
+      await input.fill("Check my work.");
+      await input.press("Enter");
+      await started;
+      await page.close();
+
+      // The reply runs on without it: the annotation is placed, kept pending, and never reaches the board.
+      const reply = async () => (await sql<{ status: string }[]>`
+        select m.status from messages m join chats c on c.id = m.chat_id where c.canvas_id = ${canvasId} and m.role = 'assistant'`)[0]?.status;
+      await expect.poll(reply, { timeout: 30_000 }).toBe("done");
+      const [placed] = await pending(sql, canvasId);
+      expect(placed).toBeDefined();
+      expect((await saved(sql, canvasId)).some((e) => e.type === "annotation")).toBe(false);
+
+      // Opened again: the page adds it, saves it — no longer pending — and the log tells it as Mola's.
+      const again = await context.newPage();
+      await again.goto(`/canvas/${canvasId}`);
+      const icon = again.locator(`[data-testid="ai-annotation"][data-element-id="${placed}"]`);
+      await expect(icon).toHaveCount(1);
+      await expect.poll(async () => (await saved(sql, canvasId!)).filter((e) => e.type === "annotation").map((e) => e.id)).toEqual([placed]);
+      expect(await pending(sql, canvasId)).toEqual([]);
+      await openChat(again);
+      const entries = again.getByTestId("canvas-edit-entry");
+      await expect(entries).toHaveText([/^Mola marked T1 word 5 as an error \(K1\): "2 \+ 2 is 4, not 5\."$/], { timeout: 10_000 });
+
+      // Erased: gone from the board and the save, logged as the student's, and still gone after a reload.
+      await icon.click();
+      await again.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await again.keyboard.press("Delete");
+      await expect(icon).toHaveCount(0);
+      await expect.poll(async () => (await saved(sql, canvasId!)).some((e) => e.type === "annotation")).toBe(false);
+      await expect(entries.nth(1)).toHaveText(/^You deleted K1: "2 \+ 2 is 4, not 5\."$/, { timeout: 10_000 });
+      await again.reload();
+      await expect(again.locator('path[data-element-id^="sum-"]')).toHaveCount(work.length);
+      await again.waitForTimeout(2_000); // what a pending edit would take to be added and saved, if there were one
+      await expect(again.getByTestId("ai-annotation")).toHaveCount(0);
+      expect(await saved(sql, canvasId)).toEqual(work);
+      expect(await pending(sql, canvasId)).toEqual([]);
     } finally {
       if (canvasId) {
         await sql`delete from chats where canvas_id = ${canvasId}`;

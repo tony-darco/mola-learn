@@ -10,12 +10,15 @@
  *
  * Only the caller's own chat for the canvas gets entries, and only once it
  * exists: a first message reads the whole board anyway.
+ *
+ * It also hands back the AI's edits no save has acknowledged yet — placed
+ * while no page could add them — for the page to add now.
  */
 import { eq } from "drizzle-orm";
 import { artifacts, db } from "@mola/db";
 import { authzResponse, requireSession } from "@/lib/auth/ownership";
 import type { CanvasEditsResponse } from "@/lib/canvas/chat";
-import { findCanvasChat, lockChat, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
+import { findCanvasChat, lockChat, pendingAIEdits, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,14 +30,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ canvas
     await requireOwnCanvas(canvasId, session);
 
     const chat = await findCanvasChat(canvasId, session.userId);
-    if (!chat) return Response.json({ chatId: null, entries: [] } satisfies CanvasEditsResponse);
+    if (!chat) return Response.json({ chatId: null, entries: [], pending: [] } satisfies CanvasEditsResponse);
 
     const written = await db.transaction(async (tx) => {
       const locked = await lockChat(tx, chat.id);
       const [canvas] = await tx.select({ payload: artifacts.payload, version: artifacts.version }).from(artifacts).where(eq(artifacts.id, canvasId));
       return (await syncEditLog(tx, locked, canvas!)).written;
     });
-    return Response.json({ chatId: chat.id, entries: written.map(toClientMessage) } satisfies CanvasEditsResponse);
+    return Response.json({ chatId: chat.id, entries: written.map(toClientMessage), pending: await pendingAIEdits(canvasId) } satisfies CanvasEditsResponse);
   } catch (err) {
     return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });
   }

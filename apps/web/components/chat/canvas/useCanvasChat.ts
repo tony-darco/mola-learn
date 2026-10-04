@@ -43,11 +43,13 @@ function withEntries(ts: CanvasTurn[], entries: CanvasChatMessage[], before?: st
  * The canvas's conversation (app/api/canvas/[canvasId]/chat): loaded once on
  * first use, then sent to and streamed into — and, after every save, its
  * edit log brought up to the board (syncEdits). What the AI puts on the
- * board while it replies goes to `onAIElement`, with the reply's id.
+ * board goes to `onAIEdits`, with the id of the reply it came from: as the
+ * reply streams in, and — for what no page added at the time — when a sync
+ * hands back what is still pending, after every save and after every reply.
  */
-export function useCanvasChat(canvasId: string, onAIElement: (messageId: string, element: CanvasElement) => void) {
-  const onAIElementRef = useRef(onAIElement);
-  onAIElementRef.current = onAIElement;
+export function useCanvasChat(canvasId: string, onAIEdits: (messageId: string, elements: CanvasElement[]) => void) {
+  const onAIEditsRef = useRef(onAIEdits);
+  onAIEditsRef.current = onAIEdits;
   const [turns, setTurns] = useState<CanvasTurn[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -91,6 +93,9 @@ export function useCanvasChat(canvasId: string, onAIElement: (messageId: string,
         if (!res.ok) return;
         const data = (await res.json()) as CanvasEditsResponse;
         if (data.chatId === null) hasChatRef.current = false;
+        for (const messageId of new Set(data.pending.map((p) => p.messageId))) {
+          onAIEditsRef.current(messageId, data.pending.filter((p) => p.messageId === messageId).map((p) => p.element));
+        }
         // Not loaded yet: loading brings these with it. Loading now: they go in after it.
         if (data.entries.length > 0 && loadRef.current) {
           await loadRef.current;
@@ -158,7 +163,7 @@ export function useCanvasChat(canvasId: string, onAIElement: (messageId: string,
               patch(assistantId, (t) => ({ ...t, text: t.text + ev.text }));
               break;
             case "annotation":
-              onAIElementRef.current(assistantId, ev.element);
+              onAIEditsRef.current(assistantId, [ev.element]);
               break;
             case "message_end":
               patch(assistantId, (t) => ({ ...t, streaming: false }));
@@ -175,6 +180,8 @@ export function useCanvasChat(canvasId: string, onAIElement: (messageId: string,
       patch(assistantId, (t) => ({ ...t, streaming: false }));
       busyRef.current = false;
       setBusy(false);
+      // A stream cut short leaves the rest of the reply's edits pending: the sync hands them back.
+      syncEdits();
     }
   }
 

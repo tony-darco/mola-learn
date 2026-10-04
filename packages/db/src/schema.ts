@@ -359,6 +359,27 @@ export const artifacts = pgTable("artifacts", {
   index("artifacts_course_idx").on(t.courseId),
 ]);
 
+/**
+ * What the canvas chat's AI put on a canvas (apps/web/lib/canvas/annotate.ts),
+ * one row per element, kept until a page has put it on the board and saved.
+ * The open canvas page adds them and saves them itself, so one placed while
+ * no page could — a tab closed mid-reply, a dropped stream, a failed save —
+ * is added by the next page that opens the canvas or syncs its chat.
+ * `appliedAt`: a page added it and saved; from then on it is the student's
+ * to keep or erase, and never added again.
+ */
+export const canvasAiEdits = pgTable("canvas_ai_edits", {
+  /** The element's own id. */
+  id: text("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  canvasId: uuid("canvas_id").notNull().references(() => artifacts.id, { onDelete: "cascade" }),
+  /** The reply that placed it. */
+  messageId: uuid("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  element: jsonb("element").notNull(),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [index("canvas_ai_edits_canvas_idx").on(t.canvasId)]);
+
 /** Denormalised out of the deck payload so SRS can query due cards directly. */
 export const flashcards = pgTable("flashcards", {
   id: id(),

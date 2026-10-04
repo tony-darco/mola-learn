@@ -7,7 +7,7 @@
  * rather than shown in the chat, and the first event has to carry what the
  * model was shown. Same SSE framing — one JSON object per `data:` line.
  */
-import type { CanvasAnnotationElement } from "@mola/shared";
+import type { CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import type { CanvasEdit } from "./editLog";
 import type { Rect } from "./marquee";
 
@@ -47,8 +47,14 @@ export type CanvasChatMessage =
   }
   | { id: string; role: "event"; content: string; event: CanvasEdit };
 
-/** POST …/chat/edits: the edit log brought up to the canvas as saved — the entries written or rewritten. `chatId` is null when there's no chat to log into. */
-export type CanvasEditsResponse = { chatId: string | null; entries: CanvasChatMessage[] };
+/**
+ * POST …/chat/edits: the edit log brought up to the canvas as saved — the entries written or rewritten. `chatId` is null when
+ * there's no chat to log into. `pending`: the AI's edits no save has acknowledged yet, for the page to add (chatServer.ts).
+ */
+export type CanvasEditsResponse = { chatId: string | null; entries: CanvasChatMessage[]; pending: PendingAIEdit[] };
+
+/** An AI edit still to be put on the board, and the reply that placed it. */
+export type PendingAIEdit = { messageId: string; element: CanvasElement };
 
 export function encodeCanvasChatEvent(event: CanvasChatEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;

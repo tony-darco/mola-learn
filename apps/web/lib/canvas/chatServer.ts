@@ -1,14 +1,15 @@
 /**
  * The canvas chat's rows, for its routes (app/api/canvas/[canvasId]/chat):
- * the caller's chat for a canvas, its messages as the panel gets them, and
- * keeping its edit log (lib/canvas/editLog.ts) in step with the board.
+ * the caller's chat for a canvas, its messages as the panel gets them,
+ * keeping its edit log (lib/canvas/editLog.ts) in step with the board, and
+ * keeping what the AI placed until a page has put it on the board.
  */
-import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { canvasPayloadSchema } from "@mola/shared";
-import { chats, messages, db, type DB } from "@mola/db";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { canvasPayloadSchema, type CanvasElement } from "@mola/shared";
+import { canvasAiEdits, chats, messages, db, type DB } from "@mola/db";
 import { AuthzError, requireOwned, type Session } from "@/lib/auth/ownership";
 import { readCanvas, type LabelMap } from "./textSyntax";
-import type { CanvasChatMessage, CanvasContext } from "./chat";
+import type { CanvasChatMessage, CanvasContext, PendingAIEdit } from "./chat";
 import { describeEdit, diffSnapshots, mergeEdit, snapshotBoard, type BoardSnapshot, type CanvasEdit, type EditActor } from "./editLog";
 
 type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
@@ -91,4 +92,39 @@ export async function syncEditLog(
   const kept: StoredSnapshot = { version: canvas.version, ...snapshot };
   await tx.update(chats).set({ canvasLabels: read.labels, canvasSnapshot: kept }).where(eq(chats.id, chat.id));
   return { written: [...written.values()], read };
+}
+
+// ── what the AI placed, until a page has put it on the board ────────────────
+//
+// The open canvas page adds the AI's edits and saves them itself; the server
+// never writes the canvas. So each is kept (canvas_ai_edits) from the moment
+// it is placed until a save acknowledges it, and one no page could add — a
+// tab closed mid-reply, a dropped stream, a failed save — goes to the next
+// page that opens the canvas or syncs its chat. A page acknowledges what it
+// added with the save after, whether it is still on the board or already
+// erased or undone, so an edit the student took away never comes back.
+
+/** Keeps what a reply placed, before it goes out to the page. */
+export async function recordAIEdits(canvasId: string, userId: string, messageId: string, elements: CanvasElement[]) {
+  if (elements.length === 0) return;
+  await db.insert(canvasAiEdits).values(elements.map((element) => ({
+    id: element.id, userId, canvasId, messageId, element,
+    // Per row, so edits placed together keep their order.
+    createdAt: sql`clock_timestamp()`,
+  })));
+}
+
+/** The canvas's AI edits no save has acknowledged yet, oldest first. */
+export async function pendingAIEdits(canvasId: string): Promise<PendingAIEdit[]> {
+  const rows = await db.select({ messageId: canvasAiEdits.messageId, element: canvasAiEdits.element }).from(canvasAiEdits)
+    .where(and(eq(canvasAiEdits.canvasId, canvasId), isNull(canvasAiEdits.appliedAt)))
+    .orderBy(asc(canvasAiEdits.createdAt));
+  return rows.map((r) => ({ messageId: r.messageId, element: r.element as CanvasElement }));
+}
+
+/** Marks those of `ids` that are the canvas's pending AI edits as applied — call in the transaction of the save that acknowledges them. */
+export async function markAIEditsApplied(tx: Tx, canvasId: string, ids: string[]) {
+  if (ids.length === 0) return;
+  await tx.update(canvasAiEdits).set({ appliedAt: sql`now()` })
+    .where(and(eq(canvasAiEdits.canvasId, canvasId), isNull(canvasAiEdits.appliedAt), inArray(canvasAiEdits.id, ids)));
 }

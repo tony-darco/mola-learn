@@ -10,8 +10,8 @@
 import type { ProviderStreamEvent } from "@mola/shared";
 import type { CompletionRequest, LLMProvider } from "@/lib/llm/types";
 
-/** What one model call streams. */
-export type ScriptStep = ProviderStreamEvent[];
+/** What one model call streams, and where it pauses (`{ wait: ms }`) — a model thinking. */
+export type ScriptStep = (ProviderStreamEvent | { wait: number })[];
 
 /** Streams `steps` in turn: a reply's first call gets the first, the call after a tool result the next, and so on. */
 export class ScriptedProvider implements LLMProvider {
@@ -25,7 +25,10 @@ export class ScriptedProvider implements LLMProvider {
     // How many calls this reply has made: the assistant messages since the student's last one.
     let step = 0;
     for (let i = req.messages.length - 1; i >= 0 && req.messages[i]!.role !== "user"; i--) if (req.messages[i]!.role === "assistant") step++;
-    yield* this.steps[step] ?? [{ type: "error", message: `the script has no step ${step + 1}` }];
+    for (const ev of this.steps[step] ?? [{ type: "error", message: `the script has no step ${step + 1}` }]) {
+      if ("wait" in ev) await new Promise((resolve) => setTimeout(resolve, ev.wait));
+      else yield ev;
+    }
   }
 }
 
@@ -53,6 +56,11 @@ const SCRIPTS: Record<string, ScriptStep[]> = {
       { type: "text_delta", text: "Your sum is set up right, but 2 + 2 is 4, not 5 — I've circled the 5 on your board." },
       { type: "done", stopReason: "end_turn" },
     ],
+  ],
+  /** The same board: three seconds' thought, time for the page to go before the error on the 5 is placed; then the answer. */
+  "check-sum-slowly": [
+    [{ wait: 3_000 }, annotateCall([{ target: "T1 word 5", kind: "error", mark: "circle", note: "2 + 2 is 4, not 5." }]), { type: "done", stopReason: "end_turn" }],
+    [{ type: "text_delta", text: "2 + 2 is 4, not 5 — I've circled the 5 on your board." }, { type: "done", stopReason: "end_turn" }],
   ],
 };
 

@@ -6,10 +6,11 @@
  * selected — and the reply streams back (lib/canvas/chat.ts has the event
  * format). The model has one tool, annotate_canvas: notes pinned to places
  * on the board, which stream out with the reply for the open canvas to add
- * and save (lib/canvas/chatTurn.ts runs the reply; this route never writes
- * the canvas itself). The first event carries exactly the canvas text the
- * model was given and the region it was limited to; the same is stored on
- * the user's message, so "What the AI saw" survives a reload.
+ * and save, and are kept until it has (lib/canvas/chatTurn.ts runs the
+ * reply; this route never writes the canvas itself). The first event
+ * carries exactly the canvas text the model was given and the region it was
+ * limited to; the same is stored on the user's message, so "What the AI
+ * saw" survives a reload.
  *
  * Stored as an ordinary chat (chats.canvas_id) so it can later be opened as a
  * normal chat. Labels (M1, Q2, …) stay the same across turns: the reader's
@@ -31,7 +32,7 @@ import { readCanvas, type LabelMap } from "@/lib/canvas/textSyntax";
 import { MAX_ANNOTATIONS_PER_TURN } from "@/lib/canvas/annotate";
 import { encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
 import { changesSection, type CanvasEdit } from "@/lib/canvas/editLog";
-import { findCanvasChat, lockChat, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
+import { findCanvasChat, lockChat, recordAIEdits, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
 import { runCanvasTurn } from "@/lib/canvas/chatTurn";
 import { scriptedProvider } from "@/lib/canvas/scripted";
 
@@ -179,6 +180,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
           const provider = scriptedProvider(chat.model) ?? getChatProvider(session.userId, { model: chat.model, think: chat.thinkingEnabled === 1 });
           error = await runCanvasTurn({
             provider, system: SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS, board,
+            record: (placed) => recordAIEdits(canvasId, session.userId, messageId, placed),
             send: (ev) => {
               if (ev.type === "text_delta") text += ev.text;
               send(ev);
