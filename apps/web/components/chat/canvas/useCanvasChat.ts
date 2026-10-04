@@ -14,16 +14,36 @@ export type CanvasTurn = {
   text: string;
   /** User turns: what the model was shown with this message — null until the server says. */
   context: CanvasContext | null;
+  /** User turns: the AI annotation this message replies to; null for any other. */
+  annotationId: string | null;
   streaming: boolean;
   error: string | null;
 };
 
 function fromStored(m: CanvasChatMessage): CanvasTurn {
-  if (m.role === "event") return { id: m.id, role: "event", text: m.content, context: null, streaming: false, error: null };
+  if (m.role === "event") return { id: m.id, role: "event", text: m.content, context: null, annotationId: null, streaming: false, error: null };
   return {
-    id: m.id, role: m.role, text: m.content, context: m.canvasContext,
+    id: m.id, role: m.role, text: m.content, context: m.canvasContext, annotationId: m.annotationId,
     streaming: false, error: m.status === "error" ? m.errorMessage : null,
   };
+}
+
+/** Each AI annotation's thread, by its id: the student's replies to it, each followed by the AI's answer, oldest first. */
+export function annotationThreads(turns: CanvasTurn[]): Map<string, CanvasTurn[]> {
+  const threads = new Map<string, CanvasTurn[]>();
+  /** The thread the newest reply went into, until its answer has. */
+  let open: CanvasTurn[] | null = null;
+  for (const t of turns) {
+    if (t.role === "user") {
+      open = t.annotationId ? (threads.get(t.annotationId) ?? []) : null;
+      if (open) threads.set(t.annotationId!, open);
+      open?.push(t);
+    } else if (t.role === "assistant" && open) {
+      open.push(t);
+      open = null;
+    }
+  }
+  return threads;
 }
 
 /** `entries` written into `ts`: a rewritten one in place, a new one at the end — or just before `before`, the turn they came ahead of. */
@@ -110,8 +130,11 @@ export function useCanvasChat(canvasId: string, onAIEdits: (messageId: string, e
     })();
   }
 
-  /** `rect`: the selection the message is about, in world coordinates; null asks about the whole canvas. */
-  async function send(message: string, rect: Rect | null) {
+  /**
+   * `rect`: the selection the message is about, in world coordinates; null asks about the whole canvas.
+   * `annotationId`: the AI annotation the message replies to, from its note on the board.
+   */
+  async function send(message: string, rect: Rect | null, annotationId: string | null = null) {
     const text = message.trim();
     if (!text || busyRef.current) return;
     busyRef.current = true;
@@ -124,12 +147,12 @@ export function useCanvasChat(canvasId: string, onAIEdits: (messageId: string, e
     let assistantId = `local-assistant-${Date.now()}`;
     setTurns((ts) => [
       ...ts,
-      { id: userId, role: "user", text, context: null, streaming: false, error: null },
-      { id: assistantId, role: "assistant", text: "", context: null, streaming: true, error: null },
+      { id: userId, role: "user", text, context: null, annotationId, streaming: false, error: null },
+      { id: assistantId, role: "assistant", text: "", context: null, annotationId: null, streaming: true, error: null },
     ]);
 
     try {
-      const body: CanvasChatRequest = rect ? { message: text, selection: { rect } } : { message: text };
+      const body: CanvasChatRequest = { message: text, ...(rect ? { selection: { rect } } : {}), ...(annotationId ? { annotationId } : {}) };
       const res = await fetch(`/api/canvas/${canvasId}/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -153,7 +176,7 @@ export function useCanvasChat(canvasId: string, onAIEdits: (messageId: string, e
               userId = ev.userMessageId;
               assistantId = ev.messageId;
               hasChatRef.current = true;
-              const context = { text: ev.text, region: ev.region, changes: ev.changes };
+              const context = { text: ev.text, region: ev.region, changes: ev.changes, replyTo: ev.replyTo };
               setTurns((ts) => withEntries(ts, ev.edits, localUser).map((t) => (
                 t.id === localUser ? { ...t, id: userId, context } : t.id === localAssistant ? { ...t, id: assistantId } : t
               )));

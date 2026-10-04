@@ -143,6 +143,9 @@ export const messages = pgTable("messages", {
   /** Role "event": what happened, structured — for a canvas edit, a CanvasEdit (lib/canvas/editLog.ts).
    * `content` holds the same as one sentence. */
   event: jsonb("event"),
+  /** Canvas chats, on a user's message that replies to one of the AI's annotations: that annotation's
+   * element id. No foreign key — the annotation lives in the canvas payload, and its thread outlives it. */
+  annotationId: text("annotation_id"),
   createdAt: createdAt(),
 }, (t) => [
   index("messages_chat_idx").on(t.chatId, t.createdAt),

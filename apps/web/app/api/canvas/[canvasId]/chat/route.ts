@@ -21,6 +21,12 @@
  * each save). A message first brings the log up to the board as saved, and
  * the model reads the entries since the student's last message as a section
  * before the board — they are never turns of their own.
+ *
+ * A message can be a reply to one of the AI's annotations, sent from its note
+ * on the board (`annotationId`). It is a turn like any other, stored with the
+ * annotation's id (messages.annotation_id) so the note shows its thread; the
+ * model reads which annotation it answers — label, kind, place and note — after
+ * the board (forModel), and keeps its tool.
  */
 import { asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -32,7 +38,7 @@ import { readCanvas, type LabelMap } from "@/lib/canvas/textSyntax";
 import { encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
 import { changesSection, type CanvasEdit } from "@/lib/canvas/editLog";
 import { findCanvasChat, lockChat, recordAIEdits, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
-import { CANVAS_CHAT_SYSTEM, forModel, MAX_OUTPUT_TOKENS, runCanvasTurn } from "@/lib/canvas/chatTurn";
+import { CANVAS_CHAT_SYSTEM, forModel, MAX_OUTPUT_TOKENS, repliedAnnotation, runCanvasTurn } from "@/lib/canvas/chatTurn";
 import { scriptedProvider } from "@/lib/canvas/scripted";
 
 export const runtime = "nodejs";
@@ -45,6 +51,7 @@ const rectSchema = z.object({
 const requestSchema = z.object({
   message: z.string().trim().min(1),
   selection: z.object({ rect: rectSchema }).optional(),
+  annotationId: z.string().min(1).optional(),
 });
 
 /** Created on first use, with the model and thinking setting a new chat would get (app/api/chat/route.ts). */
@@ -87,13 +94,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
 
     const parsed = requestSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return Response.json({ error: "bad request" }, { status: 400 });
-    const { message } = parsed.data;
+    const { message, annotationId } = parsed.data;
     const region = parsed.data.selection?.rect ?? null;
 
     const chatId = ((await findCanvasChat(canvasId, session.userId)) ?? (await createCanvasChat(canvasId, canvas.title, session.userId))).id;
 
     // All under the chat's lock, so no entry can land between the ones this message folds in and the message itself.
-    const { chat, context, history, edits, userRow, assistantRow, board } = await db.transaction(async (tx) => {
+    const turn = await db.transaction(async (tx) => {
       const chat = await lockChat(tx, chatId);
       const [current] = await tx.select({ payload: artifacts.payload, version: artifacts.version }).from(artifacts).where(eq(artifacts.id, canvasId));
       // The log catches up with the board as saved; that read is the one to send, unless only a region is wanted.
@@ -108,11 +115,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
       let since = history.length;
       while (since > 0 && history[since - 1]!.role !== "user") since--;
       const entries = history.slice(since).filter((m) => m.role === "event").map((m) => m.event as CanvasEdit);
-      const context: CanvasContext = { text: read.text, region, ...(entries.length > 0 ? { changes: changesSection(entries) } : {}) };
+      // A reply goes to an annotation on the board as saved; one erased meanwhile has nothing to answer.
+      const replyTo = annotationId ? repliedAnnotation(elements, read.labels, annotationId) : null;
+      if (annotationId && !replyTo) return null;
+      const context: CanvasContext = {
+        text: read.text, region, ...(entries.length > 0 ? { changes: changesSection(entries) } : {}), ...(replyTo ? { replyTo } : {}),
+      };
 
       await tx.update(chats).set({ canvasLabels: read.labels, updatedAt: new Date() }).where(eq(chats.id, chatId));
       const [userRow] = await tx.insert(messages).values({
-        userId: session.userId, chatId, role: "user", content: message, canvasContext: context, createdAt: sql`clock_timestamp()`,
+        userId: session.userId, chatId, role: "user", content: message, canvasContext: context, annotationId: annotationId ?? null,
+        createdAt: sql`clock_timestamp()`,
       }).returning();
       const [assistantRow] = await tx.insert(messages).values({
         userId: session.userId, chatId, role: "assistant", content: "", status: "streaming", createdAt: sql`clock_timestamp()`,
@@ -122,6 +135,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
       const board = () => ({ elements, doc: (whole ?? readCanvas(elements, { labels: read.labels })).doc });
       return { chat, context, history, edits: synced.written, userRow: userRow!, assistantRow: assistantRow!, board };
     });
+    if (!turn) return Response.json({ error: "annotation not found" }, { status: 404 });
+    const { chat, context, history, edits, userRow, assistantRow, board } = turn;
 
     const modelMessages: Message[] = [
       ...history.flatMap((m): Message[] => {
