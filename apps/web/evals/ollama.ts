@@ -14,7 +14,8 @@ import type { ToolSpec } from "@/lib/llm/types";
 
 const envPath = resolve(fileURLToPath(new URL(".", import.meta.url)), "../.env.local");
 if (existsSync(envPath)) process.loadEnvFile(envPath);
-const { OllamaProvider } = await import("@/lib/llm/ollama");
+/** The app's provider, for an eval that runs more than one call (the canvas chat's reply loop). */
+export const { OllamaProvider } = await import("@/lib/llm/ollama");
 
 /**
  * `firstTokenMs`: when the first visible token or tool call arrived — for a thinking model, roughly how long it thought.
