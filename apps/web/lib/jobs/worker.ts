@@ -5,7 +5,7 @@
  * worker uses, so running several of these — or running one alongside an
  * on-demand `runDueJobs()` from a page load — cannot double-process a row.
  */
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, jobs } from "@mola/db";
 import { CALENDAR_JOB_KINDS, type CalendarJobKind } from "@mola/shared";
 import { HANDLERS } from "./handlers";
@@ -126,14 +126,4 @@ export async function enqueueJob(
   if (existing.length > 0) return;
 
   await db.insert(jobs).values({ userId, kind, payload, runAfter: runAfter ?? new Date() });
-}
-
-/** True when anything of these kinds is due — cheap guard before a drain. */
-export async function hasDueJobs(kinds: readonly CalendarJobKind[]): Promise<boolean> {
-  const rows = await db.select({ id: jobs.id }).from(jobs).where(and(
-    eq(jobs.status, "pending"),
-    lte(jobs.runAfter, new Date()),
-    inArray(jobs.kind, kinds as unknown as string[]),
-  )).limit(1);
-  return rows.length > 0;
 }

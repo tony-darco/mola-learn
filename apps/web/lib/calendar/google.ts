@@ -176,14 +176,6 @@ export async function saveGoogleCredential(input: {
   });
 }
 
-export async function deleteGoogleCredential(userId: string, accountEmail: string): Promise<void> {
-  await db.delete(googleCredentials).where(and(
-    eq(googleCredentials.userId, userId),
-    eq(googleCredentials.googleAccountEmail, accountEmail),
-  ));
-  ACCESS_TOKENS.delete(`${userId}:${accountEmail}`);
-}
-
 export async function hasGoogleCredential(userId: string): Promise<string | null> {
   const rows = await db.select({ email: googleCredentials.googleAccountEmail })
     .from(googleCredentials).where(eq(googleCredentials.userId, userId)).limit(1);

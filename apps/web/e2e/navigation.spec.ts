@@ -19,7 +19,7 @@ test.use({ storageState: ALICE_STORAGE });
 test("a new general chat and a new course chat both land in the sidebar's Chats list, and the course chat is scoped to its course", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/chat");
 
   const generalChatId = await newGeneralChat(page);
   await expect(page.locator(`[data-testid="sidebar-chat-link"][href="/chats/${generalChatId}"]`)).toBeVisible();
@@ -37,7 +37,7 @@ test.describe("live-turn dependent navigation checks", () => {
   test.setTimeout(5 * 60_000);
 
   test("reloading mid-conversation restores history instead of showing it empty", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/chat");
     await newGeneralChat(page);
 
     const messageText = "Just acknowledge this message in one short sentence.";
@@ -58,7 +58,7 @@ test.describe("live-turn dependent navigation checks", () => {
   });
 
   test("sidebar list re-sorts to reflect a chat's own new activity", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/chat");
     const chatXId = await newGeneralChat(page);
     const chatYId = await newGeneralChat(page); // created after X — starts above it in a recency list
 

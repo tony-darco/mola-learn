@@ -18,12 +18,12 @@ export type ChatModelOption = {
   supportsThinking: boolean;
 };
 
+// Gemma 4 only. Retiring a model here needs a data migration too (see
+// 0012_retire_non_gemma_models.sql) — a chat or user row still naming it is
+// rejected as "unknown model" by the chat API and the picker.
 export const CHAT_MODELS: readonly ChatModelOption[] = [
-  { id: "qwen3.6:27b", label: "qwen3.6:27b", description: "Current default", supportsThinking: true },
-  { id: "rnj-1:latest", label: "RNJ-1", description: "8B, code and STEM", supportsThinking: false },
-  { id: "gemma4:26b", label: "gemma4:26b", description: "26B general", supportsThinking: true },
+  { id: "gemma4:26b", label: "gemma4:26b", description: "Default — 26B, fast", supportsThinking: true },
   { id: "gemma4:12b", label: "gemma4:12b", description: "12B general", supportsThinking: true },
-  { id: "qwen3.8:27b", label: "qwen3.8:27b", description: "27B latest", supportsThinking: true },
 ] as const;
 
 export function modelSupportsThinking(modelId: string): boolean {

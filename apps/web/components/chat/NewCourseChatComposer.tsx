@@ -16,7 +16,7 @@ import { MATH_CATEGORIES, wrapMathForInsertion } from "./math-symbols";
  * Enter on the chat page.
  */
 export function NewCourseChatComposer({
-  courseId, placeholder, defaultModel = "qwen3.6:27b", defaultThinkingEnabled = true, hasOwnKey = false,
+  courseId, placeholder, defaultModel = "gemma4:26b", defaultThinkingEnabled = true, hasOwnKey = false,
   prefillText, prefillToken,
 }: {
   courseId?: string;

@@ -35,6 +35,15 @@ apps/web/playwright-report/
 apps/web/test-results/
 apps/web/blob-report/
 
+# canvas-syntax eval runs (apps/web/evals/canvas-syntax)
+apps/web/evals/canvas-syntax/output/
+# canvas-reader eval runs (apps/web/evals/canvas-reader)
+apps/web/evals/canvas-reader/output/
+# canvas-understanding eval runs (apps/web/evals/canvas-understanding)
+apps/web/evals/canvas-understanding/output/
+# canvas-annotate eval runs (apps/web/evals/canvas-annotate)
+apps/web/evals/canvas-annotate/output/
+
 # local-only dev-server launch config for the Browser preview tool
 .claude/
 

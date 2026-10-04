@@ -19,7 +19,7 @@ export const sourceRefSchema = z.object({
 });
 export type SourceRef = z.infer<typeof sourceRefSchema>;
 
-export const ARTIFACT_KINDS = ["flashcard_deck", "quiz", "mind_map"] as const;
+export const ARTIFACT_KINDS = ["flashcard_deck", "quiz", "mind_map", "canvas"] as const;
 export const artifactKindSchema = z.enum(ARTIFACT_KINDS);
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
@@ -84,10 +84,199 @@ export const mindMapPayloadSchema = z.object({
     .default([]),
 });
 
+// ── Canvas — an infinite whiteboard ──────────────────────────────────────────
+//
+// Elements sit at real (x, y) — deliberately no spatial grid/hex-tiling.
+// "Addressable regions" (for a later phase where a model reads/annotates the
+// canvas) are explicit `frame` elements other elements belong to via
+// `parentId`, not a coordinate-derived index. `index` is a fractional-indexing
+// key (see lib/canvas/order.ts) — sort with plain `<`, never localeCompare.
+
+export const canvasDashStyleSchema = z.enum(["solid", "dashed", "dotted"]);
+export const canvasFillStyleSchema = z.enum(["solid", "hachure", "crosshatch", "none"]);
+export const canvasShapeKindSchema = z.enum(["rectangle", "ellipse", "triangle", "star"]);
+export const canvasBackgroundPatternSchema = z.enum(["dots", "grid", "lines", "blank"]);
+export const canvasTextAlignSchema = z.enum(["left", "center", "right"]);
+/** How a text/note box reconciles its stored size against what's actually
+ * typed: "fixed" never auto-adjusts (text may clip); "shrink" reduces the
+ * font size to keep the box's own size; "grow" enlarges the box to keep
+ * the font size. */
+export const canvasAutoFitSchema = z.enum(["fixed", "shrink", "grow"]);
+
+export const canvasElementBaseSchema = z.object({
+  id: z.string().min(1),
+  /** A frame element's id, or null — the only addressable-region mechanism. */
+  parentId: z.string().nullable(),
+  index: z.string().min(1),
+  x: z.number(), y: z.number(),
+  width: z.number().nonnegative(), height: z.number().nonnegative(),
+  /** Always 0 in v1 — no rotate UI. Kept for forward compat. */
+  rotation: z.number().default(0),
+  opacity: z.number().min(0).max(1).default(1),
+  /** "ai": put there by the canvas chat (annotations), never by the user's own tools. */
+  createdBy: z.enum(["user", "ai"]).default("user"),
+});
+
+export const canvasDrawElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("draw"),
+  props: z.object({
+    /** Relative to the element's own (x, y) — moving it never rewrites these. */
+    points: z.array(z.object({
+      x: z.number(), y: z.number(),
+      pressure: z.number().min(0).max(1).optional(),
+    })).min(2),
+    color: z.string().min(1),
+    strokeWidth: z.number().positive(),
+    /** Highlighter renders translucent, flat-capped, and wider — same points/color/strokeWidth fields, different rendering. */
+    variant: z.enum(["pen", "highlighter"]).default("pen"),
+    /** "solid" renders the tapered perfect-freehand ink; dashed/dotted fall
+     * back to a plain stroked polyline (dashing a variable-width filled
+     * outline doesn't read as a dashed line) — same visual language as the
+     * line/shape tools' dash option. */
+    dash: canvasDashStyleSchema.default("solid"),
+  }),
+});
+
+export const canvasTextElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("text"),
+  props: z.object({
+    text: z.string(),
+    /** Font color. */
+    color: z.string().min(1),
+    fontSize: z.number().positive(),
+    /** null = transparent (the original, paper-less look). */
+    backgroundColor: z.string().nullable().default(null),
+    bold: z.boolean().default(false),
+    italic: z.boolean().default(false),
+    textAlign: canvasTextAlignSchema.default("left"),
+    autoFit: canvasAutoFitSchema.default("grow"),
+  }),
+});
+
+export const canvasFrameElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("frame"),
+  props: z.object({ name: z.string() }),
+});
+
+/** Line and arrow are the same element — start is (x,y), end is (x+endX, y+endY), relative like draw's points. */
+export const canvasLineElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("line"),
+  props: z.object({
+    endX: z.number(), endY: z.number(),
+    color: z.string().min(1),
+    strokeWidth: z.number().positive(),
+    dash: canvasDashStyleSchema.default("solid"),
+    startArrow: z.boolean().default(false),
+    endArrow: z.boolean().default(false),
+  }),
+});
+
+export const canvasShapeElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("shape"),
+  props: z.object({
+    shapeKind: canvasShapeKindSchema,
+    color: z.string().min(1),
+    fillColor: z.string().nullable(),
+    fillStyle: canvasFillStyleSchema.default("none"),
+    strokeWidth: z.number().positive(),
+    dash: canvasDashStyleSchema.default("solid"),
+  }),
+});
+
+/** A sticky note — a distinct, filled-card element, not a text-tool style variant. */
+export const canvasNoteElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("note"),
+  props: z.object({
+    text: z.string(),
+    /** Paper color. */
+    color: z.string().min(1),
+    textColor: z.string().default("#1c1b18"),
+    fontSize: z.number().positive(),
+    bold: z.boolean().default(false),
+    italic: z.boolean().default(false),
+    textAlign: canvasTextAlignSchema.default("left"),
+    autoFit: canvasAutoFitSchema.default("grow"),
+  }),
+});
+
+/** LaTeX source, rendered via KaTeX and edited via the app's existing MathLive surface. */
+export const canvasMathElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("math"),
+  props: z.object({
+    latex: z.string(),
+    color: z.string().min(1),
+    fontSize: z.number().positive(),
+  }),
+});
+
+export const canvasImageElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("image"),
+  props: z.object({
+    url: z.string().min(1),
+    naturalWidth: z.number().positive(),
+    naturalHeight: z.number().positive(),
+  }),
+});
+
+export const canvasAnnotationKindSchema = z.enum(["error", "hint", "check", "note"]);
+export const canvasAnnotationMarkSchema = z.enum(["circle", "underline", "box", "none"]);
+
+/**
+ * A note the AI pinned to one place on the board (lib/canvas/annotate.ts):
+ * an icon for its kind at the place's corner, an optional mark drawn round
+ * it, and the note, opened from the icon. The box is the place's — its
+ * target's — so the annotation moves, selects and erases with the work it
+ * is on. Always createdBy "ai"; its id is what later steps (replying to
+ * it, taking it back) refer to.
+ */
+export const canvasAnnotationElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("annotation"),
+  props: z.object({
+    kind: canvasAnnotationKindSchema,
+    mark: canvasAnnotationMarkSchema,
+    note: z.string(),
+    /** The place, as the read addressed it when the annotation was made: "M8 row 1 col 4", "T2 word 5", "X1". */
+    target: z.string(),
+    /** What that place was read from then: the pen strokes of a cell or word, or a placed element's id. */
+    targetIds: z.array(z.string()),
+  }),
+});
+
+export const canvasElementSchema = z.discriminatedUnion("type", [
+  canvasDrawElementSchema,
+  canvasTextElementSchema,
+  canvasFrameElementSchema,
+  canvasLineElementSchema,
+  canvasShapeElementSchema,
+  canvasNoteElementSchema,
+  canvasMathElementSchema,
+  canvasImageElementSchema,
+  canvasAnnotationElementSchema,
+]);
+export type CanvasElement = z.infer<typeof canvasElementSchema>;
+export type CanvasDrawElement = z.infer<typeof canvasDrawElementSchema>;
+export type CanvasLineElement = z.infer<typeof canvasLineElementSchema>;
+export type CanvasShapeElement = z.infer<typeof canvasShapeElementSchema>;
+export type CanvasNoteElement = z.infer<typeof canvasNoteElementSchema>;
+export type CanvasMathElement = z.infer<typeof canvasMathElementSchema>;
+export type CanvasImageElement = z.infer<typeof canvasImageElementSchema>;
+export type CanvasAnnotationElement = z.infer<typeof canvasAnnotationElementSchema>;
+
+export const canvasPayloadSchema = z.object({
+  kind: z.literal("canvas"),
+  elements: z.array(canvasElementSchema),
+  viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number().positive() }),
+  background: z.object({
+    pattern: canvasBackgroundPatternSchema,
+    color: z.string().min(1),
+  }).default({ pattern: "dots", color: "#ffffff" }),
+});
+
 export const artifactPayloadSchema = z.discriminatedUnion("kind", [
   flashcardDeckPayloadSchema,
   quizPayloadSchema,
   mindMapPayloadSchema,
+  canvasPayloadSchema,
 ]);
 export type ArtifactPayload = z.infer<typeof artifactPayloadSchema>;
 

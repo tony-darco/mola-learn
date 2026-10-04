@@ -65,10 +65,6 @@ export function utcDayKey(d: Date): string {
   return `${d.getUTCFullYear()}-${m}-${day}`;
 }
 
-export function isSameDay(a: Date, b: Date): boolean {
-  return dayKey(a) === dayKey(b);
-}
-
 /**
  * Always 42 cells — six rows of seven, starting on the Monday on or before the
  * first of `anchor`'s month. A fixed height matters more than a tight one: a

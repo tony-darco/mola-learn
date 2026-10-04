@@ -65,6 +65,10 @@ services:
       S3_BUCKET_SAFE: mola-safe
       S3_BUCKET_QUARANTINE: mola-quarantine
       OLLAMA_HOST: http://192.168.1.17:11434
+      # Summaries are mostly reading long excerpts, where gemma4:12b (fully on
+      # the 12 GB GPU) is ~4x faster than chat's gemma4:26b. The cost: a job
+      # evicts 26b, so the next chat message reloads it (~10s).
+      MOLA_CHAT_MODEL: gemma4:12b
       CLAMD_HOST: clamav
       CLAMD_PORT: "3310"
     depends_on:

@@ -6,7 +6,11 @@ import type { CompletionRequest, LLMProvider, Message } from "./types";
 // convention), which fetch()/URL reject outright — default it to http://.
 const rawHost = process.env.OLLAMA_HOST ?? "192.168.1.17:11434";
 export const HOST = /^https?:\/\//.test(rawHost) ? rawHost : `http://${rawHost}`;
-export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "qwen3.6:27b";
+// gemma4:26b, not qwen3.6:27b: the LAN box's GPU is a 12 GB RTX 5070, and
+// qwen3.6's ~18 GB of dense weights leave most of it on the CPU (minutes per
+// thinking turn). gemma4:26b is mixture-of-experts — ~4B active per token —
+// so it stays fast even partly offloaded.
+export const DEFAULT_CHAT_MODEL = process.env.MOLA_CHAT_MODEL ?? "gemma4:26b";
 
 /**
  * Inactivity timeout, not a total-duration cap.
@@ -92,7 +96,15 @@ export class OllamaProvider implements LLMProvider {
       signal,
       body: JSON.stringify({
         model: this.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        // A tool call and its result go back as Ollama's own fields. Sent as
+        // bare text, gemma4:26b reads an empty turn of its own followed by a
+        // result it never asked for: it calls the same tool again, or writes
+        // a call out as text (the canvas chat's annotate tool, measured).
+        messages: messages.map((m) => ({
+          role: m.role, content: m.content,
+          ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((c) => ({ function: { name: c.name, arguments: c.input } })) } : {}),
+          ...(m.role === "tool" && m.toolCallId ? { tool_name: messages.flatMap((x) => x.toolCalls ?? []).find((c) => c.id === m.toolCallId)?.name } : {}),
+        })),
         stream: true,
         think,
         options: {
@@ -124,6 +136,7 @@ export class OllamaProvider implements LLMProvider {
     // done_reason "length" with this still false (below) is known to be
     // fully silent, safe to retry rather than surface as a failed turn.
     let sawOutput = false;
+    const leak = new ChannelLeakFilter();
 
     try {
     while (true) {
@@ -164,13 +177,18 @@ export class OllamaProvider implements LLMProvider {
           };
         }
 
-        const text = chunk.message?.content;
+        const text = chunk.message?.content && leak.push(chunk.message.content);
         if (text) {
           sawOutput = true;
           yield { type: "text_delta", text };
         }
 
         if (chunk.done) {
+          const rest = leak.end();
+          if (rest) {
+            sawOutput = true;
+            yield { type: "text_delta", text: rest };
+          }
           // A thinking-capable model can spend its entire output budget on
           // hidden reasoning and stop with done_reason "length" having
           // never emitted a single visible token or tool call — confirmed
@@ -208,6 +226,52 @@ export class OllamaProvider implements LLMProvider {
     } finally {
       stall.clear();
     }
+  }
+}
+
+/**
+ * gemma4:26b now and then opens a call's visible text with its thinking
+ * channel's header: "thought\n<channel|>" (an empty thought), or "thought\n"
+ * in front of what is plainly the answer — 3 of the canvas annotate eval's
+ * later calls, 2026-10-04. The start of each attempt is held until it shows
+ * whether it opens that way; if it does, the rest is held until the
+ * channel's close marker (what came before it was thinking) or the end of
+ * the call (all of it was the answer), and the header never shows.
+ */
+export class ChannelLeakFilter {
+  private static readonly HEADERS = ["thought\n", "<|channel>thought\n"];
+  private static readonly CLOSE = "<channel|>";
+  /** null once the text is passing straight through. */
+  private held: string | null = "";
+  private inThought = false;
+
+  push(text: string): string {
+    if (this.held === null) return text;
+    this.held += text;
+    if (!this.inThought) {
+      const start = this.held.trimStart();
+      const header = ChannelLeakFilter.HEADERS.find((h) => start.startsWith(h));
+      if (!header) {
+        // Could it still become one? Then keep holding.
+        if (ChannelLeakFilter.HEADERS.some((h) => h.startsWith(start))) return "";
+        return this.release(this.held);
+      }
+      this.inThought = true;
+      this.held = start.slice(header.length);
+    }
+    const close = this.held.indexOf(ChannelLeakFilter.CLOSE);
+    return close < 0 ? "" : this.release(this.held.slice(close + ChannelLeakFilter.CLOSE.length).trimStart());
+  }
+
+  /** What is still held when the call ends. */
+  end(): string {
+    if (this.held === null) return "";
+    return this.release(this.inThought ? this.held.trimStart() : this.held);
+  }
+
+  private release(text: string): string {
+    this.held = null;
+    return text;
   }
 }
 

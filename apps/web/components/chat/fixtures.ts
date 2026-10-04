@@ -113,8 +113,42 @@ const mindMapFixture: ArtifactRecord = artifactRecordSchema.parse({
   updatedAt: now(),
 });
 
+const canvasFixture: ArtifactRecord = artifactRecordSchema.parse({
+  id: "11111111-1111-4111-8111-111111111144",
+  userId: "00000000-0000-4000-8000-000000000000",
+  courseId: null,
+  originChatId: null,
+  kind: "canvas",
+  title: "Untitled canvas",
+  topics: [],
+  sources: [],
+  payload: {
+    kind: "canvas",
+    elements: [
+      {
+        id: "f1", type: "frame", parentId: null, index: "a0",
+        x: 0, y: 0, width: 200, height: 150, rotation: 0, createdBy: "user",
+        props: { name: "Scratch work" },
+      },
+      {
+        id: "d1", type: "draw", parentId: "f1", index: "a1",
+        x: 20, y: 20, width: 60, height: 40, rotation: 0, createdBy: "user",
+        props: {
+          points: [{ x: 0, y: 0 }, { x: 30, y: 20 }, { x: 60, y: 40 }],
+          color: "#481715", strokeWidth: 3,
+        },
+      },
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  },
+  version: 1,
+  createdAt: now(),
+  updatedAt: now(),
+});
+
 export const ARTIFACT_FIXTURES: ArtifactRecord[] = [
   flashcardDeckFixture,
   quizFixture,
   mindMapFixture,
+  canvasFixture,
 ];
