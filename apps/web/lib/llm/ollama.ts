@@ -137,6 +137,12 @@ export class OllamaProvider implements LLMProvider {
     // fully silent, safe to retry rather than surface as a failed turn.
     let sawOutput = false;
     const leak = new ChannelLeakFilter();
+    const written = req.tools?.length ? new ToolCallLeakFilter(req.tools.map((t) => t.name)) : null;
+    const events = (outs: LeakOut[]): ProviderStreamEvent[] => outs.flatMap((o): ProviderStreamEvent[] =>
+      "call" in o ? [{ type: "tool_call", id: crypto.randomUUID(), name: o.call.name, input: o.call.input }]
+        : o.text ? [{ type: "text_delta", text: o.text }] : []);
+    // The visible text, after both filters: words, and any tool call written out among them.
+    const visible = (text: string) => events(written ? written.push(text) : [{ text }]);
 
     try {
     while (true) {
@@ -177,17 +183,16 @@ export class OllamaProvider implements LLMProvider {
           };
         }
 
-        const text = chunk.message?.content && leak.push(chunk.message.content);
-        if (text) {
+        const content = chunk.message?.content;
+        for (const ev of content ? visible(leak.push(content)) : []) {
           sawOutput = true;
-          yield { type: "text_delta", text };
+          yield ev;
         }
 
         if (chunk.done) {
-          const rest = leak.end();
-          if (rest) {
+          for (const ev of [...visible(leak.end()), ...events(written?.end() ?? [])]) {
             sawOutput = true;
-            yield { type: "text_delta", text: rest };
+            yield ev;
           }
           // A thinking-capable model can spend its entire output budget on
           // hidden reasoning and stop with done_reason "length" having
@@ -226,6 +231,124 @@ export class OllamaProvider implements LLMProvider {
     } finally {
       stall.clear();
     }
+  }
+}
+
+type LeakOut = { text: string } | { call: { name: string; input: unknown } };
+const TOOL_CALL_STARTS = ["<|tool_call>", "<call:", "call:"];
+const TOOL_CALL_START = /(?:<\|tool_call>\s*)?<?call:([A-Za-z_]\w*)>?\s*(?=\{)/g;
+const GEMMA_QUOTE = '<|"|>';
+
+/**
+ * gemma4:26b now and then writes a tool call into its visible text instead
+ * of making it — `<call:annotate_canvas>{annotations:[…]}</call:annotate_canvas>`,
+ * keys unquoted (the canvas chat, 2026-10-04) — and Ollama passes it on as
+ * words. For a request that offered tools, a call written out for one of
+ * them is taken back out of the text and made a tool call; text that could
+ * still turn into one is held until it shows whether it does.
+ */
+export class ToolCallLeakFilter {
+  private buf = "";
+  constructor(private readonly names: string[]) {}
+
+  push(text: string): LeakOut[] {
+    this.buf += text;
+    const out: LeakOut[] = [];
+    for (;;) {
+      const start = this.nextStart();
+      if (!start) {
+        const keep = this.heldFrom();
+        if (keep > 0) out.push({ text: this.buf.slice(0, keep) });
+        this.buf = this.buf.slice(keep);
+        return out;
+      }
+      const end = closingBrace(this.buf, start.brace);
+      if (end < 0) {
+        // The call is still arriving.
+        if (start.index > 0) out.push({ text: this.buf.slice(0, start.index) });
+        this.buf = this.buf.slice(start.index);
+        return out;
+      }
+      const after = new RegExp(`^\\s*(?:</call:${start.name}>|<tool_call\\|>)`).exec(this.buf.slice(end + 1));
+      const stop = end + 1 + (after?.[0].length ?? 0);
+      const input = parseLooseObject(this.buf.slice(start.brace, end + 1));
+      if (start.index > 0) out.push({ text: this.buf.slice(0, start.index) });
+      out.push(input === undefined ? { text: this.buf.slice(start.index, stop) } : { call: { name: start.name, input } });
+      this.buf = this.buf.slice(stop);
+    }
+  }
+
+  /** What is still held when the call ends: a call that never closed stays words. */
+  end(): LeakOut[] {
+    const text = this.buf;
+    this.buf = "";
+    return text ? [{ text }] : [];
+  }
+
+  private nextStart(): { index: number; brace: number; name: string } | null {
+    for (const m of this.buf.matchAll(TOOL_CALL_START)) {
+      if (this.names.includes(m[1]!)) return { index: m.index, brace: m.index + m[0].length, name: m[1]! };
+    }
+    return null;
+  }
+
+  /** Where the text stops being certain words: a call's opening, begun but not yet decidable ("<cal", "call:annot"). */
+  private heldFrom(): number {
+    for (let k = Math.max(0, this.buf.length - 64); k < this.buf.length; k++) {
+      const s = this.buf.slice(k);
+      if (TOOL_CALL_STARTS.some((m) => m.startsWith(s)) || /^(?:<\|tool_call>\s*)?<?call:\w*>?\s*$/.test(s)) return k;
+    }
+    return this.buf.length;
+  }
+}
+
+/** The index of the brace closing the one at `open`, strings skipped; -1 while it hasn't come. */
+function closingBrace(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s.startsWith(GEMMA_QUOTE, i)) {
+      const close = s.indexOf(GEMMA_QUOTE, i + GEMMA_QUOTE.length);
+      if (close < 0) return -1;
+      i = close + GEMMA_QUOTE.length - 1;
+    } else if (s[i] === '"') {
+      for (i++; i < s.length && s[i] !== '"'; i++) if (s[i] === "\\") i++;
+      if (i >= s.length) return -1;
+    } else if (s[i] === "{") depth++;
+    else if (s[i] === "}" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** A JSON object as gemma writes one: keys may be unquoted, strings may use its own quote token. Undefined if it isn't one. */
+function parseLooseObject(src: string): unknown {
+  let json = "";
+  for (let i = 0; i < src.length;) {
+    if (src.startsWith(GEMMA_QUOTE, i)) {
+      const close = src.indexOf(GEMMA_QUOTE, i + GEMMA_QUOTE.length);
+      json += JSON.stringify(src.slice(i + GEMMA_QUOTE.length, close));
+      i = close + GEMMA_QUOTE.length;
+      continue;
+    }
+    if (src[i] === '"') {
+      let j = i + 1;
+      while (j < src.length && src[j] !== '"') j += src[j] === "\\" ? 2 : 1;
+      json += src.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    const key = /^[A-Za-z_]\w*(?=\s*:)/.exec(src.slice(i));
+    if (key && /[{,]\s*$/.test(json)) {
+      json += JSON.stringify(key[0]);
+      i += key[0].length;
+      continue;
+    }
+    json += src[i++];
+  }
+  try {
+    const value: unknown = JSON.parse(json);
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
   }
 }
 
