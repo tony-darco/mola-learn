@@ -6,6 +6,7 @@ import type { ArtifactRecord, ArtifactKind } from "@mola/shared";
 import type { CourseOption, TermOption } from "@/lib/artifacts/filters";
 import { artifactIcon, summarizeArtifact } from "./artifact-summary";
 import { NewCanvasDialog } from "./canvas/NewCanvasDialog";
+import { CanvasThumbnail } from "./canvas/CanvasThumbnail";
 
 type ClientArtifact = Omit<ArtifactRecord, "createdAt" | "updatedAt"> & { createdAt: string; updatedAt: string };
 
@@ -227,15 +228,19 @@ function ArtifactCard({ artifact, courseLabel }: { artifact: ClientArtifact; cou
       href={`${KIND_ROUTE[artifact.kind]}/${artifact.id}`}
       className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface text-left transition hover:border-accent"
     >
-      <div className="flex h-28 flex-col justify-center gap-1 overflow-hidden bg-bg px-4 py-3">
-        {preview.length === 0 ? (
-          <span className="text-2xl text-fg-muted" aria-hidden="true">{artifactIcon(artifact.payload.kind)}</span>
-        ) : (
-          preview.map((line, i) => (
-            <div key={i} className="truncate text-xs text-fg-muted">{line}</div>
-          ))
-        )}
-      </div>
+      {artifact.payload.kind === "canvas" ? (
+        <CanvasThumbnail payload={artifact.payload} />
+      ) : (
+        <div className="flex h-28 flex-col justify-center gap-1 overflow-hidden bg-bg px-4 py-3">
+          {preview.length === 0 ? (
+            <span className="text-2xl text-fg-muted" aria-hidden="true">{artifactIcon(artifact.payload.kind)}</span>
+          ) : (
+            preview.map((line, i) => (
+              <div key={i} className="truncate text-xs text-fg-muted">{line}</div>
+            ))
+          )}
+        </div>
+      )}
       <div className="flex flex-col gap-1 border-t border-border p-3">
         <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-fg-muted">
           <span aria-hidden="true">{artifactIcon(artifact.payload.kind)}</span>
