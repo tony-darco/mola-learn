@@ -363,22 +363,26 @@ export const artifacts = pgTable("artifacts", {
 ]);
 
 /**
- * What the canvas chat's AI put on a canvas (apps/web/lib/canvas/annotate.ts),
- * one row per element, kept until a page has put it on the board and saved.
- * The open canvas page adds them and saves them itself, so one placed while
- * no page could — a tab closed mid-reply, a dropped stream, a failed save —
- * is added by the next page that opens the canvas or syncs its chat.
- * `appliedAt`: a page added it and saved; from then on it is the student's
- * to keep or erase, and never added again.
+ * What the canvas chat's AI did to a canvas (apps/web/lib/canvas/annotate.ts,
+ * apps/web/lib/canvas/writes.ts), one row per change — an element it added,
+ * or an edit or move of one already there — kept until a page has applied it
+ * and saved. The open canvas page applies them and saves them itself, so one
+ * made while no page could — a tab closed mid-reply, a dropped stream, a
+ * failed save — is applied by the next page that opens the canvas or syncs
+ * its chat. `appliedAt`: a page applied it and saved; from then on it is the
+ * student's to keep or undo, and never applied again.
  */
 export const canvasAiEdits = pgTable("canvas_ai_edits", {
-  /** The element's own id. */
+  /** The change's id: the element's own id for one the AI added; a fresh id for an edit or move. */
   id: text("id").primaryKey(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   canvasId: uuid("canvas_id").notNull().references(() => artifacts.id, { onDelete: "cascade" }),
-  /** The reply that placed it. */
+  /** The reply that made it. */
   messageId: uuid("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  /** The element as the AI left it. */
   element: jsonb("element").notNull(),
+  /** NULL for an element the AI added; for an edit or move, the whole element as it was before — what reverting it puts back. */
+  before: jsonb("before"),
   appliedAt: timestamp("applied_at", { withTimezone: true }),
   createdAt: createdAt(),
 }, (t) => [index("canvas_ai_edits_canvas_idx").on(t.canvasId)]);

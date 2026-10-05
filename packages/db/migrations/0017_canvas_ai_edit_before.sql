@@ -1,0 +1,1 @@
+ALTER TABLE "canvas_ai_edits" ADD COLUMN "before" jsonb;
