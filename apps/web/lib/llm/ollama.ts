@@ -249,12 +249,26 @@ const GEMMA_QUOTE = '<|"|>';
  */
 export class ToolCallLeakFilter {
   private buf = "";
+  /** The tags that may still close the last call made, when they hadn't arrived with it. */
+  private closers: string[] | null = null;
   constructor(private readonly names: string[]) {}
 
   push(text: string): LeakOut[] {
     this.buf += text;
     const out: LeakOut[] = [];
     for (;;) {
+      if (this.closers) {
+        const rest = this.buf.trimStart();
+        const tag = this.closers.find((t) => rest.startsWith(t));
+        if (tag) {
+          this.buf = rest.slice(tag.length);
+          this.closers = null;
+          continue;
+        }
+        // Only whitespace yet, or a closing tag begun but not finished.
+        if (this.closers.some((t) => t.startsWith(rest))) return out;
+        this.closers = null;
+      }
       const start = this.nextStart();
       if (!start) {
         const keep = this.heldFrom();
@@ -274,6 +288,7 @@ export class ToolCallLeakFilter {
       const input = parseLooseObject(this.buf.slice(start.brace, end + 1));
       if (start.index > 0) out.push({ text: this.buf.slice(0, start.index) });
       out.push(input === undefined ? { text: this.buf.slice(start.index, stop) } : { call: { name: start.name, input } });
+      if (input !== undefined && !after) this.closers = [`</call:${start.name}>`, "<tool_call|>"];
       this.buf = this.buf.slice(stop);
     }
   }

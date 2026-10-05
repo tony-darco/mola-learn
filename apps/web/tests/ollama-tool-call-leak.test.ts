@@ -42,6 +42,17 @@ describe("ollama chat provider — a tool call written out as text", () => {
     expect(r.text).toBe("It looks like you've written a sentence and a math problem.\n\n Take another look.");
   });
 
+  it("drops the closing tag when it streams in after the call, split across chunks", async () => {
+    const r = await seen([
+      "Here's a note.\n\n<call:annotate_canvas>{annotations:[{kind:\"error\",mark:\"underline\",note:\"That's not quite right. What is 2 + 2?\",target:\"X1 word 15\"}]}",
+      "</",
+      "call:annotate_canvas>",
+      " Take another look.",
+    ]);
+    expect(r.calls).toEqual([{ name: "annotate_canvas", input: { annotations: [annotation] } }]);
+    expect(r.text).toBe("Here's a note.\n\n Take another look.");
+  });
+
   it("reads gemma's own call format, quote tokens and all, and a bare call", async () => {
     const native = await seen(['<|tool_call>call:annotate_canvas{annotations:[{target:<|"|>T1 word 5<|"|>,note:<|"|>Say "4".<|"|>}]}<tool_call|>']);
     expect(native.calls).toEqual([{ name: "annotate_canvas", input: { annotations: [{ target: "T1 word 5", note: 'Say "4".' }] } }]);
