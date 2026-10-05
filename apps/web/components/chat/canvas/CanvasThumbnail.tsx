@@ -111,6 +111,9 @@ function ThumbnailElement({ element }: { element: CanvasElement }) {
     );
   }
 
+  // AI annotations are an overlay on the board, not its content.
+  if (element.type === "annotation") return null;
+
   const isNote = element.type === "note";
   const { x, y, width, height } = element;
   const text = element.type === "math" ? element.props.latex : element.props.text;
