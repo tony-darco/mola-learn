@@ -11,16 +11,16 @@
  * never writes to the artifacts table itself), and runs compaction (§4) after
  * each turn.
  */
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   artifactRecordSchema, encodeSSE, isArtifactToolResult, type StreamEvent,
 } from "@mola/shared";
 import {
-  artifacts, cardSrsState, chats, compactionBoundaries, courses, db, flashcards, messages,
+  artifacts, cardSrsState, chats, courses, db, flashcards, messages,
   notifyMessageDone, users,
 } from "@mola/db";
 import { authzResponse, requireOwned, requireSession } from "@/lib/auth/ownership";
-import { getPublicApiKey } from "@/lib/auth/api-keys";
+import { loadChatHistory } from "@/lib/chat/history";
 import { assembleContext } from "@/lib/context/assemble";
 import { canEscalate, escalate } from "@/lib/context/hint-ladder";
 import { buildRegistry } from "@/lib/agent/tools";
@@ -479,31 +479,7 @@ export async function GET(
   try {
     const { chatId } = await params;
     const chat = await requireOwned("chat", chatId);
-
-    const [course, turns, chatArtifacts, [boundary], ownKey] = await Promise.all([
-      chat.courseId
-        ? db.select().from(courses).where(eq(courses.id, chat.courseId)).limit(1).then((r) => r[0] ?? null)
-        : Promise.resolve(null),
-      db.select().from(messages).where(eq(messages.chatId, chatId)).orderBy(asc(messages.createdAt)),
-      db.select().from(artifacts).where(eq(artifacts.originChatId, chatId)).orderBy(asc(artifacts.createdAt)),
-      db.select().from(compactionBoundaries).where(eq(compactionBoundaries.chatId, chatId))
-        .orderBy(desc(compactionBoundaries.createdAt)).limit(1),
-      getPublicApiKey(chat.userId),
-    ]);
-
-    return Response.json({
-      chat,
-      course: course ? { id: course.id, name: course.name, number: course.number } : null,
-      messages: turns,
-      artifacts: chatArtifacts.map((a) => artifactRecordSchema.parse(a)),
-      compactionBoundary: boundary
-        ? { upToMessageId: boundary.upToMessageId, summary: boundary.summary, createdAt: boundary.createdAt }
-        : null,
-      // A BYOK user's model/thinking picker has no effect (resolveProvider
-      // never forwards it to OpenAI/Anthropic) — the client uses this to hide
-      // the picker rather than show one that silently does nothing.
-      hasOwnKey: ownKey !== null,
-    });
+    return Response.json(await loadChatHistory(chat));
   } catch (err) {
     return authzResponse(err) ?? Response.json({ error: "internal" }, { status: 500 });
   }

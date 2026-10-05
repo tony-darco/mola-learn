@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { AuthzError, requireOwned } from "@/lib/auth/ownership";
+import { loadChatHistory } from "@/lib/chat/history";
 import { ChatMain } from "@/components/chat/ChatMain";
 
 export const dynamic = "force-dynamic";
@@ -16,12 +17,18 @@ export default async function ChatPage({ params }: { params: Promise<{ chatId: s
   const session = await getSession();
   if (!session) return null; // ShellLayout already redirected; unreachable in practice.
 
+  let chat;
   try {
-    await requireOwned("chat", chatId, session);
+    chat = await requireOwned("chat", chatId, session);
   } catch (err) {
     if (err instanceof AuthzError && err.status === 404) notFound();
     throw err;
   }
 
-  return <ChatMain chatId={chatId} />;
+  // History rides along with this render instead of being a second,
+  // client-side GET after mount. JSON round-trip so the client gets the
+  // exact shape GET /api/chat/[chatId] returns (Dates as ISO strings).
+  const initialHistory = JSON.parse(JSON.stringify(await loadChatHistory(chat)));
+
+  return <ChatMain chatId={chatId} initialHistory={initialHistory} />;
 }

@@ -19,7 +19,7 @@ import type { ActivityEntry, CompactionBoundary, Turn } from "./types";
 
 type MessageStatus = "streaming" | "done" | "error";
 
-type HistoryResponse = {
+export type HistoryResponse = {
   chat: { id: string; title: string; courseId: string | null; model: string; thinkingEnabled: number };
   course: { id: string; name: string; number: string | null } | null;
   messages: {
@@ -139,24 +139,27 @@ function lastRung(turns: Turn[]): HintRung | null {
  * preview. Rendered as `children` inside the persistent AppShell, which owns
  * the sidebar; this component has no sidebar of its own.
  */
-export function ChatMain({ chatId }: { chatId: string }) {
+export function ChatMain({ chatId, initialHistory }: { chatId: string; initialHistory: HistoryResponse }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const refreshSidebar = useRefreshSidebar();
   const confirm = useConfirm();
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [loading, setLoading] = useState(true);
+  // First paint (including SSR) comes straight from the server-loaded
+  // history, so there's no "Loading conversation…" pass on open. The load
+  // effect below still runs hydrate() for its side effects (reconnects).
+  const [turns, setTurns] = useState<Turn[]>(() => turnsFromHistory(initialHistory));
+  const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [rung, setRung] = useState<HintRung | null>(null);
-  const [canEscalate, setCanEscalate] = useState(true);
-  const [boundary, setBoundary] = useState<CompactionBoundary | null>(null);
+  const [rung, setRung] = useState<HintRung | null>(() => lastRung(turns));
+  const [canEscalate, setCanEscalate] = useState(() => computeCanEscalate(rung));
+  const [boundary, setBoundary] = useState<CompactionBoundary | null>(initialHistory.compactionBoundary);
   const [expandedCompacted, setExpandedCompacted] = useState(false);
   const [input, setInput] = useState("");
   const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
-  const [model, setModel] = useState("qwen3.6:27b");
-  const [thinkingEnabled, setThinkingEnabled] = useState(true);
-  const [hasOwnKey, setHasOwnKey] = useState(false);
+  const [model, setModel] = useState(initialHistory.chat.model);
+  const [thinkingEnabled, setThinkingEnabled] = useState(initialHistory.chat.thinkingEnabled === 1);
+  const [hasOwnKey, setHasOwnKey] = useState(initialHistory.hasOwnKey);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -295,6 +298,16 @@ export function ChatMain({ chatId }: { chatId: string }) {
     let cancelled = false;
     setLoadError(null);
 
+    // The server render already loaded this chat's history (page.tsx) —
+    // fresh by definition, so no cache lookup and no second GET.
+    if (initialHistory.chat.id === chatId) {
+      historyCache.current.set(chatId, initialHistory);
+      writeSessionCache(chatId, initialHistory);
+      hydrate(initialHistory);
+      setLoading(false);
+      return;
+    }
+
     let cached = historyCache.current.get(chatId);
     if (!cached) {
       // Cold mount (fresh tab, or a reload) — the in-memory Map is always
@@ -352,7 +365,9 @@ export function ChatMain({ chatId }: { chatId: string }) {
 
   // Fires the queued draft once the initial history load has settled (see
   // above) — this is what makes hitting Enter in the course composer start
-  // the chat immediately instead of requiring a second Enter here.
+  // the chat immediately instead of requiring a second Enter here. Also keyed
+  // on chatId: with server-loaded history `loading` is already false on a
+  // chat switch, so it no longer flips to re-trigger this.
   useEffect(() => {
     if (loading) return;
     const draft = pendingDraftRef.current;
@@ -360,7 +375,7 @@ export function ChatMain({ chatId }: { chatId: string }) {
     pendingDraftRef.current = null;
     void send(false, draft);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [loading, chatId]);
 
   function patchTurn(id: string, fn: (t: Turn) => Turn) {
     setTurns((ts) => ts.map((t) => (t.id === id ? fn(t) : t)));
