@@ -4,8 +4,9 @@
  * boxes, sticky notes, math, images, and every mark or connector drawn over
  * them — frames, shapes, lines, arrows, and the circles, arrows and
  * underlines people draw with the pen (marks.ts) — each with what it points
- * at, encloses, covers or contains (relations.ts) — and drawings made with
- * the pen, by their parts, joins and labels (sketch.ts).
+ * at, encloses, covers or contains (relations.ts) — drawings made with the
+ * pen, by their parts, joins and labels (sketch.ts), and, apart from all of
+ * it, the notes the AI pinned to the board (annotations).
  *
  * Every item gets a short label (M1, T3, X1, A2, …) that stays the same
  * across reads (labels.ts), so the model and later messages can refer to it.
@@ -18,12 +19,14 @@
  * Deterministic: the same elements and labels always give the identical
  * string.
  */
-import type { CanvasElement, CanvasShapeElement } from "@mola/shared";
+import type { CanvasAnnotationElement, CanvasElement, CanvasShapeElement } from "@mola/shared";
 import { DEFAULT_BITMAP_ROWS } from "./bitmap";
-import { blockRenderer, COORDINATES, HANDWRITING_GUIDE, plural, scriptedText, topLeft, type SyntaxRender } from "./handwriting";
+import {
+  blockRenderer, BOXES_GUIDE, COORDINATES, describeBoxes, HANDWRITING_GUIDE, plural, printedWord, scriptedText, topLeft, UNSURE_GUIDE, type SyntaxRender,
+} from "./handwriting";
 import { assignLabels, EMPTY_LABELS, type Labelable, type LabelMap } from "./labels";
 import { detectPenMarks, type PenMark } from "./marks";
-import { DEFAULT_MIN_CONFIDENCE, recognizeDoc } from "./recognize";
+import { DEFAULT_MIN_CONFIDENCE, recognizeDoc, type Recognition } from "./recognize";
 import { blockGlyphs, blockWords, coveredBy, enclosedBy, touching, underlinedBy, type Board, type Target } from "./relations";
 import {
   boxOf, centerX, centerY, height, inkFromElements, inReadingOrder, median, segmentHandwriting, strokeUnit, width,
@@ -31,12 +34,14 @@ import {
 } from "./segment";
 import { attachLabels, findDrawings, type Drawing } from "./sketch";
 import { describeDrawing } from "./sketchText";
+import { resolveTarget } from "./targets";
 
 export type Region = Box;
 
 export type ItemKind =
   | "matrix" | "writing" | "drawing" | "text" | "note" | "math" | "image"
-  | "frame" | "shape" | "arrow" | "line" | "circle" | "underline" | "highlight";
+  | "frame" | "shape" | "arrow" | "line" | "circle" | "underline" | "highlight"
+  | "annotation";
 
 /** One labelled thing on the canvas, as read. Relations are given as printed addresses ("M2 row 2 col 3", "N1"). */
 export type ReadItem = {
@@ -59,22 +64,30 @@ export type ReadItem = {
 /**
  * `handwriting` is the whole board's, with blocks carrying their stable
  * labels (less the writing taken as drawings' labels); `items` are the ones
- * printed, in order; `drawings`, every pen drawing on the board, by label.
+ * printed, in order; `drawings`, every pen drawing on the board, by label;
+ * `reads`, the recognizer's reading of every handwritten character.
  */
-export type CanvasDoc = { handwriting: HandwritingDoc; items: ReadItem[]; drawings: { label: string; drawing: Drawing }[] };
+export type CanvasDoc = {
+  handwriting: HandwritingDoc; items: ReadItem[]; drawings: { label: string; drawing: Drawing }[]; reads: Map<Glyph, Recognition>;
+};
 
 const PREFIX: Record<ItemKind, string> = {
   matrix: "M", writing: "T", drawing: "D", text: "X", note: "N", math: "Q", image: "I",
   frame: "F", shape: "S", arrow: "A", line: "L", circle: "C", underline: "U", highlight: "H",
+  annotation: "K",
 };
 const NAMES: Record<ItemKind, [string, string]> = {
   matrix: ["handwritten matrix", "handwritten matrices"], writing: ["line of handwriting", "lines of handwriting"], drawing: ["pen drawing", "pen drawings"],
   text: ["text box", "text boxes"], note: ["sticky note", "sticky notes"], math: ["math element", "math elements"], image: ["image", "images"],
   frame: ["frame", "frames"], shape: ["shape", "shapes"], arrow: ["arrow", "arrows"], line: ["line", "lines"],
   circle: ["pen circle", "pen circles"], underline: ["pen underline", "pen underlines"], highlight: ["highlighter stroke", "highlighter strokes"],
+  annotation: ["AI annotation", "AI annotations"],
 };
 const CONTENT: ItemKind[] = ["matrix", "writing", "drawing", "text", "note", "math", "image"];
 const MARKS: ItemKind[] = ["frame", "shape", "arrow", "line", "circle", "underline", "highlight"];
+const ANNOTATIONS: ItemKind[] = ["annotation"];
+/** How an annotation's mark is drawn round its place. */
+const MARKED = { circle: "circled", underline: "underlined", box: "boxed", none: "no mark" } as const;
 
 /** A highlighter renders three times its stroke width wide (strokePath.ts). */
 const HIGHLIGHTER_WIDTH = 3;
@@ -182,8 +195,9 @@ function counts(entries: Entry[], kinds: ItemKind[]): string {
   return `${list(parts)}.`;
 }
 
-const LABEL_KEY = "Every item has a label: M a handwritten matrix, T a handwritten line of text, D a drawing made with the pen, X a text box, N a sticky note, Q math (LaTeX), I an image, "
-  + "F a frame, S a shape, A an arrow, L a line, C a circle drawn with the pen, U an underline drawn with the pen, H a highlighter stroke. "
+/** K is only told when there is an annotation to read, so a board without any reads as it always has. */
+const labelKey = (annotations: boolean) => "Every item has a label: M a handwritten matrix, T a handwritten line of text, D a drawing made with the pen, X a text box, N a sticky note, Q math (LaTeX), I an image, "
+  + `F a frame, S a shape, A an arrow, L a line, C a circle drawn with the pen, U an underline drawn with the pen, H a highlighter stroke${annotations ? ", K an annotation the AI pinned to the board" : ""}. `
   + "A label keeps naming the same thing for as long as it is on the board and is never reused for anything else, so numbers can have gaps.";
 
 const GUIDE = [
@@ -192,15 +206,24 @@ const GUIDE = [
   `- An arrow runs from its tail to its head. Each end of an arrow or line names what it touches, or "a free end" if it touches nothing.`,
   `- "(made by the AI)" marks what the AI assistant put on the board; everything else was made by the user.`,
 ];
+const ANNOTATION_GUIDE = `- An AI annotation is a short note the AI assistant pinned to one place on the board — an error, a hint, a check (it is right) or a note — `
+  + "with the mark drawn round that place. The user sees it beside their work; it is not theirs. "
+  + "If that place has changed since, or is gone, the annotation says so.";
 const DRAWING_GUIDE = `- A drawing made with the pen is described by its parts, P1, P2, … — straight lines, corners, closed shapes, arcs, curves, arrows, and so on — `
-  + "with places given on a grid laid over the drawing; which parts join; and the short labels written beside them. Lines drawn between written labels are given as which label is joined to which, and by what kind of line. "
+  + "with places given on a grid laid over the drawing, which way each arrow points, and which corners are right angles (90°, as drawn by hand); "
+  + "which parts join, and how — at a right angle, end to end round a closed ring, a small part across another's corner; and the short labels written beside them. "
+  + "Lines drawn between written labels are given as which label is joined to which, and by what kind of line, and any closed ring they make. "
   + "What the drawing shows is not said: work it out from its parts.";
 
 // ── read ────────────────────────────────────────────────────────────────────
 
 export function readCanvas(
   elements: CanvasElement[],
-  opts: { labels?: LabelMap; render?: SyntaxRender; region?: Region } = {},
+  opts: {
+    labels?: LabelMap; render?: SyntaxRender; region?: Region;
+    /** Also print the box of every matrix cell and handwritten word, for a model that points by coordinates. Off by default. */
+    coordinates?: boolean;
+  } = {},
 ): { text: string; doc: CanvasDoc; labels: LabelMap } {
   const render = opts.render ?? "normalized";
   const rows = DEFAULT_BITMAP_ROWS;
@@ -219,13 +242,11 @@ export function readCanvas(
   const marks = sketch.marks;
   const handwriting = segmentHandwriting(sketch.writing);
   const reads = recognizeDoc(handwriting);
-  // Short writing by a drawing is its label, and is printed with it.
+  // Short writing by a drawing is its label, and is printed with it, its unsure characters as what they may be.
   const labelText = (words: Word[]) => {
-    const unsure = words.flatMap((w) => w.glyphs).map((g) => reads.get(g)!).filter((r) => r.confidence < DEFAULT_MIN_CONFIDENCE);
-    return {
-      text: words.map((w) => scriptedText(w.glyphs.map((g) => reads.get(g)!))).join(" "),
-      ...(unsure.length ? { doubt: unsure.map((r) => `"${r.char}" may be ${r.candidates.slice(1, 3).map((c) => `"${c.char}"`).join(" or ")}`).join("; ") } : {}),
-    };
+    const text = words.map((w) => scriptedText(w.glyphs.map((g) => reads.get(g)!))).join(" ");
+    const shown = words.map((w) => printedWord(w, reads, DEFAULT_MIN_CONFIDENCE)).join(" ");
+    return { text, ...(shown !== text ? { shown } : {}) };
   };
   const { drawings, labels: labelBlocks } = attachLabels(sketch.drawings, handwriting.blocks.filter((b): b is TextBlock => b.kind === "text"), labelText, unit);
 
@@ -244,7 +265,8 @@ export function readCanvas(
     }),
     ...marks.map((mark): Entry => ({ kind: mark.kind, box: mark.box, mark })),
   ];
-  const entries = [...inReadingOrder(content), ...inReadingOrder(drawn)];
+  const pinned = elements.flatMap((e): Entry[] => (e.type === "annotation" ? [{ kind: "annotation", box: elementBox(e), element: e }] : []));
+  const entries = [...inReadingOrder(content), ...inReadingOrder(drawn), ...inReadingOrder(pinned)];
 
   /** The pen strokes a handwritten block or pen mark was read from. */
   const strokesOf = (entry: Entry): Ink[] => {
@@ -293,6 +315,7 @@ export function readCanvas(
       // Its children by parentId, plus handwriting and pen marks most of whose strokes are inside it.
       const within = (s: Ink) => centerX(s.box) >= e.x && centerX(s.box) <= e.x + e.width && centerY(s.box) >= e.y && centerY(s.box) <= e.y + e.height;
       const targets = entries.filter((other) => {
+        if (other.kind === "annotation") return false;
         if (other.element) return other.element.parentId === e.id;
         const strokes = strokesOf(other);
         return 2 * strokes.filter(within).length > strokes.length;
@@ -320,6 +343,28 @@ export function readCanvas(
     return ai === true ? " (made by the AI)" : ai === "partly" ? " (partly made by the AI)" : "";
   };
 
+  const itemOf = (entry: Entry): ReadItem => {
+    const rel = relations.get(entry);
+    const ids = entry.element ? [entry.element.id] : strokeIds(entry);
+    return {
+      label: labelOf.get(entry)!, kind: entry.kind, box: entry.box, elementIds: ids,
+      pen: !entry.element, madeByAI: madeByAI(entry),
+      ...(rel?.ends ? { ends: rel.ends.map((t) => t?.text ?? null) as [string | null, string | null] } : {}),
+      ...(rel?.targets ? { targets: rel.targets.map((t) => t.text) } : {}),
+      ...(selection?.includes(entry) instanceof Set ? { partly: true as const } : {}),
+    };
+  };
+  /** The whole board as read, to find an annotation's place on — made once, and only for a board with annotations. */
+  let whole: { doc: CanvasDoc } | null = null;
+  /** An annotation's place, as it stands now: the same strokes or element as when it was made, changed since, or gone. */
+  const placeOf = ({ target, targetIds }: CanvasAnnotationElement["props"]) => {
+    whole ??= { doc: { handwriting: { blocks }, items: entries.map(itemOf), drawings: [], reads } };
+    const now = resolveTarget(target, whole);
+    if (!now.ok) return `${target}, which is no longer on the board`;
+    const same = now.elementIds.length === targetIds.length && targetIds.every((id) => now.elementIds.includes(id));
+    return same ? target : `${target}, which has changed since`;
+  };
+
   const renderBlock = blockRenderer({ blocks }, { render, rows, minConfidence: DEFAULT_MIN_CONFIDENCE, reads });
   const itemText = (entry: Entry): string => {
     const label = labelOf.get(entry)!;
@@ -327,7 +372,9 @@ export function readCanvas(
     const rel = relations.get(entry);
     if (entry.block) {
       const part = selection?.includes(entry);
-      return renderBlock(entry.block, { tag, only: part instanceof Set ? part : undefined });
+      const only = part instanceof Set ? part : undefined;
+      const text = renderBlock(entry.block, { tag, only });
+      return opts.coordinates ? `${text}\n\n${describeBoxes(entry.block, only)}` : text;
     }
     if (entry.drawing) return describeDrawing(entry.drawing, label, tag);
     const mark = entry.mark;
@@ -358,9 +405,11 @@ export function readCanvas(
         const [tail, head] = startArrow ? [q, p] : [p, q];
         return `${label} — arrow${tag} from ${end(a)} to ${end(b)}. Tail ${pt(tail)}, head ${pt(head)}.`;
       }
+      case "annotation": return `${label} — AI annotation: ${e.props.kind}, on ${placeOf(e.props)} (${MARKED[e.props.mark]}). Note${typed(e.props.note)}`;
     }
   };
 
+  const annotated = shown.some((entry) => entry.kind === "annotation");
   const header = selection
     ? ["CANVAS SELECTION, AS TEXT",
       `Only what is inside a selected rectangle of this whiteboard, from ${pt({ x: opts.region!.minX, y: opts.region!.minY })} to ${pt({ x: opts.region!.maxX, y: opts.region!.maxY })}: `
@@ -368,31 +417,29 @@ export function readCanvas(
         + "Labels are the same as in a read of the whole board, and anything referred to that lies outside the rectangle is marked \"(outside the selection)\"."]
     : ["CANVAS CONTENTS, AS TEXT",
       "Everything on this whiteboard: first what is written or placed on it, then the marks and connections drawn over it, "
-        + "each part in reading order (top to bottom within each column of the board, columns left to right)."];
+        + `${annotated ? "then the AI's annotations, " : ""}each part in reading order (top to bottom within each column of the board, columns left to right).`];
   const parts = [
     { title: "WRITTEN AND PLACED", entries: shown.filter((entry) => CONTENT.includes(entry.kind)), kinds: CONTENT },
     { title: "MARKS AND CONNECTIONS", entries: shown.filter((entry) => MARKS.includes(entry.kind)), kinds: MARKS },
+    { title: "AI ANNOTATIONS", entries: shown.filter((entry) => ANNOTATIONS.includes(entry.kind)), kinds: ANNOTATIONS },
   ].filter((p) => p.entries.length > 0);
+  const bodies = parts.map((p) => p.entries.map(itemText));
+  const handwritingGuide = shown.some((entry) => entry.block) ? HANDWRITING_GUIDE[render](rows) : [];
+  // A drawing's label can hold an unsure character where no handwriting guide says how one is printed.
+  const unsureGuide = !handwritingGuide.includes(UNSURE_GUIDE) && bodies.flat().some((t) => t.includes("«")) ? [UNSURE_GUIDE] : [];
   const text = parts.length === 0
     ? [header.join("\n"), selection ? "Nothing is inside the selection." : "Nothing is on this canvas."].join("\n\n")
     : [
       header.join("\n"),
-      LABEL_KEY,
-      ["How to read it:", ...(shown.some((entry) => entry.block) ? HANDWRITING_GUIDE[render](rows) : []), ...(shown.some((entry) => entry.drawing) ? [DRAWING_GUIDE] : []), ...GUIDE, COORDINATES].join("\n"),
-      ...parts.flatMap((p) => [`${p.title}\n${counts(p.entries, p.kinds)}`, ...p.entries.map(itemText)]),
+      labelKey(annotated),
+      [
+        "How to read it:", ...handwritingGuide, ...unsureGuide, ...(shown.some((entry) => entry.drawing) ? [DRAWING_GUIDE] : []),
+        ...GUIDE, ...(annotated ? [ANNOTATION_GUIDE] : []), ...(opts.coordinates && shown.some((entry) => entry.block) ? [BOXES_GUIDE] : []), COORDINATES,
+      ].join("\n"),
+      ...parts.flatMap((p, i) => [`${p.title}\n${counts(p.entries, p.kinds)}`, ...bodies[i]!]),
     ].join("\n\n");
 
-  const items = shown.map((entry): ReadItem => {
-    const rel = relations.get(entry);
-    const ids = entry.element ? [entry.element.id] : strokeIds(entry);
-    return {
-      label: labelOf.get(entry)!, kind: entry.kind, box: entry.box, elementIds: ids,
-      pen: !entry.element, madeByAI: madeByAI(entry),
-      ...(rel?.ends ? { ends: rel.ends.map((t) => t?.text ?? null) as [string | null, string | null] } : {}),
-      ...(rel?.targets ? { targets: rel.targets.map((t) => t.text) } : {}),
-      ...(selection?.includes(entry) instanceof Set ? { partly: true as const } : {}),
-    };
-  });
+  const items = shown.map(itemOf);
   const pictures = entries.flatMap((entry) => (entry.drawing ? [{ label: labelOf.get(entry)!, drawing: entry.drawing }] : []));
-  return { text, doc: { handwriting: { blocks }, items, drawings: pictures }, labels: map };
+  return { text, doc: { handwriting: { blocks }, items, drawings: pictures, reads }, labels: map };
 }

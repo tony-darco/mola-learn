@@ -7,10 +7,11 @@
 import { and, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import type { z } from "zod";
+import { z } from "zod";
 import { artifacts, db } from "@mola/db";
 import { canvasBackgroundPatternSchema, canvasPayloadSchema, type CanvasElement } from "@mola/shared";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
+import { markAIEditsApplied } from "./chatServer";
 
 async function requireOwnCanvas(canvasId: string, userId: string) {
   const row = await requireOwned("artifact", canvasId).catch((err) => {
@@ -31,6 +32,11 @@ export type SaveCanvasResult =
  * the first place in the codebase to enforce the CAS check the `version`
  * column was always meant for. The WHERE clause re-checks version at the
  * SQL level too, closing the race between the SELECT above and this UPDATE.
+ *
+ * `aiApplied`: the AI edits the page has put on the board since its last
+ * save went through — still there or already taken away. They, and any AI
+ * element the board holds, stop being pending with this save
+ * (lib/canvas/chatServer.ts markAIEditsApplied), in the same transaction.
  */
 export async function saveCanvasAction(
   canvasId: string,
@@ -38,6 +44,7 @@ export async function saveCanvasAction(
   viewport: { x: number; y: number; zoom: number },
   background: { pattern: z.infer<typeof canvasBackgroundPatternSchema>; color: string },
   expectedVersion: number,
+  aiApplied: string[] = [],
 ): Promise<SaveCanvasResult> {
   const session = await requireSession();
   const row = await requireOwnCanvas(canvasId, session.userId);
@@ -47,12 +54,17 @@ export async function saveCanvasAction(
   }
 
   const payload = canvasPayloadSchema.parse({ kind: "canvas", elements, viewport, background });
+  const acknowledged = [...z.array(z.string()).catch([]).parse(aiApplied), ...payload.elements.filter((e) => e.createdBy === "ai").map((e) => e.id)];
 
-  const result = await db
-    .update(artifacts)
-    .set({ payload, version: row.version + 1, updatedAt: new Date() })
-    .where(and(eq(artifacts.id, canvasId), eq(artifacts.version, expectedVersion)))
-    .returning({ version: artifacts.version });
+  const result = await db.transaction(async (tx) => {
+    const saved = await tx
+      .update(artifacts)
+      .set({ payload, version: row.version + 1, updatedAt: new Date() })
+      .where(and(eq(artifacts.id, canvasId), eq(artifacts.version, expectedVersion)))
+      .returning({ version: artifacts.version });
+    if (saved.length > 0) await markAIEditsApplied(tx, canvasId, acknowledged);
+    return saved;
+  });
 
   if (result.length === 0) {
     const [fresh] = await db.select({ version: artifacts.version }).from(artifacts).where(eq(artifacts.id, canvasId)).limit(1);

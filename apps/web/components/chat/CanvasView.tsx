@@ -14,18 +14,19 @@ import { createSaveSerializer } from "@/lib/canvas/saveQueue";
 import { saveCanvasAction } from "@/lib/canvas/actions";
 import { uploadCanvasImageAction } from "@/lib/canvas/imageUpload";
 import { emptyHistory, pushHistory, redo as historyRedo, undo as historyUndo, type History } from "@/lib/canvas/history";
+import { applyAIElements, type AIStep } from "@/lib/canvas/aiEdits";
 import { eraseWholeObjects, erasePartial } from "@/lib/canvas/eraser";
 import { resizeBox, type ResizeCorner } from "@/lib/canvas/resize";
 import { cursorForTool } from "@/lib/canvas/cursors";
 import { boundsOf, elementsInRect, rectFromPoints, toScreenRect, unionRect, type Rect } from "@/lib/canvas/marquee";
-import { COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
+import { aiInk, COLOR_PALETTE, ERASER_SIZES, FONT_SIZES, NOTE_DEFAULT_COLOR, STROKE_WIDTHS, type WidthCategory } from "@/lib/canvas/styleConstants";
 import { Toolbar, type EraserMode, type ShapeKind, type Tool } from "./canvas/Toolbar";
 import { BottomPill } from "./canvas/BottomPill";
 import { StylePanel, type StyleContext } from "./canvas/StylePanel";
 import { ElementShape, SelectionOutline, ShapeOutline } from "./canvas/ElementRenderer";
 import { SelectionMenu } from "./canvas/SelectionMenu";
 import { CanvasChatPanel, type ChatAttachment } from "./canvas/CanvasChatPanel";
-import { useCanvasChat } from "./canvas/useCanvasChat";
+import { annotationThreads, useCanvasChat } from "./canvas/useCanvasChat";
 import { useConfirm } from "./shell-context";
 
 type Payload = z.infer<typeof canvasPayloadSchema>;
@@ -45,8 +46,12 @@ const BG_PATTERN_ID = "canvas-bg-pattern";
 const CHECK_MY_WORK = "Check my work in this selection.";
 
 export function CanvasView({
-  canvasId, title, payload, initialVersion,
-}: { canvasId: string; title: string; payload: Payload; initialVersion: number }) {
+  canvasId, title, payload, initialVersion, pendingAIEdits,
+}: {
+  canvasId: string; title: string; payload: Payload; initialVersion: number;
+  /** The AI's edits no save has acknowledged yet (lib/canvas/chatServer.ts) — added when the page opens. */
+  pendingAIEdits: CanvasElement[];
+}) {
   const confirm = useConfirm();
 
   const [elements, setElements] = useState<CanvasElement[]>(payload.elements);
@@ -80,7 +85,9 @@ export function CanvasView({
   const [marqueeArea, setMarqueeArea] = useState<{ ids: Set<string>; rect: Rect } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
-  const chat = useCanvasChat(canvasId);
+  const chat = useCanvasChat(canvasId, applyFromAI);
+  const syncEditsRef = useRef(chat.syncEdits);
+  syncEditsRef.current = chat.syncEdits;
 
   const elementsRef = useRef(elements);
   elementsRef.current = elements;
@@ -90,6 +97,10 @@ export function CanvasView({
   const versionRef = useRef(initialVersion);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRef = useRef<History<CanvasElement[]>>(emptyHistory());
+  const aiStepRef = useRef<AIStep | null>(null);
+  /** Every AI edit this page has taken; and those of them no save has acknowledged yet. */
+  const aiTakenRef = useRef<ReadonlySet<string>>(new Set());
+  const aiUnsavedRef = useRef(new Set<string>());
   const resizeRef = useRef<{ id: string; corner: ResizeCorner } | null>(null);
 
   const toolRef = useRef(tool); toolRef.current = tool;
@@ -110,12 +121,19 @@ export function CanvasView({
   const serializer = useMemo(
     () =>
       createSaveSerializer(
-        async (args: { elements: CanvasElement[]; viewport: typeof payload.viewport; background: typeof payload.background; expectedVersion: number }) => {
+        async (args: {
+          elements: CanvasElement[]; viewport: typeof payload.viewport; background: typeof payload.background; expectedVersion: number; aiApplied: string[];
+        }) => {
           setSaving(true);
-          const result = await saveCanvasAction(canvasId, args.elements, args.viewport, args.background, args.expectedVersion);
+          const result = await saveCanvasAction(canvasId, args.elements, args.viewport, args.background, args.expectedVersion, args.aiApplied);
           setSaving(false);
-          if (result.ok) { versionRef.current = result.version; setConflict(false); }
-          else setConflict(true);
+          if (result.ok) {
+            versionRef.current = result.version;
+            for (const id of args.aiApplied) aiUnsavedRef.current.delete(id);
+            setConflict(false);
+            // The chat's edit log reads the board as saved — but not while more edits wait to be saved: the save after them will.
+            if (!saveTimerRef.current) syncEditsRef.current();
+          } else setConflict(true);
           return result;
         },
       ),
@@ -130,6 +148,7 @@ export function CanvasView({
       viewport: viewportRef.current,
       background: backgroundRef.current,
       expectedVersion: versionRef.current,
+      aiApplied: [...aiUnsavedRef.current],
     }));
   }
 
@@ -202,6 +221,35 @@ export function CanvasView({
     setSelectedIds(new Set());
   }
 
+  /**
+   * What the AI put on the board — a reply's (`key`: its message), or all
+   * that were still pending: on top, saved as usual, one undo step, and
+   * never twice (lib/canvas/aiEdits.ts). The next save that goes through
+   * acknowledges each, so the server stops keeping it pending.
+   */
+  function applyFromAI(key: string, incoming: CanvasElement[]) {
+    const next = applyAIElements(
+      { elements: elementsRef.current, history: historyRef.current, step: aiStepRef.current, taken: aiTakenRef.current }, key, incoming,
+    );
+    aiTakenRef.current = next.taken;
+    for (const id of next.fresh) aiUnsavedRef.current.add(id);
+    if (next.elements === elementsRef.current) return;
+    historyRef.current = next.history;
+    aiStepRef.current = next.step;
+    // Now, not when React gets to the update: a reply's next element can arrive before it does.
+    elementsRef.current = next.elements;
+    setHistoryVersion((v) => v + 1);
+    applyMutation(() => next.elements);
+  }
+
+  // What the AI placed while no page could add it — the tab closed mid-reply, the stream dropped, the save failed.
+  useEffect(() => {
+    if (pendingAIEdits.length > 0) applyFromAI("pending", pendingAIEdits);
+    // An annotation's thread is in the chat: a board with annotations loads it with the page.
+    if (elementsRef.current.some((e) => e.type === "annotation")) void chat.ensureLoaded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the page opens.
+  }, []);
+
   useEffect(() => {
     function onVisibilityChange() { if (document.hidden) requestSaveNow(); }
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -246,6 +294,8 @@ export function CanvasView({
   }, [laserPoints.length > 0]);
 
   function panFilter(event: Event): boolean {
+    // An annotation's open note is its own: scrolling its thread, selecting or typing in it never pans or zooms the board.
+    if ((event.target as Element | null)?.closest?.("[data-annotation-card]")) return false;
     if (event.type === "wheel") return true;
     const me = event as MouseEvent;
     if (me.button === 1) return true;
@@ -570,9 +620,10 @@ export function CanvasView({
     void chat.ensureLoaded();
   }
 
-  async function sendToChat(message: string, rect: Rect | null) {
+  /** `annotationId`: the message is a reply to that AI annotation, sent from its note on the board. */
+  async function sendToChat(message: string, rect: Rect | null, annotationId: string | null = null) {
     await flushSave();
-    await chat.send(message, rect);
+    await chat.send(message, rect, annotationId);
   }
 
   /** Ask AI / Check my work: attach the selection to the chat, and for a check, ask straight away. */
@@ -797,6 +848,8 @@ export function CanvasView({
   const canUndo = useMemo(() => historyRef.current.past.length > 0, [historyVersion]);
   const canRedo = useMemo(() => historyRef.current.future.length > 0, [historyVersion]);
   const sorted = useMemo(() => [...elements].sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : 0)), [elements]);
+  const threads = useMemo(() => annotationThreads(chat.turns), [chat.turns]);
+  const annotationsOnBoard = useMemo(() => new Set(elements.flatMap((e) => (e.type === "annotation" ? [e.id] : []))), [elements]);
 
   const selectedElement = selectedId ? elements.find((e) => e.id === selectedId) ?? null : null;
   const isTextLikeSelected = selectedElement?.type === "text" || selectedElement?.type === "note";
@@ -815,6 +868,7 @@ export function CanvasView({
   const showStylePanel = showAmbientStylePanel || isTextLikeSelected;
   const now = Date.now();
   const visibleLaser = laserPoints.filter((p) => now - p.t < LASER_FADE_MS);
+  const ink = aiInk(background.color);
 
   const panelColor = isTextLikeSelected ? getInkColor(selectedElement!) : color;
   const panelOnColorChange = isTextLikeSelected ? setSelectedFontColor : setColor;
@@ -903,7 +957,8 @@ export function CanvasView({
         ref={svgRef}
         width="100%" height="100%"
         className="flex-1 touch-none"
-        style={{ cursor: cursorForTool(tool) }}
+        // The AI's ink for this board's background, for its annotations (ElementRenderer.tsx).
+        style={{ cursor: cursorForTool(tool), "--ai-ink": ink.ink, "--ai-ink-fg": ink.fg } as React.CSSProperties}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -926,6 +981,9 @@ export function CanvasView({
               onRenameFrame={renameFrame}
               onStartEdit={startEdit}
               zoom={transform.k}
+              replies={el.type === "annotation"
+                ? { thread: threads.get(el.id) ?? [], busy: chat.busy, onReply: (text) => void sendToChat(text, null, el.id) }
+                : undefined}
             />
           ))}
 
@@ -970,7 +1028,7 @@ export function CanvasView({
 
     {chatOpen && (
       <CanvasChatPanel
-        turns={chat.turns} busy={chat.busy} loadError={chat.loadError}
+        turns={chat.turns} busy={chat.busy} loadError={chat.loadError} annotationsOnBoard={annotationsOnBoard}
         attachment={attachment} onRemoveAttachment={() => setAttachment(null)}
         onSend={(text) => void sendToChat(text, attachment?.rect ?? null)}
         onClose={() => setChatOpen(false)}

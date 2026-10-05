@@ -113,7 +113,7 @@ export const canvasElementBaseSchema = z.object({
   /** Always 0 in v1 — no rotate UI. Kept for forward compat. */
   rotation: z.number().default(0),
   opacity: z.number().min(0).max(1).default(1),
-  /** Nothing writes "ai" yet — reserved for a later phase. */
+  /** "ai": put there by the canvas chat (annotations), never by the user's own tools. */
   createdBy: z.enum(["user", "ai"]).default("user"),
 });
 
@@ -218,6 +218,30 @@ export const canvasImageElementSchema = canvasElementBaseSchema.extend({
   }),
 });
 
+export const canvasAnnotationKindSchema = z.enum(["error", "hint", "check", "note"]);
+export const canvasAnnotationMarkSchema = z.enum(["circle", "underline", "box", "none"]);
+
+/**
+ * A note the AI pinned to one place on the board (lib/canvas/annotate.ts):
+ * an icon for its kind at the place's corner, an optional mark drawn round
+ * it, and the note, opened from the icon. The box is the place's — its
+ * target's — so the annotation moves, selects and erases with the work it
+ * is on. Always createdBy "ai"; its id is what later steps (replying to
+ * it, taking it back) refer to.
+ */
+export const canvasAnnotationElementSchema = canvasElementBaseSchema.extend({
+  type: z.literal("annotation"),
+  props: z.object({
+    kind: canvasAnnotationKindSchema,
+    mark: canvasAnnotationMarkSchema,
+    note: z.string(),
+    /** The place, as the read addressed it when the annotation was made: "M8 row 1 col 4", "T2 word 5", "X1". */
+    target: z.string(),
+    /** What that place was read from then: the pen strokes of a cell or word, or a placed element's id. */
+    targetIds: z.array(z.string()),
+  }),
+});
+
 export const canvasElementSchema = z.discriminatedUnion("type", [
   canvasDrawElementSchema,
   canvasTextElementSchema,
@@ -227,6 +251,7 @@ export const canvasElementSchema = z.discriminatedUnion("type", [
   canvasNoteElementSchema,
   canvasMathElementSchema,
   canvasImageElementSchema,
+  canvasAnnotationElementSchema,
 ]);
 export type CanvasElement = z.infer<typeof canvasElementSchema>;
 export type CanvasDrawElement = z.infer<typeof canvasDrawElementSchema>;
@@ -235,6 +260,7 @@ export type CanvasShapeElement = z.infer<typeof canvasShapeElementSchema>;
 export type CanvasNoteElement = z.infer<typeof canvasNoteElementSchema>;
 export type CanvasMathElement = z.infer<typeof canvasMathElementSchema>;
 export type CanvasImageElement = z.infer<typeof canvasImageElementSchema>;
+export type CanvasAnnotationElement = z.infer<typeof canvasAnnotationElementSchema>;
 
 export const canvasPayloadSchema = z.object({
   kind: z.literal("canvas"),

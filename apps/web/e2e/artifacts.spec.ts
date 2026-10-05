@@ -12,8 +12,8 @@ import { newGeneralChat } from "./helpers";
  * The redesign changed this flow in two ways this test has to follow, not
  * just re-select around:
  *  1. The preview button only exists on `ChatMain` (an actual open chat) —
- *     `page.goto("/")` now lands on the chat-less `/chat` landing page, so a
- *     chat has to be opened first.
+ *     the app's `/chat` landing page is chat-less (and `/` is now the
+ *     public marketing site), so a chat has to be opened first.
  *  2. `ArtifactPreviewPanel.tsx` no longer has an "Insert 3 fixture
  *     artifacts" button that drops all three into the conversation as real
  *     turns. It's a side panel with three tabs (Flashcards/Quiz/Overview)
@@ -24,7 +24,7 @@ import { newGeneralChat } from "./helpers";
 test.use({ storageState: ALICE_STORAGE });
 
 test("flashcards, quizzes, and mind maps render as real interactive UI, never a raw JSON dump", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/chat");
   await newGeneralChat(page);
   await page.getByRole("button", { name: "Preview artifact renderers" }).click();
 

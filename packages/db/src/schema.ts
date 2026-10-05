@@ -100,6 +100,8 @@ export const chats = pgTable("chats", {
   canvasId: uuid("canvas_id").references((): AnyPgColumn => artifacts.id, { onDelete: "set null" }),
   /** The canvas reader's LabelMap, kept between turns so M1, Q2, … keep naming the same things. */
   canvasLabels: jsonb("canvas_labels"),
+  /** The board as the edit log last saw it, read with canvas_labels: { version, items } (lib/canvas/editLog.ts). */
+  canvasSnapshot: jsonb("canvas_snapshot"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -108,7 +110,12 @@ export const chats = pgTable("chats", {
   index("chats_canvas_idx").on(t.canvasId),
 ]);
 
-export const roleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool"]);
+/**
+ * "event": something that happened in the conversation that is no one's turn —
+ * so far, an entry in a canvas chat's edit log ("You added M9 (a 3×4 matrix)").
+ * Never sent to a model as a turn of its own.
+ */
+export const roleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool", "event"]);
 
 /**
  * Turn lifecycle, so a reload can distinguish "still generating" / "failed"
@@ -133,6 +140,12 @@ export const messages = pgTable("messages", {
   /** Canvas chats, on the user's message: { text, region } — the canvas as text that was sent
    * with it, and the selected rectangle it was limited to (null: the whole board). */
   canvasContext: jsonb("canvas_context"),
+  /** Role "event": what happened, structured — for a canvas edit, a CanvasEdit (lib/canvas/editLog.ts).
+   * `content` holds the same as one sentence. */
+  event: jsonb("event"),
+  /** Canvas chats, on a user's message that replies to one of the AI's annotations: that annotation's
+   * element id. No foreign key — the annotation lives in the canvas payload, and its thread outlives it. */
+  annotationId: text("annotation_id"),
   createdAt: createdAt(),
 }, (t) => [
   index("messages_chat_idx").on(t.chatId, t.createdAt),
@@ -348,6 +361,27 @@ export const artifacts = pgTable("artifacts", {
   index("artifacts_user_idx").on(t.userId),
   index("artifacts_course_idx").on(t.courseId),
 ]);
+
+/**
+ * What the canvas chat's AI put on a canvas (apps/web/lib/canvas/annotate.ts),
+ * one row per element, kept until a page has put it on the board and saved.
+ * The open canvas page adds them and saves them itself, so one placed while
+ * no page could — a tab closed mid-reply, a dropped stream, a failed save —
+ * is added by the next page that opens the canvas or syncs its chat.
+ * `appliedAt`: a page added it and saved; from then on it is the student's
+ * to keep or erase, and never added again.
+ */
+export const canvasAiEdits = pgTable("canvas_ai_edits", {
+  /** The element's own id. */
+  id: text("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  canvasId: uuid("canvas_id").notNull().references(() => artifacts.id, { onDelete: "cascade" }),
+  /** The reply that placed it. */
+  messageId: uuid("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  element: jsonb("element").notNull(),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [index("canvas_ai_edits_canvas_idx").on(t.canvasId)]);
 
 /** Denormalised out of the deck payload so SRS can query due cards directly. */
 export const flashcards = pgTable("flashcards", {

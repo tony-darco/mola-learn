@@ -361,7 +361,8 @@ async function buildLayer5(
     });
   }
   for (const m of recent) {
-    if (m.role === "system") continue;
+    // An "event" (a canvas chat's edit-log entry) is no one's turn — never a model message of its own.
+    if (m.role === "system" || m.role === "event") continue;
     turns.push({ role: m.role as Message["role"], content: m.content });
   }
 

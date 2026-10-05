@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { SquareDashed, X } from "lucide-react";
-import type { CanvasContext } from "@/lib/canvas/chat";
+import { PencilLine, Reply, SquareDashed, X } from "lucide-react";
+import { replySection, type CanvasContext } from "@/lib/canvas/chat";
 import type { Rect } from "@/lib/canvas/marquee";
 import { Markdown } from "../Markdown";
 import type { CanvasTurn } from "./useCanvasChat";
@@ -21,9 +21,26 @@ function WhatTheAISaw({ context }: { context: CanvasContext }) {
         <div className="mb-1">
           {region ? `Selection from ${pt(region.minX, region.minY)} to ${pt(region.maxX, region.maxY)}` : "The whole canvas"}
         </div>
-        <pre className="max-h-80 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-snug text-fg">{context.text}</pre>
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-snug text-fg">
+          {[...(context.changes ? [context.changes] : []), context.text, ...(context.replyTo ? [replySection(context.replyTo)] : [])].join("\n\n")}
+        </pre>
       </div>
     </details>
+  );
+}
+
+/** On a reply to one of the AI's annotations: which one ("Re K1"), and whether it is still on the board — its thread stays here either way. */
+function ReplyChip({ label, gone }: { label: string | undefined; gone: boolean }) {
+  return (
+    <span
+      data-testid="canvas-reply-chip"
+      data-gone={gone ? "" : undefined}
+      title={gone ? "This note is no longer on the board" : "A reply to one of Mola's notes on the board"}
+      className="mb-1 inline-flex items-center gap-1 rounded-full border border-border bg-bg px-2 py-0.5 text-[11px] text-fg-muted"
+    >
+      <Reply size={11} className="text-accent" aria-hidden />
+      Re {label ?? "note"}{gone && " · no longer on the board"}
+    </span>
   );
 }
 
@@ -31,13 +48,16 @@ function WhatTheAISaw({ context }: { context: CanvasContext }) {
  * The canvas's own conversation, as a right-hand panel on the canvas page.
  * A selection attached from the selection menu shows as a chip and goes with
  * every message until it's removed; without one, the AI reads the whole board.
+ * Replies sent from an annotation's note are here too, each with a chip naming it.
  */
 export function CanvasChatPanel({
-  turns, busy, loadError, attachment, onRemoveAttachment, onSend, onClose,
+  turns, busy, loadError, annotationsOnBoard, attachment, onRemoveAttachment, onSend, onClose,
 }: {
   turns: CanvasTurn[];
   busy: boolean;
   loadError: string | null;
+  /** The ids of the AI annotations on the board now — a reply to one that isn't says so. */
+  annotationsOnBoard: ReadonlySet<string>;
   attachment: ChatAttachment | null;
   onRemoveAttachment: () => void;
   onSend: (text: string) => void;
@@ -84,8 +104,15 @@ export function CanvasChatPanel({
             Select part of the board and choose Ask AI, or just ask — without a selection the AI reads the whole canvas.
           </p>
         )}
-        {turns.map((t) => (t.role === "user" ? (
+        {turns.map((t) => (t.role === "event" ? (
+          // An entry in the edit log: a change to the board, told by label — not a message.
+          <div key={t.id} data-testid="canvas-edit-entry" className="mb-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-fg-muted">
+            <PencilLine size={11} className="mt-px shrink-0" aria-hidden />
+            <span>{t.text}</span>
+          </div>
+        ) : t.role === "user" ? (
           <div key={t.id} data-testid="canvas-turn-user" className="mb-4 flex flex-col items-end">
+            {t.annotationId && <ReplyChip label={t.context?.replyTo?.label} gone={!annotationsOnBoard.has(t.annotationId)} />}
             <div className="max-w-[90%] rounded-2xl border border-border bg-bg px-3 py-2 text-sm">
               <Markdown text={t.text} />
             </div>

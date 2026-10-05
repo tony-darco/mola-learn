@@ -17,7 +17,7 @@ test.setTimeout(20 * 60_000);
 test("hint rungs escalate pointing -> teaching -> bottom_out only on explicit pulls, are never named to the student, and lock after bottom-out", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/chat");
   await newGeneralChat(page);
 
   // Ground the exchange in a real conceptual question before pulling hints —

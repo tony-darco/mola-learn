@@ -128,6 +128,15 @@ describe("character recognition: the full alphabet", () => {
     // unflagged misreads are "×" and "x" taken for each other: written the
     // same size and nearly the same height, they differ by a fifth of a cap.
     // The floors sit just under (or over) what was measured.
+    //
+    // Measured again when unsure glyphs came to be printed as the readings
+    // they may be ("«5|S|s»", recognize.ts's offered, tuned on seeds 1–20:
+    // 1308 of 1327 flagged glyphs offered as what was written), on these
+    // seeds once: 11195 read right, 3258 flagged, 29 misread unflagged
+    // (0.247%, near the cap: the code this was branched from already
+    // measured 11195 and 29 here, with 3264 flagged — the 6 fewer are "0"s
+    // ending a number, now read surely and rightly), and 3205 of the 3258
+    // flagged offered as what was written.
     const all = sumAlphabet(Array.from({ length: 50 }, (_, i) => scoreAlphabet(makeAlphabet(300 + i))));
     const g = all.glyphs;
     expect(g.segmented / g.expected).toBeGreaterThanOrEqual(0.985);
@@ -135,5 +144,6 @@ describe("character recognition: the full alphabet", () => {
     expect(g.confidentWrong / g.segmented).toBeLessThanOrEqual(0.0025);
     expect(g.flagged / g.segmented).toBeLessThanOrEqual(0.3);
     expect(all.scripts.correct / all.scripts.expected).toBeGreaterThanOrEqual(0.93);
+    expect(g.offered / g.flagged).toBeGreaterThanOrEqual(0.98);
   }, 300_000);
 });

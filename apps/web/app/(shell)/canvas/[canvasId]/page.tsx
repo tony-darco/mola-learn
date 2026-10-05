@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { artifactRecordSchema } from "@mola/shared";
 import { AuthzError, requireOwned, requireSession } from "@/lib/auth/ownership";
 import { CanvasView } from "@/components/chat/CanvasView";
+import { pendingAIEdits } from "@/lib/canvas/chatServer";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,10 @@ export default async function CanvasDetailPage({ params }: { params: Promise<{ c
 
   return (
     <main className="flex flex-1 min-w-0 overflow-hidden">
-      <CanvasView canvasId={canvas.id} title={canvas.title} payload={canvas.payload} initialVersion={canvas.version} />
+      <CanvasView
+        canvasId={canvas.id} title={canvas.title} payload={canvas.payload} initialVersion={canvas.version}
+        pendingAIEdits={(await pendingAIEdits(canvas.id)).map((p) => p.element)}
+      />
     </main>
   );
 }

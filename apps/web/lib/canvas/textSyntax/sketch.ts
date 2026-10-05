@@ -2,8 +2,10 @@
  * Pen drawings — ink that is neither writing nor a mark about writing — as
  * parts a model can picture without seeing them: straight lines, corners,
  * closed shapes, arcs, curves, zigzags, coils, wedges, dashed and parallel
- * lines, dots; which of them join, and the written labels beside them.
- * Nothing here says what a drawing depicts: that is the reader's to work out.
+ * lines, dots, arrows and which way they point; which of them join, and how
+ * — at a right angle, end to end round a closed ring, a small part across
+ * another's corner; and the written labels beside them. Nothing here says
+ * what a drawing depicts: that is the reader's to work out.
  *
  * Strokes are taken for drawing (findDrawings) when they are bigger than
  * writing, or join a drawing by touching it; small strokes in a row along a
@@ -38,6 +40,8 @@ export type Part = {
   across?: [number, number];
   /** polygon: sides. polyline: corners. zigzag: turns. coil: loops. parallel: lines. dashed: dashes. */
   count?: number;
+  /** polyline, triangle, rectangle, polygon: which of its `points` are corners at a right angle (see RIGHT). */
+  right?: number[];
   /** For checking joins: every point of its ink. */
   ink: Pt[];
 };
@@ -86,8 +90,23 @@ const SIDES = 0.04;
  */
 const BOW = 0.12;
 const BOW_MIN = 0.1;
-/** In a drawing, an arrow drawn in one stroke may have a head up to this share of its shaft (a short force arrow, say). */
+/**
+ * In a drawing, an arrow drawn in one stroke may have a head up to this share
+ * of its shaft (a short force arrow, say), and barbs reaching out only this
+ * far (× unit) to each side: a small head on a long shaft, drawn quickly. (At
+ * marks.ts's 0.15, 2 of the 100 one-stroke arrows of seeds 1–20 of the
+ * diagram board came out as a line, or a line with corners; from 0.08 to 0.1,
+ * none did.)
+ */
 const HEAD_SHARE = 0.8;
+const HEAD_SPREAD = 0.1;
+/**
+ * An angle within this many degrees of 90 is a right angle. On seeds 1–20 of
+ * the diagram board, 390 of the 400 corners drawn square are within it (the
+ * rest are corners of the shaky car body, placed off by its tremor), and 2 of
+ * the 320 drawn at least 15° off are.
+ */
+const RIGHT = 12;
 
 // ── geometry ────────────────────────────────────────────────────────────────
 
@@ -159,6 +178,20 @@ function corners(path: Pt[], size: number): Pt[] {
     run = 0;
   }
   return out;
+}
+
+/** The angle (0–180°) at `v` between the directions to `a` and to `b`. */
+function angleAt(v: Pt, a: Pt, b: Pt): number {
+  const [u, w] = [sub(a, v), sub(b, v)];
+  const n = Math.hypot(u.x, u.y) * Math.hypot(w.x, w.y);
+  return n === 0 ? 0 : (Math.acos(Math.max(-1, Math.min(1, (u.x * w.x + u.y * w.y) / n))) * 180) / Math.PI;
+}
+
+/** Which of a path's corners are right angles: of a closed one, every point; of an open one, the inner ones. */
+function rightCorners(points: Pt[], isClosed: boolean): number[] {
+  const n = points.length;
+  const inner = isClosed ? points.map((_, i) => i) : points.slice(1, -1).map((_, i) => i + 1);
+  return inner.filter((i) => Math.abs(angleAt(points[i]!, points[(i - 1 + n) % n]!, points[(i + 1) % n]!) - 90) <= RIGHT);
 }
 
 function pointInLoop(p: Pt, loop: Pt[]): boolean {
@@ -241,12 +274,16 @@ export function fitStroke(ink: Ink, unit: number): Part {
           const point = found[(k + 2) % 3]!;
           return { ...base, kind: "wedge", points: [point, mid(found[k]!, found[(k + 1) % 3]!)] };
         }
-        return { ...base, kind: "triangle", points: found };
+        return { ...base, kind: "triangle", points: found, right: rightCorners(found, true) };
       }
-      return { ...base, kind: found.length === 4 ? "rectangle" : "polygon", points: found, count: found.length };
+      return { ...base, kind: found.length === 4 ? "rectangle" : "polygon", points: found, count: found.length, right: rightCorners(found, true) };
     }
     return { ...base, kind: "circle", points: [], centre: { x: cx, y: cy }, across: [width(b), height(b)] };
   }
+
+  // An arrow drawn in one stroke, before straightness: a small head on a long shaft strays from its line less than a line may.
+  const arrow = arrowInOneStroke(pts, unit, HEAD_SHARE, HEAD_SPREAD);
+  if (arrow) return { ...base, kind: "arrow", points: [arrow.tail, arrow.tip] };
 
   const [a, z] = [pts[0]!, pts[pts.length - 1]!];
   const chord = dist(a, z);
@@ -259,9 +296,6 @@ export function fitStroke(ink: Ink, unit: number): Part {
     if (c && sagitta >= BOW * chord && sagitta >= BOW_MIN * unit && sagitta >= 3 * tremor) return { ...base, kind: "arc", points: [a, m, z], centre: c.centre };
     return { ...base, kind: "segment", points: [a, z] };
   }
-  const arrow = arrowInOneStroke(pts, unit, HEAD_SHARE);
-  if (arrow) return { ...base, kind: "arrow", points: [arrow.tail, arrow.tip] };
-
   const path = simplify(pts, SIMPLIFY * size);
   const found = corners(path, size);
   // A coil turns round and round; a zigzag turns sharply back and forth.
@@ -277,7 +311,7 @@ export function fitStroke(ink: Ink, unit: number): Part {
   });
   const alternating = signs.slice(1).filter((s, i) => s !== signs[i]).length;
   if (found.length >= 4 && alternating >= 0.75 * (found.length - 1)) return { ...base, kind: "zigzag", points: [a, ...found, z], count: found.length };
-  if (found.length >= 1) return { ...base, kind: "polyline", points: [a, ...found, z], count: found.length };
+  if (found.length >= 1) return { ...base, kind: "polyline", points: [a, ...found, z], count: found.length, right: rightCorners([a, ...found, z], false) };
 
   // Smooth: an arc if it keeps to one circle, otherwise a curve.
   const c = circleThrough(a, along(pts, 0.5), z);
@@ -525,15 +559,31 @@ function dashEnds(strokes: Ink[]): Pt[] {
 
 /** Where on a part a label sits. */
 export type Place = "start" | "end" | "tail" | "head" | "middle" | "side" | "vertex" | "inside" | "near";
-/** Two parts (indices into `parts`) that join: `a`'s end on `b` (meet), their sides against each other (touch), or `a`, or an end of it, within `b` (inside). */
-export type Join = { a: number; b: number; how: "meet" | "touch" | "inside"; at?: Pt };
-/** A label: written text beside the drawing, the part it is nearest, and where on that part. `index`: which side or corner (from 0, in drawing order). */
-export type DrawingLabel = { strokes: Ink[]; box: Box; text: string; part: number | null; place: Place; index?: number; doubt?: string };
+/**
+ * Two parts (indices into `parts`) that join: `a`'s end on `b` (meet), their sides against each other (touch), or `a`, or an end of it, within `b` (inside).
+ * `right`: two straight runs that meet at a right angle.
+ */
+export type Join = { a: number; b: number; how: "meet" | "touch" | "inside"; at?: Pt; right?: true };
+/**
+ * A label: written text beside the drawing, the part it is nearest, and where on that part. `index`: which side or corner (from 0, in drawing order).
+ * `text`: the label as read; `shown`, as printed, if that differs — its unsure characters as what they may be, "«5|S»" (handwriting.ts's printedWord).
+ */
+export type DrawingLabel = { strokes: Ink[]; box: Box; text: string; shown?: string; part: number | null; place: Place; index?: number };
 export type BondType = "single" | "double" | "triple" | "wedge" | "dashed";
 /** Labels and unlabelled corners, joined by lines: `node`s are indices into `labels`, or `{ corner }` for an unlabelled point where lines meet. */
 export type GraphNode = { label: number } | { corner: Pt };
-export type Graph = { nodes: GraphNode[]; edges: { from: number; to: number; type: BondType; part: number }[] };
-export type Drawing = { parts: Part[]; strokes: Ink[]; box: Box; joins: Join[]; labels: DrawingLabel[]; graph: Graph | null };
+/** `points`: where each node is — a label's middle, or the corner. */
+export type Graph = { nodes: GraphNode[]; edges: { from: number; to: number; type: BondType; part: number }[]; points: Pt[] };
+/**
+ * Straight lines joined end to end into a closed loop: `parts` in order round it, and the `corners` between them (where
+ * parts[i] and parts[i + 1] meet), or for a graph, the `nodes` (indices into its nodes) in the same order.
+ */
+export type Ring = { parts: number[]; corners: Pt[]; nodes?: number[] };
+/** A small part (`mark`) set across a corner `at` of another (`part`), an end on each of the two sides that meet there. */
+export type CornerMark = { mark: number; part: number; at: Pt };
+export type Drawing = {
+  parts: Part[]; strokes: Ink[]; box: Box; joins: Join[]; labels: DrawingLabel[]; graph: Graph | null; rings: Ring[]; cornerMarks: CornerMark[];
+};
 
 /** A label is short writing — at most this many words and characters — within LABEL_REACH of a drawing. */
 const LABEL_WORDS = 3;
@@ -572,7 +622,10 @@ export function joinsOf(parts: Part[], unit: number): Join[] {
     if (meetAt) {
       // Recorded as the one whose end it is first.
       const [x, y] = meetAt.other === b ? [i, j] : [j, i];
-      out.push({ a: x, b: y, how: "meet", at: meetAt.e });
+      const [u, v] = [runAt(a, meetAt.e), runAt(b, meetAt.e)];
+      let apart = u === null || v === null ? 0 : Math.abs(u - v);
+      apart = Math.min(apart, Math.PI - apart);
+      out.push({ a: x, b: y, how: "meet", at: meetAt.e, ...(Math.abs((apart * 180) / Math.PI - 90) <= RIGHT ? { right: true as const } : {}) });
       return;
     }
     const inside = [[a, b, i, j], [b, a, j, i]].map(([p, q, x, y]) => {
@@ -593,6 +646,124 @@ export function joinsOf(parts: Part[], unit: number): Join[] {
     }
   }));
   return out;
+}
+
+/**
+ * The direction (radians, 0–π) of the straight run of `p` at `q`: a line's
+ * (an arrow's shaft, parallel lines', a row of strokes'), or the leg of a
+ * line with corners or the side of a closed shape nearest `q`. Null for a
+ * part with no straight run: round, curved, zigzag, a dot.
+ */
+function runAt(p: Part, q: Pt): number | null {
+  const direction = (a: Pt, b: Pt) => (Math.atan2(b.y - a.y, b.x - a.x) + Math.PI) % Math.PI;
+  const [first, last] = [p.points[0]!, p.points[p.points.length - 1]!];
+  switch (p.kind) {
+    case "segment": case "arrow": case "parallel": case "dashed": case "wedge": return direction(first, last);
+    case "polyline": case "triangle": case "rectangle": case "polygon": {
+      const legs = p.points.slice(p.kind === "polyline" ? 1 : 0).map((b, k) => {
+        const a = p.kind === "polyline" ? p.points[k]! : p.points[(k - 1 + p.points.length) % p.points.length]!;
+        return [a, b] as const;
+      });
+      const [a, b] = legs.reduce((best, leg) => (distToSegment(q, ...leg) < distToSegment(q, ...best) ? leg : best));
+      return direction(a, b);
+    }
+    default: return null;
+  }
+}
+
+/** A part's corners with the two sides that meet at each: a closed shape's every corner, a line with corners' inner ones. */
+function cornersOf(p: Part): { at: Pt; sides: [Pt, Pt] }[] {
+  const n = p.points.length;
+  if (["triangle", "rectangle", "polygon"].includes(p.kind)) return p.points.map((v, i) => ({ at: v, sides: [p.points[(i - 1 + n) % n]!, p.points[(i + 1) % n]!] }));
+  if (p.kind === "polyline") return p.points.slice(1, -1).map((v, k) => ({ at: v, sides: [p.points[k]!, p.points[k + 2]!] }));
+  return [];
+}
+
+/**
+ * Small parts set across another's corner, an end on each of the two sides
+ * that meet there and no further along them than half their length: the arc
+ * marking an angle, the square marking a right angle. Only a short line, an
+ * arc, or a line with one corner can be one.
+ */
+function cornerMarksOf(parts: Part[], unit: number): CornerMark[] {
+  const out: CornerMark[] = [];
+  parts.forEach((m, i) => {
+    if (!(m.kind === "arc" || m.kind === "segment" || (m.kind === "polyline" && m.count === 1))) return;
+    const [e1, e2] = [m.points[0]!, m.points[m.points.length - 1]!];
+    parts.forEach((p, j) => {
+      if (j === i) return;
+      for (const { at, sides: [s1, s2] } of cornersOf(p)) {
+        const on = (e: Pt, side: Pt) => distToSegment(e, at, side) <= MEET * unit && dist(e, at) >= MEET * unit && dist(e, at) <= 0.5 * dist(at, side);
+        if ((on(e1, s1) && on(e2, s2)) || (on(e1, s2) && on(e2, s1))) out.push({ mark: i, part: j, at });
+      }
+    });
+  });
+  return out;
+}
+
+/**
+ * Closed rings in a graph of `edges` between numbered nodes: for each edge,
+ * the shortest way round back to it through the others, if there is one —
+ * so two rings sharing a side are two rings, not one big one. Each ring once,
+ * its edges and nodes in order round it.
+ */
+function cyclesOf(edges: { from: number; to: number }[]): { edges: number[]; nodes: number[] }[] {
+  const out: { edges: number[]; nodes: number[] }[] = [];
+  const seen = new Set<string>();
+  edges.forEach((e, k) => {
+    // Breadth first from e.from to e.to, without e.
+    const back = new Map<number, { node: number; edge: number }>([[e.from, { node: -1, edge: -1 }]]);
+    for (let frontier = [e.from]; frontier.length && !back.has(e.to);) {
+      const next: number[] = [];
+      for (const n of frontier) {
+        edges.forEach((f, m) => {
+          if (m === k || (f.from !== n && f.to !== n)) return;
+          const other = f.from === n ? f.to : f.from;
+          if (back.has(other)) return;
+          back.set(other, { node: n, edge: m });
+          next.push(other);
+        });
+      }
+      frontier = next;
+    }
+    if (!back.has(e.to)) return;
+    const nodes = [e.to];
+    const ring = [k];
+    for (let n = e.to; n !== e.from; n = back.get(n)!.node) {
+      ring.push(back.get(n)!.edge);
+      nodes.push(back.get(n)!.node);
+    }
+    const key = [...ring].sort((x, y) => x - y).join(",");
+    if (ring.length < 3 || seen.has(key)) return;
+    seen.add(key);
+    out.push({ edges: ring, nodes });
+  });
+  return out;
+}
+
+/** How many straight sides a part makes in a ring: a line one, a line with corners one more than its corners. */
+export const sidesOf = (p: Part) => (p.kind === "polyline" ? p.count! + 1 : 1);
+
+/**
+ * Straight lines (single lines, lines with corners) joined end to end into
+ * closed rings: their ends, where within MEET of each other, are the ring's
+ * corners. For a graph, its rings of labels and corners instead.
+ */
+function ringsOf(parts: Part[], graph: Graph | null, unit: number): Ring[] {
+  if (graph) {
+    const nodePoint = (n: number) => graph.points[n]!;
+    return cyclesOf(graph.edges).map((c) => ({ parts: c.edges.map((k) => graph.edges[k]!.part), corners: c.nodes.map(nodePoint), nodes: c.nodes }));
+  }
+  const lines = parts.map((p, i) => ({ p, i })).filter(({ p }) => p.kind === "segment" || p.kind === "polyline");
+  const ends = lines.flatMap(({ p, i }) => [{ e: p.points[0]!, i }, { e: p.points[p.points.length - 1]!, i }]);
+  const clusters = groupBy(ends, (a, b) => dist(a.e, b.e) <= MEET * unit);
+  const clusterOf = (x: (typeof ends)[number]) => clusters.findIndex((c) => c.includes(x));
+  const edges = lines.map(({ i }) => {
+    const [a, b] = ends.filter((x) => x.i === i);
+    return { from: clusterOf(a!), to: clusterOf(b!), part: i };
+  }).filter((e) => e.from !== e.to);
+  const centre = (c: (typeof ends)[number][]) => ({ x: c.reduce((s, x) => s + x.e.x, 0) / c.length, y: c.reduce((s, x) => s + x.e.y, 0) / c.length });
+  return cyclesOf(edges).map((c) => ({ parts: c.edges.map((k) => edges[k]!.part), corners: c.nodes.map((n) => centre(clusters[n]!)) }));
 }
 
 /** Where on `part` a label centred at `c` sits. */
@@ -666,7 +837,8 @@ function graphOf(parts: Part[], labels: DrawingLabel[], unit: number): Graph | n
     return { from: nodeOf(a!), to: nodeOf(b!), type: typeOf(p), part: i };
   }).filter((e) => e.from !== e.to);
   const labelled = new Set(edges.flatMap((e) => [e.from, e.to]).filter((n) => n < labels.length));
-  return labelled.size >= GRAPH_LABELS ? { nodes, edges } : null;
+  const points = nodes.map((n) => ("label" in n ? { x: centerX(labels[n.label]!.box), y: centerY(labels[n.label]!.box) } : n.corner));
+  return labelled.size >= GRAPH_LABELS ? { nodes, edges, points } : null;
 }
 
 /**
@@ -675,12 +847,12 @@ function graphOf(parts: Part[], labels: DrawingLabel[], unit: number): Graph | n
  * running on through the labels of two drawings side by side). A label
  * within reach of the ends of two drawings' lines joins them into one (the
  * "C" between a molecule's bonds). `blocks` are the board's lines of writing,
- * `textOf` reads words (`doubt`: what they may be instead, where the
- * recognizer is unsure). Returns the finished drawings and the blocks they
- * took as labels — only blocks all of whose words became labels.
+ * `textOf` reads words (`shown`: as printed, where the recognizer is unsure
+ * of some of it). Returns the finished drawings and the blocks they took as
+ * labels — only blocks all of whose words became labels.
  */
 export function attachLabels(
-  drafts: DrawingDraft[], blocks: TextBlock[], textOf: (words: Word[]) => { text: string; doubt?: string }, unit: number,
+  drafts: DrawingDraft[], blocks: TextBlock[], textOf: (words: Word[]) => { text: string; shown?: string }, unit: number,
 ): { drawings: Drawing[]; labels: Set<TextBlock> } {
   type Run = { block: TextBlock; words: Word[]; box: Box };
   const all = blocks.flatMap((b) => {
@@ -725,7 +897,11 @@ export function attachLabels(
       const strokes = r.words.flatMap((w) => w.glyphs.flatMap((g) => g.strokes));
       return { strokes, box: r.box, ...textOf(r.words), part: nearest?.i ?? null, ...(nearest ? placeOn(d.parts[nearest.i]!, c, unit) : { place: "near" as const }) };
     });
-    return { ...d, strokes: [...d.strokes, ...labels.flatMap((l) => l.strokes)], box: union([d.box, ...labels.map((l) => l.box)]), joins: joinsOf(d.parts, unit), labels, graph: graphOf(d.parts, labels, unit) };
+    const graph = graphOf(d.parts, labels, unit);
+    return {
+      ...d, strokes: [...d.strokes, ...labels.flatMap((l) => l.strokes)], box: union([d.box, ...labels.map((l) => l.box)]),
+      joins: joinsOf(d.parts, unit), labels, graph, rings: ringsOf(d.parts, graph, unit), cornerMarks: cornerMarksOf(d.parts, unit),
+    };
   });
   return { drawings, labels: taken };
 }

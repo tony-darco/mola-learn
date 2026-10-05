@@ -2,12 +2,14 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
-import { Move, MoveDiagonal2, Pencil } from "lucide-react";
+import { Check, Lightbulb, MessageSquare, Move, MoveDiagonal2, Pencil, X } from "lucide-react";
 import type { MathfieldElement } from "mathlive";
 import type { z } from "zod";
-import type { canvasShapeKindSchema, CanvasElement } from "@mola/shared";
+import type { canvasShapeKindSchema, CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
 import { elementBounds } from "@/lib/canvas/marquee";
+import { Markdown } from "../Markdown";
+import type { CanvasTurn } from "./useCanvasChat";
 
 /** A single resize handle at the bottom-right corner — deliberately not one
  * per corner; a single, always-in-the-same-place handle is a simpler,
@@ -148,8 +150,11 @@ export function SelectionOutline({ element, zoom }: { element: CanvasElement; zo
   );
 }
 
+/** An AI annotation's thread (useCanvasChat.ts annotationThreads), and how to reply to it — one reply in the canvas chat at a time. */
+export type AnnotationReplies = { thread: CanvasTurn[]; busy: boolean; onReply: (text: string) => void };
+
 export function ElementShape({
-  element, selected, soleSelected, editing, onCommitText, onCommitMath, onMeasureMath, onRenameFrame, onStartEdit, zoom,
+  element, selected, soleSelected, editing, onCommitText, onCommitMath, onMeasureMath, onRenameFrame, onStartEdit, zoom, replies,
 }: {
   element: CanvasElement; selected: boolean; soleSelected: boolean; editing: boolean;
   onCommitText: (id: string, text: string, contentHeight: number) => void;
@@ -160,6 +165,8 @@ export function ElementShape({
   /** Current pan/zoom scale — text/note boxes need it to convert a live,
    * screen-pixel content-height reading into world units while typing. */
   zoom: number;
+  /** AI annotations only. */
+  replies?: AnnotationReplies;
 }) {
   if (element.type === "draw") return <DrawShape element={element} />;
 
@@ -283,12 +290,131 @@ export function ElementShape({
     );
   }
 
+  if (element.type === "annotation") return <AnnotationShape element={element} selected={selected} zoom={zoom} replies={replies} />;
+
   // text
   return (
     <TextShape
       element={element} editing={editing} soleSelected={soleSelected}
       onCommitText={onCommitText} onStartEdit={onStartEdit} zoom={zoom}
     />
+  );
+}
+
+const ANNOTATION_ICONS = { error: X, hint: Lightbulb, check: Check, note: MessageSquare };
+const ANNOTATION_TITLES = { error: "Mistake", hint: "Hint", check: "Looks right", note: "Note" };
+/** Canvas units: the gap between an annotation's place and the mark round it, the mark's width, and the icon's size. */
+const MARK_PAD = 6;
+const MARK_WIDTH = 2.5;
+const ICON_SIZE = 22;
+/** Screen pixels: the most room a note's card takes — its thread scrolls past a few replies. */
+const NOTE_WIDTH = 260;
+const NOTE_HEIGHT = 420;
+
+/**
+ * A note the AI pinned to the board, in the AI's ink (--ai-ink, set on the
+ * canvas for its background): the mark round its place, and an icon at the
+ * place's top-right corner that opens the note — on hover, and while the
+ * annotation is selected (a click on the icon). Beneath the note, its
+ * thread: the student's replies and the AI's answers, and, while it is
+ * open, a box to reply. Only the icon takes the pointer, and the card while
+ * it is open, so the work under the mark is as easy to reach as before. The
+ * note's card keeps one size on screen at any zoom.
+ */
+function AnnotationShape({
+  element, selected, zoom, replies,
+}: { element: CanvasAnnotationElement; selected: boolean; zoom: number; replies?: AnnotationReplies }) {
+  const { x, y, width: w, height: h } = element;
+  const { kind, mark, note } = element.props;
+  const Icon = ANNOTATION_ICONS[kind];
+  const cx = x + w + MARK_PAD, cy = y - MARK_PAD;
+  const thread = replies?.thread ?? [];
+  // Kept while the note is closed, so a reply half written survives a click elsewhere on the board.
+  const [draft, setDraft] = useState("");
+  // A thread longer than the card scrolls; opened, it shows the newest reply, and its answer as it streams.
+  const threadRef = useRef<HTMLDivElement>(null);
+  const newest = thread[thread.length - 1];
+  useEffect(() => {
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
+  }, [selected, thread.length, newest?.text]);
+  function reply() {
+    if (!replies || replies.busy || !draft.trim()) return;
+    replies.onReply(draft);
+    setDraft("");
+  }
+  return (
+    <g opacity={element.opacity} className="group">
+      <g fill="none" stroke="var(--ai-ink)" strokeWidth={MARK_WIDTH} strokeLinecap="round" pointerEvents="none">
+        {/* An ellipse through the corners of the place's box, and a little more. */}
+        {mark === "circle" && <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / Math.SQRT2 + MARK_PAD} ry={h / Math.SQRT2 + MARK_PAD} />}
+        {mark === "box" && <rect x={x - MARK_PAD} y={y - MARK_PAD} width={w + 2 * MARK_PAD} height={h + 2 * MARK_PAD} rx={MARK_PAD} />}
+        {mark === "underline" && <line x1={x - MARK_PAD / 2} y1={y + h + MARK_PAD} x2={x + w + MARK_PAD / 2} y2={y + h + MARK_PAD} />}
+      </g>
+      <g data-element-id={element.id} data-testid="ai-annotation" data-kind={kind} className="cursor-pointer">
+        <circle cx={cx} cy={cy} r={ICON_SIZE / 2} fill="var(--ai-ink)" />
+        <Icon x={cx - ICON_SIZE * 0.3} y={cy - ICON_SIZE * 0.3} width={ICON_SIZE * 0.6} height={ICON_SIZE * 0.6} color="var(--ai-ink-fg)" strokeWidth={3} />
+      </g>
+      <g
+        transform={`translate(${cx + ICON_SIZE / 2 + 4} ${cy - ICON_SIZE / 2}) scale(${1 / zoom})`}
+        className={selected ? undefined : "hidden group-hover:inline"} pointerEvents="none"
+      >
+        <foreignObject width={NOTE_WIDTH} height={NOTE_HEIGHT} overflow="visible">
+          {/* Open, the card takes the pointer — only the card, so the board around it draws as ever — and keeps its
+              own presses: typing in it never selects, drags or draws on the board (nor pans it: CanvasView's panFilter). */}
+          <div
+            data-annotation-card
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className={`${selected || thread.length > 0 ? "w-full" : "w-fit"} ${selected ? "pointer-events-auto" : ""} rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs leading-snug text-fg shadow-md`}
+          >
+            <div data-testid="ai-annotation-note">
+              <span className="font-semibold text-accent">{ANNOTATION_TITLES[kind]}</span> {note}
+            </div>
+            {thread.length > 0 && (
+              <div ref={threadRef} data-testid="ai-annotation-thread" className="mt-1.5 max-h-60 space-y-1.5 overflow-y-auto border-t border-border pt-1.5">
+                {thread.map((t) => (t.role === "user" ? (
+                  <div key={t.id} data-testid="ai-annotation-reply" className="ml-6 whitespace-pre-wrap rounded-lg bg-bg px-2 py-1">{t.text}</div>
+                ) : (
+                  <div key={t.id} data-testid="ai-annotation-answer" className="[&_.markdown]:text-xs">
+                    {t.text && <Markdown text={t.text} />}
+                    {!t.text && t.streaming && <span className="animate-pulse text-fg-muted">…</span>}
+                    {t.error && <div className="text-red-700 dark:text-red-400">{t.error}</div>}
+                  </div>
+                )))}
+              </div>
+            )}
+            {selected && replies && (
+              <div className="mt-1.5 flex items-end gap-1 rounded-md border border-border bg-bg p-1">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      reply();
+                    }
+                  }}
+                  placeholder="Reply…"
+                  aria-label="Reply to this note"
+                  rows={1}
+                  className="max-h-24 min-w-0 flex-1 resize-none bg-transparent px-1 py-0.5 text-xs text-fg placeholder:text-fg-muted focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={reply}
+                  disabled={replies.busy || !draft.trim()}
+                  title="Send reply"
+                  aria-label="Send reply"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-sm leading-none text-fg hover:bg-surface disabled:cursor-default disabled:opacity-50"
+                >
+                  ⏎
+                </button>
+              </div>
+            )}
+          </div>
+        </foreignObject>
+      </g>
+    </g>
   );
 }
 

@@ -13,7 +13,8 @@
     "worker": "tsx scripts/worker.ts",
     "eval:canvas": "tsx evals/canvas-syntax/run.ts",
     "eval:canvas-reader": "tsx evals/canvas-reader/run.ts",
-    "eval:canvas-understanding": "tsx evals/canvas-understanding/run.ts"
+    "eval:canvas-understanding": "tsx evals/canvas-understanding/run.ts",
+    "eval:canvas-annotate": "tsx evals/canvas-annotate/run.ts"
   },
   "dependencies": {
     "@auth/core": "0.41.3",
