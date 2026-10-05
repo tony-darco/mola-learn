@@ -17,7 +17,7 @@ const CANVAS_BUCKET = process.env.MOLA_CANVAS_BUCKET ?? "mola-canvas";
 
 function s3Client(): S3Client {
   return new S3Client({
-    endpoint: process.env.AWS_ENDPOINT_URL ?? "http://192.168.1.17:4566",
+    endpoint: process.env.AWS_ENDPOINT_URL ?? "http://192.168.1.58:4566",
     region: process.env.AWS_REGION ?? "us-east-1",
     forcePathStyle: true,
     requestChecksumCalculation: "WHEN_REQUIRED",
@@ -53,6 +53,6 @@ export async function uploadCanvasImageAction(formData: FormData): Promise<{ url
   // LocalStack setup). A real deployment would need either a bucket policy
   // making canvas images public-read, or a proxy route that streams the
   // object through an authenticated request instead of a public URL.
-  const endpoint = process.env.AWS_ENDPOINT_URL ?? "http://192.168.1.17:4566";
+  const endpoint = process.env.AWS_ENDPOINT_URL ?? "http://192.168.1.58:4566";
   return { url: `${endpoint}/${CANVAS_BUCKET}/${key}` };
 }

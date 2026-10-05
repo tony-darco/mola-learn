@@ -202,7 +202,10 @@ finished product, and the list below is meant to be read literally.
 - **Ingestion needs Docker** for S3 and ClamAV; there is no Docker-free path.
 - **The golden retrieval eval is scoped to a single syllabus corpus** (20
   questions), so it guards regressions rather than proving general quality.
-- **Desktop-shaped.** No mobile layout work has been done.
+- **Desktop-shaped** on the web. A separate native iPadOS client
+  (`apps/ipad/`) covers chat, artifact browsing/study, plan, and calendar
+  against the same backend — see its own README for what's wired and what
+  isn't; it's an unverified scaffold, not yet built on a real Mac.
 
 ### Next
 
@@ -228,6 +231,7 @@ apps/
     lib/llm/           Ollama + BYOK providers, model catalog, embeddings
     e2e/               Playwright specs
   ingest/              Python ingestion worker (scan → extract → chunk → embed)
+  ipad/                Native SwiftUI client for iPadOS — see its own README
 packages/
   db/                  Drizzle schema, migrations, seeds
   shared/              Frozen cross-boundary contracts (artifacts, stream, planning)
