@@ -37,7 +37,7 @@ import { authzResponse, requireSession } from "@/lib/auth/ownership";
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL, getChatProvider, type Message } from "@/lib/llm";
 import { readCanvas, type LabelMap } from "@/lib/canvas/textSyntax";
 import { withChecks } from "@/lib/canvas/textSyntax/checks";
-import { encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
+import { ANNOTATION_GONE, encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
 import { changesSection, type CanvasEdit } from "@/lib/canvas/editLog";
 import { findCanvasChat, lockChat, recordAIEdits, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
 import { CANVAS_CHAT_SYSTEM, forModel, MAX_OUTPUT_TOKENS, repliedAnnotation, runCanvasTurn } from "@/lib/canvas/chatTurn";
@@ -138,7 +138,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
       const board = () => ({ elements, doc: (whole ?? readCanvas(elements, { labels: read.labels })).doc });
       return { chat, context, history, edits: synced.written, userRow: userRow!, assistantRow: assistantRow!, board };
     });
-    if (!turn) return Response.json({ error: "annotation not found" }, { status: 404 });
+    if (!turn) return Response.json({ error: ANNOTATION_GONE }, { status: 404 });
     const { chat, context, history, edits, userRow, assistantRow, board } = turn;
 
     const modelMessages: Message[] = [

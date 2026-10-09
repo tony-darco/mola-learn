@@ -17,6 +17,16 @@ import type { Rect } from "./marquee";
  */
 export type CanvasChatRequest = { message: string; selection?: { rect: Rect }; annotationId?: string };
 
+/** POST's 404 body when the annotation a reply is to isn't on the board as saved — erased meanwhile, here or in another tab. */
+export const ANNOTATION_GONE = "annotation not found";
+
+/** Why a message couldn't be sent, as its thread shows it: a reply to an annotation that is gone says so, not the status. */
+export function sendFailure(status: number, body: unknown, annotationId: string | null): string {
+  const error = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+  if (annotationId && status === 404 && error === ANNOTATION_GONE) return "That annotation is no longer on the board.";
+  return `request failed (${status})`;
+}
+
 /** The AI annotation a message replies to, as the model was told it: its K label, and what it said where. */
 export type RepliedAnnotation = { label: string; kind: CanvasAnnotationElement["props"]["kind"]; target: string; note: string };
 

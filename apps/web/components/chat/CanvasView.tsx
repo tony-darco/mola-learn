@@ -334,8 +334,24 @@ export function CanvasView({
     );
   }
 
+  /** Closes any open annotation note — the selected annotation's card, which takes the pointer over the board under it. */
+  function closeNotes() {
+    setSelectedIds((prev) => {
+      const open = [...prev].filter((id) => elementsRef.current.find((el) => el.id === id)?.type === "annotation");
+      return open.length === 0 ? prev : new Set([...prev].filter((id) => !open.includes(id)));
+    });
+  }
+
+  /** A tool other than Select draws, places or erases on the board: an open note would sit over it, so it closes. */
+  function pickTool(next: Tool) {
+    setTool(next);
+    if (next !== "select") closeNotes();
+  }
+
   function handlePointerDown(e: React.PointerEvent<SVGSVGElement>) {
     if (spaceHeldRef.current || e.button === 1 || tool === "pan") return;
+    // A stroke, shape or erase started anywhere but on the note closes it, whatever tool is out.
+    if (tool !== "select") closeNotes();
 
     if (tool === "select") {
       const target = e.target as Element;
@@ -895,7 +911,7 @@ export function CanvasView({
     <>
     <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg">
       <Toolbar
-        tool={tool} onToolChange={setTool}
+        tool={tool} onToolChange={pickTool}
         locked={locked} onLockedChange={setLocked}
         shapeKind={shapeKind} onShapeKindChange={setShapeKind}
         eraserMode={eraserMode} onEraserModeChange={setEraserMode}

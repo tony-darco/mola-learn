@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { annotate, ANNOTATE_TOOL, newAnnotateTurn } from "../lib/canvas/annotate";
-import { replySection, type CanvasChatEvent, type CanvasContext } from "../lib/canvas/chat";
+import { ANNOTATION_GONE, replySection, sendFailure, type CanvasChatEvent, type CanvasContext } from "../lib/canvas/chat";
 import { forModel, repliedAnnotation, runCanvasTurn } from "../lib/canvas/chatTurn";
 import { ScriptedProvider } from "../lib/canvas/scripted";
 import { readCanvas } from "../lib/canvas/textSyntax";
@@ -74,6 +74,20 @@ describe("what the model reads for a reply to one of its annotations", () => {
     expect(provider.requests[0]!.tools).toEqual([ANNOTATE_TOOL]);
     expect(provider.requests[0]!.messages[0]!.content).toContain("a reply to your annotation K1, where you marked T8 word 5 as an error");
     expect(events.flatMap((e) => (e.type === "annotation" ? [e.element.props.target] : []))).toEqual(["T8 word 3"]);
+  });
+});
+
+describe("why a message couldn't be sent, as its thread shows it", () => {
+  it("says a reply to an annotation that has been erased is no longer on the board, not the status", () => {
+    expect(sendFailure(404, { error: ANNOTATION_GONE }, "k1")).toBe("That annotation is no longer on the board.");
+  });
+
+  it("keeps the status for any other failure, and for a 404 that isn't about an annotation", () => {
+    expect(sendFailure(404, { error: ANNOTATION_GONE }, null)).toBe("request failed (404)");
+    expect(sendFailure(404, { error: "not found" }, "k1")).toBe("request failed (404)");
+    expect(sendFailure(404, null, "k1")).toBe("request failed (404)");
+    expect(sendFailure(500, { error: ANNOTATION_GONE }, "k1")).toBe("request failed (500)");
+    expect(sendFailure(429, "slow down", "k1")).toBe("request failed (429)");
   });
 });
 
