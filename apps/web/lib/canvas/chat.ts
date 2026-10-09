@@ -3,9 +3,9 @@
  * (app/api/canvas/[canvasId]/chat) and the panel on the canvas page.
  *
  * Its own small event set rather than the main chat's (contract 6): no
- * artifacts or hints here, its one tool's results are drawn on the board
- * rather than shown in the chat, and the first event has to carry what the
- * model was shown. Same SSE framing — one JSON object per `data:` line.
+ * artifacts or hints here, its tools' results are drawn on the board rather
+ * than shown in the chat, and the first event has to carry what the model
+ * was shown. Same SSE framing — one JSON object per `data:` line.
  */
 import type { CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import type { CanvasEdit } from "./editLog";
@@ -40,6 +40,17 @@ export function replySection({ label, kind, target, note }: RepliedAnnotation): 
   return `WHAT THE STUDENT IS REPLYING TO\nTheir message is a reply to your annotation ${label}, where you ${ANNOTATED[kind](target)}: "${note}"`;
 }
 
+/**
+ * One change the AI made to the board: an element it added (`before` null) —
+ * an annotation (annotate.ts), a text box, math or an arrow (writes.ts) — or
+ * a change to one already there, with the whole element as it was before,
+ * so each change can be taken back on its own. `id`: the element's own for
+ * one it added, a fresh one for a change.
+ */
+export type AIChange = { id: string; element: CanvasElement; before: CanvasElement | null };
+
+export const addedByAI = (element: CanvasElement): AIChange => ({ id: element.id, element, before: null });
+
 export type CanvasChatEvent =
   /**
    * Always first: the stored user message, the assistant message being generated, and exactly what
@@ -49,6 +60,8 @@ export type CanvasChatEvent =
   | { type: "text_delta"; text: string }
   /** An annotation the model just placed (lib/canvas/annotate.ts), for the canvas page to put on the board and save. */
   | { type: "annotation"; element: CanvasAnnotationElement }
+  /** Any other change the model just made (lib/canvas/writes.ts), for the canvas page to apply and save. */
+  | { type: "change"; change: AIChange }
   | { type: "message_end"; messageId: string }
   | { type: "error"; message: string };
 
@@ -74,8 +87,8 @@ export type CanvasChatMessage =
  */
 export type CanvasEditsResponse = { chatId: string | null; entries: CanvasChatMessage[]; pending: PendingAIEdit[] };
 
-/** An AI edit still to be put on the board, and the reply that placed it. */
-export type PendingAIEdit = { messageId: string; element: CanvasElement };
+/** An AI change still to be applied to the board, and the reply that made it. */
+export type PendingAIEdit = { messageId: string } & AIChange;
 
 export function encodeCanvasChatEvent(event: CanvasChatEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;

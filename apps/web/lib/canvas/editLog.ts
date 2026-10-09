@@ -13,9 +13,12 @@
  * writes the entries.
  *
  * An edit says who made it, so every entry in the log has the same shape:
- * the AI's annotations are logged as its own ("Mola marked M8 row 1 col 4
- * as an error (K1): …") by what they are made of — elements createdBy
- * "ai" — whichever save brings them, and everything else as the student's.
+ * what the AI adds is logged as its own ("Mola marked M8 row 1 col 4 as an
+ * error (K1): …", "Mola wrote math Q1: …") by what it is made of — elements
+ * createdBy "ai" — whichever save brings it; so are its changes to what was
+ * there ("Mola changed X1 from … to …", "Mola moved S2"), by the element
+ * standing as the AI left it (creditAI); and everything else as the
+ * student's.
  */
 import type { CanvasElement } from "@mola/shared";
 import { readCanvas, type CanvasDoc, type LabelMap, type ReadItem } from "./textSyntax";
@@ -221,6 +224,37 @@ export function diffSnapshots(before: BoardSnapshot, after: BoardSnapshot, actor
   return [...erased, ...rest];
 }
 
+/** The placed elements behind the student's changes and moves in `edits`: those an AI change could explain (creditAI). */
+export function aiCandidates(edits: CanvasEdit[], after: BoardSnapshot): string[] {
+  const items = new Map(after.items.map((i) => [i.label, i]));
+  return edits.flatMap((e) => {
+    const item = items.get(e.label);
+    return e.actor === "user" && (e.action === "changed" || e.action === "moved") && item && !item.pen ? Object.keys(item.elements) : [];
+  });
+}
+
+/**
+ * `edits` with the AI's changes to what was already on the board — a text
+ * box rewritten, a shape moved, an arrow pointed elsewhere — told as its
+ * own: each of the student's changes and moves whose one element stands now
+ * exactly as one of the AI's changes left it (`aiLeft`, every element
+ * aiCandidates named as the AI left it, lib/canvas/chatServer.ts) — in the
+ * same place, and the same in everything but size, which the page sets
+ * itself as it lays text and math out. The rest stay the student's.
+ */
+export function creditAI(edits: CanvasEdit[], after: BoardSnapshot, aiLeft: CanvasElement[]): CanvasEdit[] {
+  if (aiLeft.length === 0) return edits;
+  const items = new Map(after.items.map((i) => [i.label, i]));
+  return edits.map((e) => {
+    const item = items.get(e.label);
+    const [id, ...more] = item && !item.pen ? Object.keys(item.elements) : [];
+    if (e.actor !== "user" || (e.action !== "changed" && e.action !== "moved") || !id || more.length > 0) return e;
+    const [x, y, , , f] = item!.elements[id]!;
+    const left = aiLeft.some((el) => el.id === id && Math.round(el.x) === x && Math.round(el.y) === y && fingerprint(el) === f);
+    return left ? { ...e, actor: "ai" as const } : e;
+  });
+}
+
 /**
  * The changes between two boards, the first read with `labels` and the
  * second with what that read left — the labels a chat would have. The sync
@@ -297,9 +331,10 @@ function added(who: string, e: CanvasEdit): string {
     case "matrix": return `${who} added ${L} (a ${dims(c)} matrix)`;
     case "writing": return `${who} wrote ${L}: ${quote(c.text)}`;
     case "drawing": return `${who} drew ${L} (a pen drawing${c.labels?.length ? `, labelled ${c.labels.map(quote).join(", ")}` : ""})`;
-    case "text": return `${who} added a text box ${L}: ${quote(c.text)}`;
+    // What the AI writes it writes: "Mola wrote math Q1: …".
+    case "text": return `${who} ${e.actor === "ai" ? "wrote" : "added"} a text box ${L}: ${quote(c.text)}`;
     case "note": return `${who} added a sticky note ${L}: ${quote(c.text)}`;
-    case "math": return `${who} added math ${L}: ${quote(c.text)}`;
+    case "math": return `${who} ${e.actor === "ai" ? "wrote" : "added"} math ${L}: ${quote(c.text)}`;
     case "image": return `${who} added an image ${L}`;
     case "frame": return `${who} added a frame ${L} ${quote(c.text)}`;
     case "shape": return `${who} drew ${article(c.form ?? "shape")} ${L}${rel ? ` ${rel}` : ""}`;

@@ -4,10 +4,12 @@
  * Each message goes to the model together with the canvas as text
  * (readCanvas) — the whole board, or only the rectangle the student
  * selected — and the reply streams back (lib/canvas/chat.ts has the event
- * format). The model has one tool, annotate_canvas: notes pinned to places
- * on the board, which stream out with the reply for the open canvas to add
- * and save, and are kept until it has (lib/canvas/chatTurn.ts runs the
- * reply; this route never writes the canvas itself). The first event
+ * format). The model's tools change the board — notes pinned to places on
+ * it (annotate_canvas), text, math and arrows written on it, typed text
+ * changed, shapes and arrows moved (write_on_canvas, arrange_canvas) — and
+ * those changes stream out with the reply for the open canvas to apply and
+ * save, and are kept until it has (lib/canvas/chatTurn.ts runs the reply;
+ * this route never writes the canvas itself). The first event
  * carries exactly the canvas text the model was given and the region it was
  * limited to; the same is stored on the user's message, so "What the AI
  * saw" survives a reload.
@@ -162,7 +164,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
           const provider = scriptedProvider(chat.model) ?? getChatProvider(session.userId, { model: chat.model, think: chat.thinkingEnabled === 1 });
           error = await runCanvasTurn({
             provider, system: CANVAS_CHAT_SYSTEM, messages: modelMessages, maxTokens: MAX_OUTPUT_TOKENS, board,
-            record: (placed) => recordAIEdits(canvasId, session.userId, messageId, placed),
+            record: (changes) => recordAIEdits(canvasId, session.userId, messageId, changes),
             send: (ev) => {
               if (ev.type === "text_delta") text += ev.text;
               send(ev);

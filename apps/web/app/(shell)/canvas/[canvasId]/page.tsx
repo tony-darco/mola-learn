@@ -28,7 +28,7 @@ export default async function CanvasDetailPage({ params }: { params: Promise<{ c
     <main className="flex flex-1 min-w-0 overflow-hidden">
       <CanvasView
         canvasId={canvas.id} title={canvas.title} payload={canvas.payload} initialVersion={canvas.version}
-        pendingAIEdits={(await pendingAIEdits(canvas.id)).map((p) => p.element)}
+        pendingAIEdits={(await pendingAIEdits(canvas.id)).map(({ id, element, before }) => ({ id, element, before }))}
       />
     </main>
   );

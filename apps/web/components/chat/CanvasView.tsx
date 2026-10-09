@@ -14,7 +14,8 @@ import { createSaveSerializer } from "@/lib/canvas/saveQueue";
 import { saveCanvasAction } from "@/lib/canvas/actions";
 import { uploadCanvasImageAction } from "@/lib/canvas/imageUpload";
 import { emptyHistory, pushHistory, redo as historyRedo, undo as historyUndo, type History } from "@/lib/canvas/history";
-import { applyAIElements, type AIStep } from "@/lib/canvas/aiEdits";
+import { applyAIChanges, type AIStep } from "@/lib/canvas/aiEdits";
+import type { AIChange } from "@/lib/canvas/chat";
 import { eraseWholeObjects, erasePartial } from "@/lib/canvas/eraser";
 import { resizeBox, type ResizeCorner } from "@/lib/canvas/resize";
 import { cursorForTool } from "@/lib/canvas/cursors";
@@ -49,8 +50,8 @@ export function CanvasView({
   canvasId, title, payload, initialVersion, pendingAIEdits,
 }: {
   canvasId: string; title: string; payload: Payload; initialVersion: number;
-  /** The AI's edits no save has acknowledged yet (lib/canvas/chatServer.ts) — added when the page opens. */
-  pendingAIEdits: CanvasElement[];
+  /** The AI's changes no save has acknowledged yet (lib/canvas/chatServer.ts) — applied when the page opens. */
+  pendingAIEdits: AIChange[];
 }) {
   const confirm = useConfirm();
 
@@ -98,7 +99,7 @@ export function CanvasView({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRef = useRef<History<CanvasElement[]>>(emptyHistory());
   const aiStepRef = useRef<AIStep | null>(null);
-  /** Every AI edit this page has taken; and those of them no save has acknowledged yet. */
+  /** Every AI change this page has taken; and those of them no save has acknowledged yet. */
   const aiTakenRef = useRef<ReadonlySet<string>>(new Set());
   const aiUnsavedRef = useRef(new Set<string>());
   const resizeRef = useRef<{ id: string; corner: ResizeCorner } | null>(null);
@@ -222,13 +223,14 @@ export function CanvasView({
   }
 
   /**
-   * What the AI put on the board — a reply's (`key`: its message), or all
-   * that were still pending: on top, saved as usual, one undo step, and
-   * never twice (lib/canvas/aiEdits.ts). The next save that goes through
-   * acknowledges each, so the server stops keeping it pending.
+   * What the AI changed on the board — a reply's (`key`: its message), or all
+   * that were still pending: what it added on top, what it edited or moved
+   * where it is, saved as usual, one undo step, and never twice
+   * (lib/canvas/aiEdits.ts). The next save that goes through acknowledges
+   * each, so the server stops keeping it pending.
    */
-  function applyFromAI(key: string, incoming: CanvasElement[]) {
-    const next = applyAIElements(
+  function applyFromAI(key: string, incoming: AIChange[]) {
+    const next = applyAIChanges(
       { elements: elementsRef.current, history: historyRef.current, step: aiStepRef.current, taken: aiTakenRef.current }, key, incoming,
     );
     aiTakenRef.current = next.taken;
@@ -236,13 +238,13 @@ export function CanvasView({
     if (next.elements === elementsRef.current) return;
     historyRef.current = next.history;
     aiStepRef.current = next.step;
-    // Now, not when React gets to the update: a reply's next element can arrive before it does.
+    // Now, not when React gets to the update: a reply's next change can arrive before it does.
     elementsRef.current = next.elements;
     setHistoryVersion((v) => v + 1);
     applyMutation(() => next.elements);
   }
 
-  // What the AI placed while no page could add it — the tab closed mid-reply, the stream dropped, the save failed.
+  // What the AI changed while no page could apply it — the tab closed mid-reply, the stream dropped, the save failed.
   useEffect(() => {
     if (pendingAIEdits.length > 0) applyFromAI("pending", pendingAIEdits);
     // An annotation's thread is in the chat: a board with annotations loads it with the page.
@@ -957,7 +959,7 @@ export function CanvasView({
         ref={svgRef}
         width="100%" height="100%"
         className="flex-1 touch-none"
-        // The AI's ink for this board's background, for its annotations (ElementRenderer.tsx).
+        // The AI's ink for this board's background, for its annotations, text, math and arrows (ElementRenderer.tsx).
         style={{ cursor: cursorForTool(tool), "--ai-ink": ink.ink, "--ai-ink-fg": ink.fg } as React.CSSProperties}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

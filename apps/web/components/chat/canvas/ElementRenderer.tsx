@@ -8,6 +8,7 @@ import type { z } from "zod";
 import type { canvasShapeKindSchema, CanvasAnnotationElement, CanvasElement } from "@mola/shared";
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
 import { elementBounds } from "@/lib/canvas/marquee";
+import { AI_ACCENT } from "@/lib/canvas/styleConstants";
 import { Markdown } from "../Markdown";
 import type { CanvasTurn } from "./useCanvasChat";
 
@@ -70,6 +71,16 @@ function DragHandle({ element }: { element: { id: string; x: number; y: number }
       </div>
     </foreignObject>
   );
+}
+
+/**
+ * The color to draw `color` in: what the AI made in Mola's accent is drawn in
+ * the AI's ink for this board's background (--ai-ink, set on the canvas), so
+ * it stays readable on a dark board; any other color — one the student chose
+ * for it since, too — as it is.
+ */
+function inkOf(element: CanvasElement, color: string): string {
+  return element.createdBy === "ai" && color === AI_ACCENT ? "var(--ai-ink)" : color;
 }
 
 function dashArray(dash: "solid" | "dashed" | "dotted", strokeWidth: number): string | undefined {
@@ -179,6 +190,7 @@ export function ElementShape({
     // stroke width, not just the thinnest ones (where the 8px floor used
     // to do most of the work anyway).
     const headSize = Math.max(element.props.strokeWidth * 4, 12);
+    const color = inkOf(element, element.props.color);
     return (
       <g data-element-id={element.id} opacity={element.opacity}>
         {/* A thin line is a hard target to click precisely — this invisible,
@@ -187,15 +199,15 @@ export function ElementShape({
         <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={Math.max(element.props.strokeWidth, 16)} strokeLinecap="round" />
         <line
           x1={x1} y1={y1} x2={x2} y2={y2}
-          stroke={element.props.color} strokeWidth={element.props.strokeWidth}
+          stroke={color} strokeWidth={element.props.strokeWidth}
           strokeDasharray={dashArray(element.props.dash, element.props.strokeWidth)}
           strokeLinecap="round"
         />
         {element.props.endArrow && (
-          <polygon points={arrowHeadPoints(x2, y2, dx, dy, headSize)} fill={element.props.color} />
+          <polygon points={arrowHeadPoints(x2, y2, dx, dy, headSize)} fill={color} />
         )}
         {element.props.startArrow && (
-          <polygon points={arrowHeadPoints(x1, y1, -dx, -dy, headSize)} fill={element.props.color} />
+          <polygon points={arrowHeadPoints(x1, y1, -dx, -dy, headSize)} fill={color} />
         )}
       </g>
     );
@@ -443,7 +455,7 @@ function TextShape({
     <g data-element-id={element.id} opacity={element.opacity} className="group">
       <foreignObject x={element.x} y={element.y} width={element.width} height={displayHeight}>
         <InlineText
-          text={element.props.text} color={element.props.color} editing={editing}
+          text={element.props.text} color={inkOf(element, element.props.color)} editing={editing}
           backgroundColor={element.props.backgroundColor} bold={element.props.bold} italic={element.props.italic}
           fontSize={element.props.fontSize} textAlign={element.props.textAlign}
           onCommit={(t, h) => onCommitText(element.id, t, h)}
@@ -643,7 +655,7 @@ function MathShape({
     <foreignObject data-element-id={element.id} x={element.x} y={element.y} width={element.width} height={element.height} opacity={element.opacity}>
       <div
         className="flex h-full items-center"
-        style={{ color: element.props.color, fontSize: element.props.fontSize, padding: `0 ${MATH_PAD}px` }}
+        style={{ color: inkOf(element, element.props.color), fontSize: element.props.fontSize, padding: `0 ${MATH_PAD}px` }}
       >
         <div ref={contentRef} className="inline-block whitespace-nowrap" dangerouslySetInnerHTML={innerHtml} />
       </div>

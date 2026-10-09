@@ -1,13 +1,14 @@
 /**
  * One reply in the canvas chat (app/api/canvas/[canvasId]/chat/route.ts),
- * run against the model with its one tool, annotate_canvas (annotate.ts).
+ * run against the model with its tools: annotate_canvas (annotate.ts), and
+ * write_on_canvas and arrange_canvas (writes.ts).
  *
- * The model's text goes out as it streams. When it calls the tool, the
- * annotations it placed are recorded as pending, then go out as events —
- * the canvas page puts each on the board as it arrives, and saves it;
- * nothing here writes to the canvas, and one no page took is added by the
+ * The model's text goes out as it streams. When it calls a tool, the
+ * changes it made are recorded as pending, then go out as events — the
+ * canvas page applies each to the board as it arrives, and saves it;
+ * nothing here writes to the canvas, and one no page took is applied by the
  * next that opens (chatServer.ts) — and the tool's result goes back to the
- * model: what was placed, and what to fix — a label that isn't on the
+ * model: what was done, and what to fix — a label that isn't on the
  * board, an error on a whole matrix, ….
  *
  * Once all it asked for is on the board, the model gets one last call,
@@ -17,11 +18,12 @@
  * annotation over and over. At most MAX_MODEL_CALLS calls; the last offers
  * no tool, so a reply ends in words.
  */
-import type { CanvasAnnotationElement, CanvasElement } from "@mola/shared";
+import type { CanvasElement } from "@mola/shared";
 import type { LLMProvider, Message } from "@/lib/llm/types";
 import { annotate, ANNOTATE_TOOL, MAX_ANNOTATIONS_PER_TURN, newAnnotateTurn, type AnnotateBoard } from "./annotate";
-import { replySection, type CanvasChatEvent, type CanvasContext, type RepliedAnnotation } from "./chat";
+import { addedByAI, replySection, type AIChange, type CanvasChatEvent, type CanvasContext, type RepliedAnnotation } from "./chat";
 import type { LabelMap } from "./textSyntax";
+import { arrange, ARRANGE_TOOL, MAX_CHANGES_PER_TURN, newWriteTurn, write, WRITE_TOOL } from "./writes";
 
 /** The canvas chat's system prompt — here rather than in the route, so the annotate eval sends exactly what ships. */
 export const CANVAS_CHAT_SYSTEM = [
@@ -35,8 +37,14 @@ export const CANVAS_CHAT_SYSTEM = [
   "Point each annotation at the smallest place that holds what you mean: the one matrix entry (\"M2 row 1 col 3\") or word (\"T3 word 5\") that is wrong, "
     + "not the whole matrix or line. Mark every separate mistake — unrelated work each gets its own mark — but in worked steps mark only where it first "
     + `goes wrong, since every step after it carries the mistake. At most ${MAX_ANNOTATIONS_PER_TURN} annotations per reply; say anything beyond that in your reply.`,
-  "You can't change or erase anything on the board, your own annotations included. Your earlier annotations are in the board text, labelled K: "
+  "You can't erase anything on the board, and annotations, your own included, can't be changed. Your earlier annotations are in the board text, labelled K: "
     + "don't mark the same thing again.",
+  "You can also write on the board and arrange it, when the student asks you to or when showing is clearer than telling. "
+    + "write_on_canvas puts new typed text or math (LaTeX) below, above, right or left of something you name by its label, and changes the text of "
+    + "a text box (X), sticky note (N) or math (Q) already there, like a typo fixed. arrange_canvas draws an arrow from one thing to another, "
+    + "points an arrow somewhere else, and moves shapes, arrows and lines. What you write and draw appears in your colour, and the student can edit it like their own.",
+  "Change or move the student's own things only when they ask you to. Handwriting can't be changed or moved: to correct it, annotate it, "
+    + "or write the correction beside it. What you add in a reply has no label until the student's next message.",
 ].join("\n\n");
 
 /**
@@ -82,21 +90,24 @@ export function repliedAnnotation(elements: CanvasElement[], labels: LabelMap, a
  */
 export const MAX_MODEL_CALLS = 4;
 
+const TOOLS = [ANNOTATE_TOOL, WRITE_TOOL, ARRANGE_TOOL];
+
 /** Runs the reply, sending its events as they come; resolves to its error, or null. */
 export async function runCanvasTurn(opts: {
   provider: LLMProvider;
   system: string;
   messages: Message[];
   maxTokens: number;
-  /** The whole board as the model was shown it — read only if the model annotates. */
+  /** The whole board as the model was shown it — read only if the model calls a tool. */
   board: () => AnnotateBoard;
-  /** Keeps what was placed until a page has put it on the board (chatServer.ts recordAIEdits) — done before it is sent. */
-  record: (placed: CanvasAnnotationElement[]) => Promise<void>;
+  /** Keeps what was changed until a page has applied it to the board (chatServer.ts recordAIEdits) — done before it is sent. */
+  record: (changes: AIChange[]) => Promise<void>;
   send: (event: CanvasChatEvent) => void;
 }): Promise<string | null> {
   const { provider, system, maxTokens, send } = opts;
   const messages = [...opts.messages];
   const turn = newAnnotateTurn();
+  const writes = newWriteTurn();
   let board: AnnotateBoard | null = null;
   /** Everything the student has been shown so far. */
   let shownSoFar = "";
@@ -119,7 +130,7 @@ export async function runCanvasTurn(opts: {
     // A call after words were shown: its first words are held until they show it isn't starting the answer over.
     let held: string | null = said ? "" : null;
     let repeat = false;
-    for await (const ev of provider.stream({ system, messages, maxTokens, tools: offer ? [ANNOTATE_TOOL] : undefined })) {
+    for await (const ev of provider.stream({ system, messages, maxTokens, tools: offer ? TOOLS : undefined })) {
       if (ev.type === "text_delta") {
         text += ev.text;
         if (repeat) continue;
@@ -146,28 +157,46 @@ export async function runCanvasTurn(opts: {
     messages.push({ role: "assistant", content: text, toolCalls: calls });
     let settled = true;
     let placedNow = 0;
+    /** Which kinds of tool this call used. */
+    let annotated = false;
+    let wrote = false;
     const results: Message[] = [];
     for (const c of calls) {
+      if (c.name === WRITE_TOOL.name || c.name === ARRANGE_TOOL.name) {
+        const done = (c.name === WRITE_TOOL.name ? write : arrange)(c.input, (board ??= opts.board()), writes);
+        await opts.record(done.changes);
+        for (const change of done.changes) send({ type: "change", change });
+        placedNow += done.changes.length;
+        settled &&= done.settled;
+        wrote = true;
+        results.push({ role: "tool", content: done.result, toolCallId: c.id });
+        continue;
+      }
       if (c.name !== ANNOTATE_TOOL.name) {
         settled = false;
-        results.push({ role: "tool", content: `error: there is no tool named "${c.name}"; the one tool is ${ANNOTATE_TOOL.name}`, toolCallId: c.id });
+        results.push({ role: "tool", content: `error: there is no tool named "${c.name}"; the tools are ${TOOLS.map((t) => t.name).join(", ")}`, toolCallId: c.id });
         continue;
       }
       const done = annotate(c.input, (board ??= opts.board()), turn);
-      await opts.record(done.placed);
+      await opts.record(done.placed.map(addedByAI));
       for (const element of done.placed) send({ type: "annotation", element });
       placedNow += done.placed.length;
       settled &&= done.settled;
+      annotated = true;
       results.push({ role: "tool", content: done.result, toolCallId: c.id });
     }
     // What it wrote is on the student's screen already: the next call should carry on from it, not write it out again.
     const shown = saidNow ? " What you wrote before is already on the student's screen: carry on from it, without repeating it." : "";
-    // All of it placed, with room for more: the tool stays, so a second, separate mistake gets its own mark — gemma4:26b
+    const room = (annotated && turn.placed.length < MAX_ANNOTATIONS_PER_TURN) || (wrote && writes.changes.length < MAX_CHANGES_PER_TURN);
+    // All of it placed, with room for more: the tools stay, so a second, separate mistake gets its own mark — gemma4:26b
     // marked the first in one call and, with the tool gone, could only mention the other (0 of 9 marked, eval 2026-10-04).
+    // So does the rest of what the student asked to have written or drawn, when the model does it a call at a time.
     // A call that placed nothing new, or a reply with no room left, gets one last call in words.
-    if (settled && placedNow > 0 && turn.placed.length < MAX_ANNOTATIONS_PER_TURN) {
-      results[results.length - 1]!.content += "\nAll of it is on the board. If the board has another, separate mistake you haven't marked, mark it now; "
-        + `otherwise finish your reply to the student, in words.${shown}`;
+    if (settled && placedNow > 0 && room) {
+      results[results.length - 1]!.content += wrote
+        ? `\nAll of it is on the board. If the student asked for more on the board that you haven't done yet, do it now; otherwise finish your reply to the student, in words.${shown}`
+        : "\nAll of it is on the board. If the board has another, separate mistake you haven't marked, mark it now; "
+          + `otherwise finish your reply to the student, in words.${shown}`;
     } else if (settled) {
       answerOnly = true;
       results[results.length - 1]!.content += `\nAll of it is on the board. Now finish your reply to the student, in words.${shown}`;

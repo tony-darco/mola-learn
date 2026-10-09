@@ -71,7 +71,7 @@ describe("what the model reads for a reply to one of its annotations", () => {
       board: () => ({ elements, doc: read.doc }), record: async () => {}, send: (ev) => events.push(ev),
     });
     expect(error).toBeNull();
-    expect(provider.requests[0]!.tools).toEqual([ANNOTATE_TOOL]);
+    expect(provider.requests[0]!.tools).toContainEqual(ANNOTATE_TOOL);
     expect(provider.requests[0]!.messages[0]!.content).toContain("a reply to your annotation K1, where you marked T8 word 5 as an error");
     expect(events.flatMap((e) => (e.type === "annotation" ? [e.element.props.target] : []))).toEqual(["T8 word 3"]);
   });
