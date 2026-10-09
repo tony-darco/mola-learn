@@ -355,10 +355,10 @@ export function readCanvas(
     };
   };
   /** The whole board as read, to find an annotation's place on — made once, and only for a board with annotations. */
-  let whole: { doc: CanvasDoc } | null = null;
+  let whole: { doc: CanvasDoc; elements: CanvasElement[] } | null = null;
   /** An annotation's place, as it stands now: the same strokes or element as when it was made, changed since, or gone. */
   const placeOf = ({ target, targetIds }: CanvasAnnotationElement["props"]) => {
-    whole ??= { doc: { handwriting: { blocks }, items: entries.map(itemOf), drawings: [], reads } };
+    whole ??= { doc: { handwriting: { blocks }, items: entries.map(itemOf), drawings: [], reads }, elements };
     const now = resolveTarget(target, whole);
     if (!now.ok) return `${target}, which is no longer on the board`;
     const same = now.elementIds.length === targetIds.length && targetIds.every((id) => now.elementIds.includes(id));

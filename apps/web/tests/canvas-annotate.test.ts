@@ -63,6 +63,16 @@ describe("annotate_canvas: what it places", () => {
     }
   });
 
+  it("takes an annotation sent under its number, {\"1\": {…}}, as the one inside — as gemma4:12b sends them", () => {
+    const wrapped = (n: number, a: unknown) => ({ [String(n)]: a });
+    const { placed } = call([wrapped(1, error("M8 row 1 col 4")), wrapped(2, error("T8 word 5"))]);
+    expect(placed.map((e) => [e.props.target, e.props.kind, e.props.mark])).toEqual([["M8 row 1 col 4", "error", "circle"], ["T8 word 5", "error", "circle"]]);
+    // Only that shape: any other object still has to be an annotation.
+    for (const odd of [{ a: error("T8 word 5") }, { "1": error("T8 word 5"), "2": error("M8 row 1 col 4") }, { "1": "T8 word 5" }, { "1": [error("T8 word 5")] }]) {
+      expect(call([odd]).placed).toEqual([]);
+    }
+  });
+
   it("sends back an unknown label, saying what there is, and places the rest", () => {
     const { placed, result } = call([error("T8 word 5"), error("T9 word 5")]);
     expect(placed.map((e) => e.props.target)).toEqual(["T8 word 5"]);

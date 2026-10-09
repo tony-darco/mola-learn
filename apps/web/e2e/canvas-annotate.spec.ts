@@ -13,7 +13,12 @@
  * annotation is placed: opened again, the canvas gets it, saved and logged
  * as Mola's; erased, it stays gone.
  *
- * A second test asks the real model (the LAN Ollama host) to check the
+ * Annotations on words of typed text ("X1 word 11", "Q1 word 5", from the
+ * scripted "check-typed") go on the whole text box or math as far as the
+ * server knows; the page draws each mark round the word itself, as laid out
+ * in the browser, still there after a reload.
+ *
+ * A last test asks the real model (the LAN Ollama host) to check the
  * annotate eval's board, only when asked for:
  *
  *   E2E_PORT=3058 npx playwright test --no-deps e2e/canvas-annotate.spec.ts
@@ -30,7 +35,9 @@ import { textStrokes } from "./support/strokeFont";
 import { finalizeStroke } from "../lib/canvas/stroke";
 import type { CanvasChatEvent } from "../lib/canvas/chat";
 import type { CanvasElement } from "@mola/shared";
+import { readCanvas } from "../lib/canvas/textSyntax";
 import { makeBoard } from "../evals/canvas-annotate/fixtures";
+import { math, textBox } from "../evals/canvas-reader/fixtures";
 
 if (!process.env.DATABASE_URL) process.loadEnvFile(resolve(fileURLToPath(import.meta.url), "../../.env.local"));
 
@@ -211,6 +218,83 @@ test.describe("canvas chat annotations", () => {
       await expect(again.getByTestId("ai-annotation")).toHaveCount(0);
       expect(await saved(sql, canvasId)).toEqual(work);
       expect(await pending(sql, canvasId)).toEqual([]);
+    } finally {
+      if (canvasId) {
+        await sql`delete from chats where canvas_id = ${canvasId}`;
+        await sql`delete from artifacts where id = ${canvasId}`;
+      }
+      await sql.end();
+    }
+  });
+
+  test("a mark on a word of typed text goes round that word, in a text box and in math, and stays there after a reload", async ({ page }, testInfo) => {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let canvasId: string | null = null;
+    try {
+      const sentence = "this is a test: 3 + 4 = 7 and 2+2=5";
+      const board = [textBox("typed-text", 300, 200, sentence, { width: 380 }), math("typed-math", 300, 320, "12 \\div 4 = 4")];
+      const labels = readCanvas(board).doc.items.map((i) => i.label);
+      expect(labels).toEqual(["X1", "Q1"]);
+      canvasId = await plant(sql, "E2E Annotate (typed words)", board, "scripted:check-typed");
+      await page.goto(`/canvas/${canvasId}`);
+      await openChat(page);
+
+      const events = await ask(page, canvasId, "Check my work.", 30_000);
+      const placed = annotationsIn(events);
+      // The server places each on all of its element, under the words' address.
+      expect(placed.map((e) => [e.props.target, e.props.targetIds])).toEqual([["X1 word 11", ["typed-text"]], ["Q1 word 5", ["typed-math"]]]);
+      expect([placed[0]!.x, placed[0]!.width]).toEqual([board[0]!.x, board[0]!.width]);
+
+      /** The screen rect of the last `count` characters drawn in the element, from the browser's own layout (math: only what KaTeX shows). */
+      const lastChars = (elementId: string, count: number) => page.evaluate(([id, n]) => {
+        const g = document.querySelector(`[data-element-id="${id}"]`)!;
+        const root = g.querySelector(".katex-html") ?? g.querySelector("foreignObject")!;
+        const chars: [Text, number][] = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let t = walker.nextNode() as Text | null; t; t = walker.nextNode() as Text | null) {
+          for (let i = 0; i < t.data.length; i++) if (!/[\s\u200b]/.test(t.data[i]!)) chars.push([t, i]);
+        }
+        const [a, b] = [chars[chars.length - (n as number)]!, chars[chars.length - 1]!];
+        const range = document.createRange();
+        range.setStart(a[0], a[1]);
+        range.setEnd(b[0], b[1] + 1);
+        const r = range.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      }, [elementId, count] as const);
+      /** The screen rect of an annotation's mark. */
+      const markOf = (annotationId: string) => page.locator(`[data-testid="ai-annotation-mark"][data-mark-for="${annotationId}"]`);
+      const markRect = (annotationId: string) => markOf(annotationId).evaluate((g) => {
+        const r = g.firstElementChild!.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      });
+
+      async function expectMarksRoundTheWords() {
+        // "2+2=5" (5 characters) is the last word of the sentence; "4" the last of the math.
+        for (const [annotation, elementId, count] of [[placed[0]!, "typed-text", 5], [placed[1]!, "typed-math", 1]] as const) {
+          await expect(markOf(annotation.id)).toHaveAttribute("data-place", "word");
+          const [word, mark, whole] = [
+            await lastChars(elementId, count), await markRect(annotation.id),
+            await page.locator(`[data-element-id="${elementId}"]`).first().boundingBox(),
+          ];
+          // Round the word, a little over it...
+          expect(mark.left).toBeLessThanOrEqual(word.left + 1);
+          expect(mark.right).toBeGreaterThanOrEqual(word.right - 1);
+          expect(mark.top).toBeLessThanOrEqual(word.top + 1);
+          expect(mark.bottom).toBeGreaterThanOrEqual(word.bottom - 1);
+          // ...and no more: not round the whole text box or formula.
+          expect(mark.right - mark.left).toBeLessThan(word.right - word.left + 24);
+          expect(mark.bottom - mark.top).toBeLessThan(word.bottom - word.top + 24);
+          if (elementId === "typed-text") expect(mark.right - mark.left).toBeLessThan(whole!.width / 3);
+        }
+      }
+      await expectMarksRoundTheWords();
+      await page.locator("svg.touch-none").screenshot({ path: testInfo.outputPath("typed-words.png") });
+
+      // The same after a reload: the annotations were saved with their words, and the page finds them again.
+      await expect.poll(async () => (await saved(sql, canvasId!)).filter((e) => e.type === "annotation").length).toBe(2);
+      await page.reload();
+      await expect(page.getByTestId("ai-annotation")).toHaveCount(2);
+      await expectMarksRoundTheWords();
     } finally {
       if (canvasId) {
         await sql`delete from chats where canvas_id = ${canvasId}`;

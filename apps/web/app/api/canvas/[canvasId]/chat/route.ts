@@ -3,7 +3,8 @@
  *
  * Each message goes to the model together with the canvas as text
  * (readCanvas) — the whole board, or only the rectangle the student
- * selected — and the reply streams back (lib/canvas/chat.ts has the event
+ * selected — followed by the arithmetic on it the server checked
+ * (lib/canvas/textSyntax/checks.ts), and the reply streams back (lib/canvas/chat.ts has the event
  * format). The model has one tool, annotate_canvas: notes pinned to places
  * on the board, which stream out with the reply for the open canvas to add
  * and save, and are kept until it has (lib/canvas/chatTurn.ts runs the
@@ -35,6 +36,7 @@ import { artifacts, chats, db, messages, users } from "@mola/db";
 import { authzResponse, requireSession } from "@/lib/auth/ownership";
 import { CHAT_MODELS, DEFAULT_CHAT_MODEL, getChatProvider, type Message } from "@/lib/llm";
 import { readCanvas, type LabelMap } from "@/lib/canvas/textSyntax";
+import { withChecks } from "@/lib/canvas/textSyntax/checks";
 import { encodeCanvasChatEvent, type CanvasChatEvent, type CanvasContext } from "@/lib/canvas/chat";
 import { changesSection, type CanvasEdit } from "@/lib/canvas/editLog";
 import { findCanvasChat, lockChat, recordAIEdits, requireOwnCanvas, syncEditLog, toClientMessage } from "@/lib/canvas/chatServer";
@@ -118,8 +120,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ canvasI
       // A reply goes to an annotation on the board as saved; one erased meanwhile has nothing to answer.
       const replyTo = annotationId ? repliedAnnotation(elements, read.labels, annotationId) : null;
       if (annotationId && !replyTo) return null;
+      // The board as read, then the arithmetic on it the server checked (checks.ts).
       const context: CanvasContext = {
-        text: read.text, region, ...(entries.length > 0 ? { changes: changesSection(entries) } : {}), ...(replyTo ? { replyTo } : {}),
+        text: withChecks(read, elements), region, ...(entries.length > 0 ? { changes: changesSection(entries) } : {}), ...(replyTo ? { replyTo } : {}),
       };
 
       await tx.update(chats).set({ canvasLabels: read.labels, updatedAt: new Date() }).where(eq(chats.id, chatId));

@@ -32,9 +32,15 @@ export const CANVAS_CHAT_SYSTEM = [
   "You can also mark the board with the annotate_canvas tool: each annotation pins a short note to one place on the board, beside the student's work. "
     + "When the student asks you to check their work, mark the mistakes you find with it, beside telling them; use it too when pointing at a spot makes "
     + "your answer clearer — but not for every reply.",
-  "Point each annotation at the smallest place that holds what you mean: the one matrix entry (\"M2 row 1 col 3\") or word (\"T3 word 5\") that is wrong, "
-    + "not the whole matrix or line. Mark every separate mistake — unrelated work each gets its own mark — but in worked steps mark only where it first "
-    + `goes wrong, since every step after it carries the mistake. At most ${MAX_ANNOTATIONS_PER_TURN} annotations per reply; say anything beyond that in your reply.`,
+  "Point each annotation at the smallest place that holds what you mean: the one matrix entry (\"M2 row 1 col 3\") or word (\"T3 word 5\", \"X1 word 4\") "
+    + "that is wrong, not the whole matrix or line. Separate mistakes each get their own mark, but in worked steps mark only where it first goes wrong, "
+    + `since every step after it carries the mistake. At most ${MAX_ANNOTATIONS_PER_TURN} annotations per reply; say anything beyond that in your reply.`,
+  "The board text can end with ARITHMETIC CHECKED: the row operations and equations on the board, worked out exactly. Trust it over your own arithmetic. "
+    + "When checking the student's work, mark each mistake listed under Mistakes, at the place it names, with the right value it gives; don't mark anything "
+    + "listed as right, and don't call anything else wrong on arithmetic of your own — say in words what you are unsure of. Under Can't check are things "
+    + "the handwriting was too unclear to settle. A line there with a place and what its left side comes to (\"2 + 2 = «5|S»\", the left side 4) can't be "
+    + "called an error for sure, but it is worth the student's attention: add a hint on that place saying what the left side is and what you can read there. "
+    + "Anything else it couldn't check you can judge yourself, saying what you read.",
   "You can't change or erase anything on the board, your own annotations included. Your earlier annotations are in the board text, labelled K: "
     + "don't mark the same thing again.",
 ].join("\n\n");

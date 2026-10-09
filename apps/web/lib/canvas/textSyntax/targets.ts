@@ -1,14 +1,21 @@
 /**
  * What a model means when it points at something on the board: an address
  * from the read ("M4", "M4 row 2 col 3", "M4 row 2", "M4 col 3", "T1 word 5",
- * "T1 words 3–5", "N2"), or a point {x, y} in canvas units. Either resolves
- * to the canvas elements it covers — every pen stroke of a cell or word, a
- * placed element's id — and their box, or to an error the model can act on
- * ("no T9 on this canvas").
+ * "T1 words 3–5", "N2", "X1 word 11"), or a point {x, y} in canvas units.
+ * Either resolves to the canvas elements it covers — every pen stroke of a
+ * cell or word, a placed element's id — and their box, or to an error the
+ * model can act on ("no T9 on this canvas").
+ *
+ * A word of typed text — a text box's, a sticky note's, or math's LaTeX,
+ * split at white space (lib/canvas/wordTargets.ts) — resolves to its whole
+ * element and box: where the word is drawn is only known on the page, which
+ * marks it there. Words need the board's elements, for the text.
  *
  * Resolved against a read (readCanvas) of the whole board, so labels mean
  * what the model was told they mean.
  */
+import type { CanvasElement } from "@mola/shared";
+import { typedWords } from "../wordTargets";
 import { outward, span } from "./handwriting";
 import type { CanvasDoc } from "./read";
 import { blockWords, distToBox } from "./relations";
@@ -18,7 +25,8 @@ export type ResolvedTarget =
   | { ok: true; address: string; elementIds: string[]; box: Box }
   | { ok: false; error: string };
 
-type Read = { doc: CanvasDoc };
+/** `elements`: the board's, for the words of its typed text; without them, only all of a text box can be named. */
+type Read = { doc: CanvasDoc; elements?: CanvasElement[] };
 
 const strokesOf = (words: Word[]) => words.flatMap((w) => w.glyphs.flatMap((g) => g.strokes.map((s) => s.id)));
 const found = (address: string, words: Word[]): ResolvedTarget =>
@@ -34,7 +42,7 @@ export function resolveTarget(target: string | Pt, read: Read): ResolvedTarget {
 
 // ── addresses ───────────────────────────────────────────────────────────────
 
-function resolveLabel(target: string, { doc }: Read): ResolvedTarget {
+function resolveLabel(target: string, { doc, elements }: Read): ResolvedTarget {
   // Lenient about case, commas, brackets and the dash in a range: "m4 (row 2, col 3)", "T1 words 3-5".
   const text = target.replace(/[(),]/g, " ").replace(/\s+/g, " ").trim();
   const head = /^([a-z])(\d+)(?: (.*))?$/i.exec(text);
@@ -49,12 +57,17 @@ function resolveLabel(target: string, { doc }: Read): ResolvedTarget {
     return fail(`no ${label} on this canvas${same.length ? ` (its ${label[0]} labels are ${same.join(", ")})` : ""}`);
   }
   if (!rest) return item ? { ok: true, address: label, elementIds: item.elementIds, box: item.box } : found(label, blockWords(block!));
-  if (!block) return fail(`${label} is not handwriting, so it has no rows, columns or words: target all of it, as "${label}"`);
 
   const cell = /^row (\d+) (?:col|column) (\d+)$/i.exec(rest);
   const row = /^row (\d+)$/i.exec(rest);
   const col = /^(?:col|column) (\d+)$/i.exec(rest);
   const words = /^words? (\d+)(?: ?(?:[-–—]|to) ?(\d+))?$/i.exec(rest);
+  if (!block) {
+    const text = typedText(item!, elements);
+    if (text === null) return fail(`${label} is not handwriting, so it has no rows, columns or words: target all of it, as "${label}"`);
+    if (!words) return fail(`${label} is typed, so it has no rows or columns: name a word, like "${label} word 2", or all of it, as "${label}"`);
+    return typedPart(item!, typedWords(text).length, Number(words[1]), Number(words[2] ?? words[1]));
+  }
   if (cell || row || col) return matrixPart(block, label, cell ? [cell[1], cell[2]] : row ? [row[1], undefined] : [undefined, col![1]]);
   if (words) return textPart(block, label, Number(words[1]), Number(words[2] ?? words[1]));
   return fail(`can't read "${target}" as a place on the board: give a label from the read, ${EXAMPLES}`);
@@ -77,6 +90,19 @@ function textPart(block: Block, label: string, a: number, b: number): ResolvedTa
   const n = block.words.length;
   if (from < 1 || to > n) return fail(`${label} has ${n} ${n === 1 ? "word" : "words"}`);
   return found(`${label} ${span("word", from, to)}`, block.words.slice(from - 1, to));
+}
+
+/** A text box's or sticky note's text, or math's LaTeX; null for anything else, or without the elements to look in. */
+function typedText(item: CanvasDoc["items"][number], elements: CanvasElement[] | undefined): string | null {
+  const e = item.elementIds.length === 1 ? elements?.find((x) => x.id === item.elementIds[0]) : undefined;
+  return e?.type === "text" || e?.type === "note" ? e.props.text : e?.type === "math" ? e.props.latex : null;
+}
+
+/** Words `a`–`b` of a typed element of `n` words: the whole element, under the words' address (see the top of this file). */
+function typedPart(item: CanvasDoc["items"][number], n: number, a: number, b: number): ResolvedTarget {
+  const [from, to] = a <= b ? [a, b] : [b, a];
+  if (from < 1 || to > n) return fail(`${item.label} has ${n} ${n === 1 ? "word" : "words"}, counted between spaces`);
+  return { ok: true, address: `${item.label} ${span("word", from, to)}`, elementIds: item.elementIds, box: item.box };
 }
 
 // ── points ──────────────────────────────────────────────────────────────────

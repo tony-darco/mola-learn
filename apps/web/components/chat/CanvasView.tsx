@@ -15,6 +15,7 @@ import { saveCanvasAction } from "@/lib/canvas/actions";
 import { uploadCanvasImageAction } from "@/lib/canvas/imageUpload";
 import { emptyHistory, pushHistory, redo as historyRedo, undo as historyUndo, type History } from "@/lib/canvas/history";
 import { applyAIElements, type AIStep } from "@/lib/canvas/aiEdits";
+import { targetWords } from "@/lib/canvas/wordTargets";
 import { eraseWholeObjects, erasePartial } from "@/lib/canvas/eraser";
 import { resizeBox, type ResizeCorner } from "@/lib/canvas/resize";
 import { cursorForTool } from "@/lib/canvas/cursors";
@@ -849,6 +850,12 @@ export function CanvasView({
   const canRedo = useMemo(() => historyRef.current.future.length > 0, [historyVersion]);
   const sorted = useMemo(() => [...elements].sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : 0)), [elements]);
   const threads = useMemo(() => annotationThreads(chat.turns), [chat.turns]);
+  const byId = useMemo(() => new Map(elements.map((e) => [e.id, e])), [elements]);
+  /** The text box, sticky note or math an annotation on some of its words is on ("X1 word 11"), for it to find the words in. */
+  const typedWordsOf = (a: Extract<CanvasElement, { type: "annotation" }>) => {
+    const on = targetWords(a.props.target) && a.props.targetIds.length === 1 ? byId.get(a.props.targetIds[0]!) : undefined;
+    return on?.type === "text" || on?.type === "note" || on?.type === "math" ? on : undefined;
+  };
   const annotationsOnBoard = useMemo(() => new Set(elements.flatMap((e) => (e.type === "annotation" ? [e.id] : []))), [elements]);
 
   const selectedElement = selectedId ? elements.find((e) => e.id === selectedId) ?? null : null;
@@ -984,6 +991,7 @@ export function CanvasView({
               replies={el.type === "annotation"
                 ? { thread: threads.get(el.id) ?? [], busy: chat.busy, onReply: (text) => void sendToChat(text, null, el.id) }
                 : undefined}
+              wordsOf={el.type === "annotation" ? typedWordsOf(el) : undefined}
             />
           ))}
 
