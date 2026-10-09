@@ -38,8 +38,40 @@ export class ScriptedProvider implements LLMProvider {
 }
 
 const annotateCall = (annotations: unknown[]): ProviderStreamEvent => ({ type: "tool_call", id: crypto.randomUUID(), name: "annotate_canvas", input: { annotations } });
+const toolCall = (name: string, input: unknown): ProviderStreamEvent => ({ type: "tool_call", id: crypto.randomUUID(), name, input });
+const done: ProviderStreamEvent = { type: "done", stopReason: "end_turn" };
 
 const SCRIPTS: Record<string, ScriptStep[]> = {
+  /**
+   * For a board with the student's handwritten "2 + 2 =" (T1), a text box "teh answer" (X1), a text box "Start here" (X2)
+   * and a rectangle (S1): the sum as math below T1 and the typo fixed; then the rectangle moved with an arrow
+   * to a label that isn't on the board; then the arrow again, fixed (S1 is where the move left it); then the answer.
+   */
+  "write-sum": [
+    [
+      toolCall("write_on_canvas", {
+        add: [{ kind: "math", content: "2 + 2 = 4", place: "below", near: "T1" }],
+        change: [{ target: "X1", content: "the answer" }],
+      }),
+      done,
+    ],
+    [
+      toolCall("arrange_canvas", { move: [{ target: "S1", place: "right", by: 150 }], arrows: [{ from: "X2", to: "S9" }] }),
+      done,
+    ],
+    [toolCall("arrange_canvas", { arrows: [{ from: "X2", to: "S1" }] }), done],
+    [{ type: "text_delta", text: "I wrote 2 + 2 = 4 below your line, fixed the typo in X1, moved S1 and drew an arrow to it from X2." }, done],
+  ],
+  /** The same board: four seconds' thought, time for the page to go; then the sum, the typo and the move, in one call to each tool; then the answer. */
+  "write-sum-slowly": [
+    [
+      { wait: 4_000 },
+      toolCall("write_on_canvas", { add: [{ kind: "math", content: "2 + 2 = 4", place: "below", near: "T1" }], change: [{ target: "X1", content: "the answer" }] }),
+      toolCall("arrange_canvas", { move: [{ target: "S1", place: "right", by: 150 }] }),
+      done,
+    ],
+    [{ type: "text_delta", text: "I wrote 2 + 2 = 4 below your line, fixed the typo in X1 and moved S1." }, done],
+  ],
   /**
    * For a board whose one line of handwriting, T1, is "2 + 2 = 5": a check
    * under "2 + 2" and an error with a wrong label and kind sent as the mark,
