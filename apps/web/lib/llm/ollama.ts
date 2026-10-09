@@ -208,6 +208,14 @@ export class OllamaProvider implements LLMProvider {
             yield* this.attempt(req, false, false);
             return;
           }
+          // Or stop of its own accord, having said nothing either: gemma4:12b thinks its way to a plan for the canvas chat's
+          // annotations ("1. Annotate M8 row 1 col 4 …") and ends there, in about a third of the annotate eval's replies.
+          // The same request again, once, mostly gets the answer.
+          if (!sawOutput && allowRetry) {
+            stall.clear();
+            yield* this.attempt(req, think, false);
+            return;
+          }
           yield {
             type: "done",
             stopReason: chunk.done_reason === "length" ? "max_tokens" : "end_turn",
