@@ -10,7 +10,7 @@
  *
  * - hit: a placed annotation of kind error or hint on the planted error's
  *   strokes. Pinpointed: on those strokes and nothing else (a cell or word,
- *   not a whole row, matrix or line).
+ *   not a whole row, matrix or line); in typed text, on its word.
  * - false flag: a placed error annotation on none of the planted errors.
  * - right value: a hitting annotation's note has the correct value in it,
  *   once addresses ("M8", "row 1", "col 4", "R1", …) are taken out.
@@ -123,7 +123,9 @@ export function scoreReply(calls: ModelCall[], board: AnnotateBoard, planted: Pl
   const placed = turn.placed.map((element): PlacedScore => {
     const ids = new Set(element.props.targetIds);
     const on = planted.filter((e) => e.strokeIds.some((id) => ids.has(id))).map((e) => e.id);
-    const pinpoints = planted.filter((e) => ids.size > 0 && [...ids].every((id) => e.strokeIds.includes(id))).map((e) => e.id);
+    const pinpoints = planted.filter((e) => (e.byAddress
+      ? element.props.target === e.address
+      : ids.size > 0 && [...ids].every((id) => e.strokeIds.includes(id)))).map((e) => e.id);
     return { element, on, pinpoints, falseFlag: element.props.kind === "error" && on.length === 0 };
   });
 

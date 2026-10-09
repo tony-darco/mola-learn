@@ -112,6 +112,17 @@ const SCRIPTS: Record<string, ScriptStep[]> = {
     },
     [{ type: "text_delta", text: "2 + 2 is 4, not 5 — I've circled the 5 on your board." }, { type: "done", stopReason: "end_turn" }],
   ],
+  /** For a board whose text box X1 ends "… 2+2=5" (word 11) and whose math Q1 is "12 \div 4 = 4": a mark on each wrong word, then the answer. */
+  "check-typed": [
+    [
+      annotateCall([
+        { target: "X1 word 11", kind: "error", mark: "box", note: "2 + 2 is 4, not 5." },
+        { target: "Q1 word 5", kind: "error", mark: "circle", note: "12 ÷ 4 is 3, not 4." },
+      ]),
+      { type: "done", stopReason: "end_turn" },
+    ],
+    [{ type: "text_delta", text: "Two sums are off: 2 + 2 is 4, and 12 ÷ 4 is 3." }, { type: "done", stopReason: "end_turn" }],
+  ],
 };
 
 const SCRIPTED_MODEL_PREFIX = "scripted:";

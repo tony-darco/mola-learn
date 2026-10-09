@@ -22,7 +22,7 @@ import { readCanvas } from "@/lib/canvas/textSyntax";
 import type { Box } from "@/lib/canvas/textSyntax/segment";
 import { CSS as READER_CSS, elementSvg } from "../canvas-reader/report";
 import { esc, pct, secs } from "../canvas-syntax/report";
-import type { AnnotateBoard, BoardName } from "./fixtures";
+import type { AnnotateBoard, BoardName, PlantedError } from "./fixtures";
 import { scoreReply, type ModelCall, type PlacedScore, type ReplyScore } from "./score";
 
 /** A board as sent: its elements and planted errors, and the user message. */
@@ -39,11 +39,12 @@ export type ReplyFile = {
 };
 type SummaryFile = {
   createdAt: string; finishedAt: string | null; model: string;
-  options: { boards: BoardName[]; repeats: number; maxReplyMinutes: number | null };
+  options: { boards: BoardName[]; repeats: number; maxReplyMinutes: number | null; replay?: string | null };
   prompt: { system: string; message: string; maxTokens: number; tool: unknown; maxAnnotations: number; maxModelCalls: number };
 };
 
-const ERROR_NAMES = { matrix: "matrix slip", line: "2 + 2 = 5" };
+const ERROR_NAMES: Record<PlantedError["id"], string> = { matrix: "matrix slip", line: "2 + 2 = 5", typed: "typed 2+2=5", math: "LaTeX 12 ÷ 4 = 4" };
+const ERROR_IDS = Object.keys(ERROR_NAMES) as PlantedError["id"][];
 
 /**
  * The first run, 2026-10-02T17-04-00, labels condition: gemma4:26b, thinking on, the same 3072-token cap and boards, 3 repeats —
@@ -53,8 +54,16 @@ const FIRST_RUN = {
   run: "2026-10-02T17-04-00", replies: 9,
   hits: [11, 18], matrix: [3, 9], line: [8, 9], pinpointed: [2, 18], rightValue: [3, 11],
   falseFlags: 16, falseFlagCalls: 6, unresolved: [0, 55], invalid: 3, latency: "55.4s <small>42.1s–61.9s</small>",
-  byBoard: { clean: "matrix slip 2/3 · 2 + 2 = 5 3/3 · false flags 9", jitter1: "matrix slip 0/3 · 2 + 2 = 5 2/3 · false flags 1", jitter2: "matrix slip 1/3 · 2 + 2 = 5 3/3 · false flags 6" },
+  byBoard: { clean: "matrix slip 2/3 · 2 + 2 = 5 3/3 · false flags 9", jitter1: "matrix slip 0/3 · 2 + 2 = 5 2/3 · false flags 1", jitter2: "matrix slip 1/3 · 2 + 2 = 5 3/3 · false flags 6" } as Partial<Record<BoardName, string>>,
 } as const;
+
+/**
+ * Runs of the reply loop as it was before the arithmetic checks (lib/canvas/textSyntax/checks.ts) — same GPU host, the three
+ * handwritten boards (the typed one came with the checks) — shown beside this run, scored here from their JSON like this one,
+ * when this checkout has them (output/ isn't committed). The first is gemma4:26b on the code at efe0a1c; the second is
+ * gemma4:12b sent that run's system prompt and board texts (run.ts --replay), as no run of it was made before the checks.
+ */
+const BEFORE_CHECKS = ["2026-10-05T01-49-50", "2026-10-09T00-57-51"];
 
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -64,10 +73,12 @@ const frac = (n: number, of: number) => (of ? `${pct(n / of)} <small>${n}/${of}<
 const yes = (ok: boolean, text: string) => `<span class="${ok ? "ok" : "bad"}">${text} ${ok ? "✓" : "✗"}</span>`;
 
 type Scored = { reply: ReplyFile; board: BoardFile; score: ReplyScore };
+/** A run beside this one: its directory's name, model, and replies as scored. */
+type Before = { run: string; model: string; replayed: boolean; scored: Scored[] };
 
 // ── leaderboard ─────────────────────────────────────────────────────────────
 
-function leaderboard(scored: Scored[]): string {
+function leaderRow(head: string, scored: Scored[], cls = ""): string {
   const planted = scored.flatMap((s) => s.board.errors.map((e) => ({ e, r: s.score.errors[e.id] })));
   const hits = planted.filter((p) => p.r.hit);
   const byError = (id: string) => planted.filter((p) => p.e.id === id);
@@ -76,24 +87,34 @@ function leaderboard(scored: Scored[]): string {
   const silent = scored.filter((s) => s.score.noToolCall).length;
   const failed = scored.filter((s) => s.reply.error || s.reply.timedOut);
   const latency = scored.filter((s) => !s.reply.timedOut).map((s) => s.reply.latencyMs);
-  const now = `<tr><th>This run <small>the shipped reply loop</small></th><td class="num">${scored.length}</td>
+  return `<tr${cls ? ` class="${cls}"` : ""}><th>${head}</th><td class="num">${scored.length}</td>
     <td class="num"><b>${frac(hits.length, planted.length)}</b></td>
-    ${(["matrix", "line"] as const).map((id) => `<td class="num">${frac(byError(id).filter((p) => p.r.hit).length, byError(id).length)}</td>`).join("")}
+    ${ERROR_IDS.map((id) => `<td class="num">${frac(byError(id).filter((p) => p.r.hit).length, byError(id).length)}</td>`).join("")}
     <td class="num">${frac(planted.filter((p) => p.r.pinpointed).length, planted.length)}</td>
     <td class="num">${frac(hits.filter((p) => p.r.rightValue).length, hits.length)}</td>
     <td class="num">${scored.reduce((n, s) => n + s.score.falseFlags, 0)} <small>in ${scored.filter((s) => s.score.falseFlags).length} replies</small></td>
     <td class="num">${scored.reduce((n, s) => n + s.score.unresolved, 0)} <small>of ${scored.reduce((n, s) => n + s.score.given, 0)} given</small></td>
     <td class="num">${invalid ? `<span class="bad">${invalid}</span>` : "0"} <small>of ${toolCalls} tool calls${silent ? `; ${silent} replies with none` : ""}${failed.length ? `; ${failed.length} failed: ${failed.map((s) => esc(s.reply.timedOut ? "cut off" : s.reply.error!)).join("; ")}` : ""}</small></td>
     <td class="num">${latency.length ? `${secs(median(latency))} <small>${secs(Math.min(...latency))}–${secs(Math.max(...latency))}</small>` : "—"}</td></tr>`;
+}
+
+function leaderboard(scored: Scored[], before: Before[]): string {
+  const handwritten = scored.filter((s) => s.board.name !== "typed");
+  const rows = [
+    leaderRow("This run <small>the shipped reply loop</small>", scored),
+    ...(handwritten.length < scored.length && handwritten.length > 0 ? [leaderRow("This run, handwritten boards only <small>to compare with the runs below</small>", handwritten)] : []),
+    ...before.map((b) => leaderRow(`Before the checks <small>${esc(b.run)}, ${esc(b.model)}, ${b.replayed ? "the first one's prompt and board texts, replayed" : "code at efe0a1c"}</small>`, b.scored, "before")),
+  ];
   const f = FIRST_RUN;
-  const before = `<tr class="before"><th>First run <small>${f.run}, one call, labels</small></th><td class="num">${f.replies}</td>
+  const first = `<tr class="before"><th>First run <small>${f.run}, gemma4:26b, one call, labels</small></th><td class="num">${f.replies}</td>
     <td class="num">${frac(f.hits[0], f.hits[1])}</td><td class="num">${frac(f.matrix[0], f.matrix[1])}</td><td class="num">${frac(f.line[0], f.line[1])}</td>
+    <td class="num">—</td><td class="num">—</td>
     <td class="num">${frac(f.pinpointed[0], f.pinpointed[1])}</td><td class="num">${frac(f.rightValue[0], f.rightValue[1])}</td>
     <td class="num">${f.falseFlags} <small>in ${f.falseFlagCalls} calls</small></td><td class="num">${f.unresolved[0]} <small>of ${f.unresolved[1]} given</small></td>
     <td class="num">${f.invalid} <small>of 9 calls</small></td><td class="num">${f.latency} <small>one call</small></td></tr>`;
-  return `<table class="leader"><thead><tr><th></th><th>Replies</th><th>Hit rate</th><th>${ERROR_NAMES.matrix}</th><th>${ERROR_NAMES.line}</th>
+  return `<table class="leader"><thead><tr><th></th><th>Replies</th><th>Hit rate</th>${ERROR_IDS.map((id) => `<th>${ERROR_NAMES[id]}</th>`).join("")}
     <th>Pinpointed</th><th>Right value in note</th><th>False flags</th><th>Unresolved targets</th><th>Invalid tool calls</th><th>Latency, median</th></tr></thead>
-    <tbody>${now}${before}</tbody></table>`;
+    <tbody>${rows.join("")}${first}</tbody></table>`;
 }
 
 /** What the shipped tool sent back or refused, and how many calls a reply took. */
@@ -112,15 +133,16 @@ function toolTable(scored: Scored[]): string {
     <td class="num">${placed.filter((p) => p === 0).length}</td></tr></tbody></table>`;
 }
 
-function byBoard(scored: Scored[], boards: BoardFile[]): string {
-  const cell = (b: BoardFile) => {
-    const mine = scored.filter((s) => s.board.name === b.name);
-    if (!mine.length) return `<td class="none">not run yet</td>`;
-    return `<td>${b.errors.map((e) => `${ERROR_NAMES[e.id]} ${mine.filter((s) => s.score.errors[e.id].hit).length}/${mine.length}`).join(" · ")}
+function byBoard(scored: Scored[], boards: BoardFile[], before: Before[]): string {
+  const cell = (b: BoardFile, of: Scored[], cls = "") => {
+    const mine = of.filter((s) => s.board.name === b.name);
+    if (!mine.length) return `<td class="none${cls ? ` ${cls}` : ""}">${cls ? "not on this board" : "not run yet"}</td>`;
+    return `<td${cls ? ` class="${cls}"` : ""}>${b.errors.map((e) => `${ERROR_NAMES[e.id]} ${mine.filter((s) => s.score.errors[e.id].hit).length}/${mine.length}`).join(" · ")}
       · false flags ${mine.reduce((n, s) => n + s.score.falseFlags, 0)}</td>`;
   };
-  return `<table class="leader"><thead><tr><th>Board</th><th>This run</th><th>First run</th></tr></thead><tbody>
-    ${boards.map((b) => `<tr><td><a href="#board-${b.name}">${esc(b.name)}</a></td>${cell(b)}<td class="before">${FIRST_RUN.byBoard[b.name]}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="leader"><thead><tr><th>Board</th><th>This run</th>${before.map((b) => `<th>Before the checks <small>${esc(b.model)}</small></th>`).join("")}<th>First run</th></tr></thead><tbody>
+    ${boards.map((b) => `<tr><td><a href="#board-${b.name}">${esc(b.name)}</a></td>${cell(b, scored)}${before.map((x) => cell(b, x.scored, "before")).join("")}
+      <td class="before">${FIRST_RUN.byBoard[b.name] ?? "—"}</td></tr>`).join("")}</tbody></table>`;
 }
 
 // ── one reply ───────────────────────────────────────────────────────────────
@@ -221,12 +243,13 @@ ol.calls li { margin-bottom: 8px; } pre.result { white-space: pre-wrap; } pre.re
 .key span { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 4px; }
 `;
 
-export function buildReport(dir: string): string {
+/** A run's directory, read and scored. */
+function loadRun(dir: string): { summary: SummaryFile | null; boards: BoardFile[]; replies: ReplyFile[]; scored: Scored[] } {
   const read = <T>(f: string) => JSON.parse(readFileSync(join(dir, f), "utf8")) as T;
   const summary = existsSync(join(dir, "summary.json")) ? read<SummaryFile>("summary.json") : null;
   const files = readdirSync(dir);
   const boards = files.filter((f) => /^board\..+\.json$/.test(f)).map((f) => read<BoardFile>(f));
-  const order = (b: BoardFile) => ["clean", "jitter1", "jitter2"].indexOf(b.name);
+  const order = (b: BoardFile) => ["clean", "jitter1", "jitter2", "typed"].indexOf(b.name);
   boards.sort((a, b) => order(a) - order(b));
   const replies = files.filter((f) => /^reply\..+\.json$/.test(f)).map((f) => read<ReplyFile>(f));
 
@@ -236,10 +259,20 @@ export function buildReport(dir: string): string {
     const board = boards.find((b) => b.name === reply.board);
     return board ? [{ reply, board, score: scoreReply(reply.calls, { elements: board.elements, doc: docs.get(board.name)! }, board.errors) }] : [];
   }).sort((a, b) => a.reply.repeat - b.reply.repeat);
+  return { summary, boards, replies, scored };
+}
+
+export function buildReport(dir: string): string {
+  const { summary, boards, replies, scored } = loadRun(dir);
   const expected = (summary?.options.repeats ?? 0) * boards.length;
+  const name = dir.split("/").filter(Boolean).pop()!;
+  const before: Before[] = BEFORE_CHECKS.filter((run) => run !== name && existsSync(join(dir, "..", run))).map((run) => {
+    const r = loadRun(join(dir, "..", run));
+    return { run, model: r.summary?.model ?? "?", replayed: !!r.summary?.options.replay, scored: r.scored };
+  });
 
   const meta = [
-    `run <b>${esc(dir.split("/").filter(Boolean).pop()!)}</b>`,
+    `run <b>${esc(name)}</b>`,
     summary ? `${esc(summary.model)}, thinking on, output cap ${summary.prompt.maxTokens} tokens a call, at most ${summary.prompt.maxModelCalls} calls and ${summary.prompt.maxAnnotations} annotations a reply` : "",
     `${replies.length} of ${expected || "?"} replies`,
     summary?.finishedAt ? `finished ${esc(summary.finishedAt.slice(0, 16).replace("T", " "))} UTC` : "<b>still running, or stopped</b> — reload for more",
@@ -248,7 +281,7 @@ export function buildReport(dir: string): string {
 
   const boardSections = boards.map((b) => `
     <section class="board-sec" id="board-${b.name}">
-      <h2>${esc(b.name)} <small>${b.jitterSeed === null ? "clean hand" : `jitter seed ${b.jitterSeed}`}</small></h2>
+      <h2>${esc(b.name)} <small>${b.name === "typed" ? "typed text and LaTeX" : b.jitterSeed === null ? "clean hand" : `jitter seed ${b.jitterSeed}`}</small></h2>
       <ul>${b.errors.map((e) => `<li><b>${ERROR_NAMES[e.id]}</b> — ${esc(e.what)} <small>strokes ${e.strokeIds.join(", ")}</small></li>`).join("")}</ul>
       <details><summary>Text sent (${b.sent.length} chars)</summary><pre>${esc(b.sent)}</pre></details>
       <div class="cols">${scored.filter((s) => s.board.name === b.name).map(replyCard).join("") || "<p class=\"meta\">Not run yet.</p>"}</div>
@@ -261,26 +294,29 @@ export function buildReport(dir: string): string {
 <h1>Canvas annotate eval</h1>
 <p class="meta">${meta}</p>
 <div class="callout">
-<p>Does the canvas chat, as it ships, find the mistakes on a whiteboard and mark them? Each board is the 8-step matrix reduction with one wrong entry
-(M8 row 1 col 4: R1 = R1 - R2 gives 3 - 2 = 1, but 5 is written) and a handwritten “2 + 2 = 5”. The whole board is read as the canvas chat reads it and sent with
+<p>Does the canvas chat, as it ships, find the mistakes on a whiteboard and mark them? The handwritten boards are the 8-step matrix reduction with one wrong entry
+(M8 row 1 col 4: R1 = R1 - R2 gives 3 - 2 = 1, but 5 is written) and a handwritten “2 + 2 = 5”, in a clean hand and two jittered ones; the typed board has
+“2+2=5” in a text box's sentence and “12 \\div 4 = 4” in LaTeX, beside right sums. The whole board is read as the canvas chat reads it — with, since they came in,
+the arithmetic the server checked after it (lib/canvas/textSyntax/checks.ts) — and sent with
 “${esc(summary?.prompt.message ?? "Check my work.")}” through the chat's own reply loop: its system prompt, the <code>annotate_canvas</code> tool, the cap on
 annotations a reply and the ask-once-for-the-entry bounce (lib/canvas/chatTurn.ts, annotate.ts). Targets are labels from the read.</p>
 <p><b>Hit</b>: a placed annotation of kind error or hint on the planted error's strokes. <b>Pinpointed</b>: on exactly the wrong cell or word, not a whole row,
-matrix or line. <b>Right value</b>: a hitting note has the correct value in it, addresses aside. <b>False flag</b>: a placed error annotation on anything else.
+matrix or line; in typed text, on its word. <b>Right value</b>: a hitting note has the correct value in it, addresses aside. <b>False flag</b>: a placed error annotation on anything else.
 <b>Invalid</b>: a tool call to another tool, or with an annotation not in the tool's shape. <b>Asked to narrow</b>: an error on a whole matrix, line, row or column,
 sent back once by the tool. <b>Cap refusal</b>: a call asking for more annotations than the reply had left.</p>
-<p>The first run sent one call with the eval's own tool — no cap, no bounce, and the result never went back to the model; its numbers are beside this run's.</p>
+<p>Beside this run: the runs before the arithmetic checks, with the code as it was then on the same GPU host, scored here the same way; and the first run,
+which sent one call with the eval's own tool — no cap, no bounce, and the result never went back to the model.</p>
 <p class="key"><span style="border-color:var(--planted);border-top-style:dashed"></span>planted error <span style="border-color:var(--annot);margin-left:12px"></span>a placed annotation's place, numbered as in its table, drawn as its mark (dashed: mark “none”)</p>
 </div>
 ${summary ? `<details><summary>System prompt, message and tool (the same for every reply)</summary><pre>${esc(summary.prompt.system)}</pre><pre>${esc(summary.prompt.message)}</pre>
   <pre>${esc(JSON.stringify(summary.prompt.tool, null, 2))}</pre></details>` : ""}
 <h2>Leaderboard</h2>
-<div class="scroll">${leaderboard(scored)}</div>
+<div class="scroll">${leaderboard(scored, before)}</div>
 <p class="meta">Rates are over every reply, two planted errors each; a failed or cut-off reply counts as missing both. Latency is the whole reply, every call and thinking included.</p>
 <h3>What the tool sent back</h3>
 <div class="scroll">${toolTable(scored)}</div>
 <h3>By board</h3>
-<div class="scroll">${byBoard(scored, boards)}</div>
+<div class="scroll">${byBoard(scored, boards, before)}</div>
 ${boardSections}
 </body></html>
 `;

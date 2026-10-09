@@ -3,8 +3,10 @@
  * on a whiteboard and mark them?
  *
  * Each board (fixtures.ts: the matrix reduction with one wrong entry, and
- * "2 + 2 = 5") is read whole and sent with "Check my work." through the
- * canvas chat's own reply loop (lib/canvas/chatTurn.ts runCanvasTurn): its
+ * "2 + 2 = 5", handwritten three ways; and typed mistakes in a text box and
+ * LaTeX) is read whole, with the arithmetic the server checks on it after
+ * the board (lib/canvas/textSyntax/checks.ts), and sent with "Check my
+ * work." through the canvas chat's own reply loop (lib/canvas/chatTurn.ts runCanvasTurn): its
  * system prompt and message format, the annotate_canvas tool with its cap of
  * 3 a reply and its ask-once-for-the-entry bounce (lib/canvas/annotate.ts),
  * the 3072-token cap on each call, thinking on — imported, not copied, so
@@ -18,17 +20,22 @@
  *   pnpm --filter @mola/web eval:canvas-annotate --max-reply-minutes 10
  *   pnpm --filter @mola/web eval:canvas-annotate --boards clean --repeats 1   # a single probe reply
  *   pnpm --filter @mola/web eval:canvas-annotate --model gemma4:12b            # another model
+ *   pnpm --filter @mola/web eval:canvas-annotate --model gemma4:12b --boards clean,jitter1,jitter2 --replay evals/canvas-annotate/output/<run>
+ *
+ * --replay sends an earlier run's system prompt and board texts instead of today's — a model measured on exactly what a past
+ * run sent, as for a before-the-checks baseline.
  */
 // First: it loads .env.local before anything can import lib/llm/ollama.ts.
 import { ask, OllamaProvider } from "../ollama";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CanvasAnnotationElement, ProviderStreamEvent } from "@mola/shared";
 import type { CompletionRequest, LLMProvider } from "@/lib/llm/types";
 import { ANNOTATE_TOOL, MAX_ANNOTATIONS_PER_TURN } from "@/lib/canvas/annotate";
 import { CANVAS_CHAT_SYSTEM, forModel, MAX_MODEL_CALLS, MAX_OUTPUT_TOKENS, runCanvasTurn } from "@/lib/canvas/chatTurn";
 import { readCanvas } from "@/lib/canvas/textSyntax";
+import { withChecks } from "@/lib/canvas/textSyntax/checks";
 import { BOARDS, makeBoard, type BoardName } from "./fixtures";
 import { writeReport, type BoardFile, type ReplyFile } from "./report";
 import { scoreReply, type ModelCall } from "./score";
@@ -47,7 +54,11 @@ function readOptions() {
   const boards = (value("--boards")?.split(",").map((s) => s.trim()).filter(Boolean) ?? BOARDS) as BoardName[];
   for (const b of boards) if (!BOARDS.includes(b)) throw new Error(`unknown board "${b}" (have: ${BOARDS.join(", ")})`);
   const maxMinutes = value("--max-reply-minutes");
-  return { model: value("--model") ?? DEFAULT_MODEL, boards, repeats: Number(value("--repeats") ?? 3), maxReplyMs: maxMinutes === undefined ? undefined : Number(maxMinutes) * 60_000 };
+  const replay = value("--replay");
+  return {
+    model: value("--model") ?? DEFAULT_MODEL, boards, repeats: Number(value("--repeats") ?? 3),
+    maxReplyMs: maxMinutes === undefined ? undefined : Number(maxMinutes) * 60_000, replay: replay ? resolve(replay) : undefined,
+  };
 }
 
 const describeError = (err: unknown) => {
@@ -84,6 +95,8 @@ function recorded(signal: AbortSignal | undefined): { provider: LLMProvider; cal
 
 const opts = readOptions();
 const MODEL = opts.model;
+const replayed = <T>(file: string) => JSON.parse(readFileSync(join(opts.replay!, file), "utf8")) as T;
+const SYSTEM = opts.replay ? replayed<{ prompt: { system: string } }>("summary.json").prompt.system : CANVAS_CHAT_SYSTEM;
 const stamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
 const outDir = join(here, "output", stamp);
 mkdirSync(outDir, { recursive: true });
@@ -94,7 +107,8 @@ console.log(`canvas-annotate eval → ${outDir}`);
 
 const boards = opts.boards.map((name): BoardFile => {
   const b = makeBoard(name);
-  return { ...b, sent: forModel({ text: readCanvas(b.elements).text, region: null }, MESSAGE) };
+  const sent = opts.replay ? replayed<{ sent: string }>(`board.${name}.json`).sent : forModel({ text: withChecks(readCanvas(b.elements), b.elements), region: null }, MESSAGE);
+  return { ...b, sent };
 });
 for (const b of boards) {
   write(`board.${b.name}.json`, b);
@@ -104,9 +118,9 @@ for (const b of boards) {
 const createdAt = new Date().toISOString();
 const writeSummary = (finishedAt: string | null) => write("summary.json", {
   createdAt, finishedAt, model: MODEL,
-  options: { ...opts, maxReplyMinutes: opts.maxReplyMs === undefined ? null : opts.maxReplyMs / 60_000 },
+  options: { ...opts, replay: opts.replay ?? null, maxReplyMinutes: opts.maxReplyMs === undefined ? null : opts.maxReplyMs / 60_000 },
   prompt: {
-    system: CANVAS_CHAT_SYSTEM, message: MESSAGE, maxTokens: MAX_OUTPUT_TOKENS, tool: ANNOTATE_TOOL,
+    system: SYSTEM, message: MESSAGE, maxTokens: MAX_OUTPUT_TOKENS, tool: ANNOTATE_TOOL,
     maxAnnotations: MAX_ANNOTATIONS_PER_TURN, maxModelCalls: MAX_MODEL_CALLS,
   },
 });
@@ -116,7 +130,7 @@ writeReport(outDir);
 // ── replies ─────────────────────────────────────────────────────────────────
 
 // Load the model with the same options the timed calls use, so the first reply isn't charged for it.
-const warm = await ask(MODEL, false, CANVAS_CHAT_SYSTEM, "Reply with OK", { maxTokens: 1 });
+const warm = await ask(MODEL, false, SYSTEM, "Reply with OK", { maxTokens: 1 });
 console.log(`${MODEL}: warmed up in ${(warm.latencyMs / 1000).toFixed(1)}s${warm.errors.length ? ` (${warm.errors.join("; ")})` : ""}`);
 
 const total = opts.repeats * boards.length;
@@ -132,7 +146,7 @@ replies: for (let repeat = 1; repeat <= opts.repeats; repeat++) {
     const started = performance.now();
     try {
       error = await runCanvasTurn({
-        provider, system: CANVAS_CHAT_SYSTEM, messages: [{ role: "user", content: b.sent }], maxTokens: MAX_OUTPUT_TOKENS,
+        provider, system: SYSTEM, messages: [{ role: "user", content: b.sent }], maxTokens: MAX_OUTPUT_TOKENS,
         board: () => ({ elements: b.elements, doc }),
         record: async () => {},
         send: (ev) => {

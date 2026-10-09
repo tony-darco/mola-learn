@@ -8,8 +8,13 @@
  * reload; and once K1 is erased, the sidebar keeps the thread, its chip
  * saying K1 is gone.
  *
+ * A reply to an annotation erased meanwhile (in another tab) says "That
+ * annotation is no longer on the board", not the request's status. And an
+ * open note gets out of the pen's way: picking a drawing tool closes it, and
+ * a stroke can start where its card was.
+ *
  * The model is scripted (lib/canvas/scripted.ts, "check-sum-then-answer").
- * A second test replies to the real model (the LAN Ollama host), only when
+ * A last test replies to the real model (the LAN Ollama host), only when
  * asked for:
  *
  *   E2E_PORT=3059 npx playwright test --no-deps e2e/canvas-annotation-replies.spec.ts
@@ -178,6 +183,96 @@ test.describe("replies to the AI's annotations", () => {
       await expect(chip).toHaveText("Re K1 · no longer on the board");
       await expect(page.getByTestId("canvas-turn-assistant").last()).toHaveText(answer);
       await page.getByTestId("canvas-chat").screenshot({ path: testInfo.outputPath("erased.png") });
+    } finally {
+      if (canvasId) {
+        await sql`delete from chats where canvas_id = ${canvasId}`;
+        await sql`delete from artifacts where id = ${canvasId}`;
+      }
+      await sql.end();
+    }
+  });
+
+  /** "2 + 2 = 5" with K1 on the 5, saved on a fresh canvas as a check would leave it; the chat is on `model`. */
+  async function plantChecked(sql: postgres.Sql, title: string, model: string) {
+    const work = handwriting("2 + 2 = 5", 300, 300, 40);
+    const [k1] = annotate(
+      { annotations: [{ target: "T1 word 5", kind: "error", mark: "circle", note: "2 + 2 is 4, not 5." }] },
+      { elements: work, doc: readCanvas(work).doc }, newAnnotateTurn(),
+    ).placed;
+    return { work, k1: k1!, canvasId: await plant(sql, title, [...work, k1!], model) };
+  }
+
+  test("a reply to an annotation erased meanwhile says it is no longer on the board, not the request's status", async ({ page }) => {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let canvasId: string | null = null;
+    try {
+      const planted = await plantChecked(sql, "E2E Annotation replies (erased meanwhile)", "scripted:check-sum-then-answer");
+      canvasId = planted.canvasId;
+      await page.goto(`/canvas/${canvasId}`);
+      const box = await openNote(page, planted.k1.id);
+
+      // Erased in another tab: the board as saved has no K1 now (a newer version, so this page's own save is a conflict and writes
+      // nothing), though this page still shows it.
+      await sql`
+        update artifacts set version = version + 1, payload = jsonb_set(payload, '{elements}', (
+          select coalesce(jsonb_agg(e), '[]'::jsonb) from jsonb_array_elements(payload->'elements') e where e->>'type' <> 'annotation'))
+        where id = ${canvasId}`;
+      expect(await saved(sql, canvasId).then((es) => es.some((e) => e.type === "annotation"))).toBe(false);
+
+      const response = chatPost(page, canvasId);
+      await box.fill("Why is it 4?");
+      await box.press("Enter");
+      expect((await response).status()).toBe(404);
+
+      const thread = page.getByTestId("ai-annotation-thread");
+      await expect(thread.getByTestId("ai-annotation-answer")).toHaveText(["That annotation is no longer on the board."]);
+      await expect(page.getByText("request failed")).toHaveCount(0);
+      // Sending a reply from a note doesn't open the chat sidebar.
+      await expect(page.getByTestId("canvas-chat")).toHaveCount(0);
+      // Nothing was asked of the model, and nothing stored.
+      const asked = await sql`select 1 from messages m join chats c on c.id = m.chat_id where c.canvas_id = ${canvasId}`;
+      expect(asked).toHaveLength(0);
+    } finally {
+      if (canvasId) {
+        await sql`delete from chats where canvas_id = ${canvasId}`;
+        await sql`delete from artifacts where id = ${canvasId}`;
+      }
+      await sql.end();
+    }
+  });
+
+  test("an open note gets out of the pen's way: picking a drawing tool closes it, and a stroke can start where its card was", async ({ page }) => {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let canvasId: string | null = null;
+    try {
+      const planted = await plantChecked(sql, "E2E Annotation replies (pen)", "scripted:check-sum-then-answer");
+      canvasId = planted.canvasId;
+      await page.goto(`/canvas/${canvasId}`);
+
+      // Open, its card is on the board, over the work around the 5.
+      const reply = await openNote(page, planted.k1.id);
+      const card = page.locator("[data-annotation-card]");
+      await expect(card).toBeVisible();
+      const over = (await card.boundingBox())!;
+
+      // The pen picked: the card goes, the reply box with it.
+      await pickTool(page, "Pen");
+      await expect(card).toBeHidden();
+      await expect(reply).toBeHidden();
+
+      // A stroke from where the card was reaches the board, and is saved with the student's work.
+      await page.mouse.move(over.x + 40, over.y + over.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(over.x + 180, over.y + over.height / 2 + 10, { steps: 8 });
+      await page.mouse.up();
+      await expect(page.locator("path[data-element-id]:not([data-element-id^='sum-'])")).toHaveCount(1);
+      await expect.poll(async () => (await saved(sql, canvasId!)).filter((e) => e.type === "draw").length).toBe(planted.work.length + 1);
+
+      // Back on Select, the note opens again, and a reply can still be typed into it.
+      await pickTool(page, "Select");
+      const again = await openNote(page, planted.k1.id);
+      await again.fill("Why is it 4?");
+      await expect(again).toHaveValue("Why is it 4?");
     } finally {
       if (canvasId) {
         await sql`delete from chats where canvas_id = ${canvasId}`;

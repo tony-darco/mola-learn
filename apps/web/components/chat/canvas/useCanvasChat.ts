@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import {
-  addedByAI, parseCanvasChatEvents, type AIChange, type CanvasChatMessage, type CanvasChatRequest, type CanvasContext, type CanvasEditsResponse,
+  addedByAI, parseCanvasChatEvents, sendFailure, type AIChange, type CanvasChatMessage, type CanvasChatRequest, type CanvasContext, type CanvasEditsResponse,
 } from "@/lib/canvas/chat";
 import type { Rect } from "@/lib/canvas/marquee";
 
@@ -157,7 +157,7 @@ export function useCanvasChat(canvasId: string, onAIEdits: (messageId: string, c
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
+      if (!res.ok || !res.body) throw new Error(sendFailure(res.status, await res.json().catch(() => null), annotationId));
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

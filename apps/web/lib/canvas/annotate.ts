@@ -32,6 +32,7 @@ import type { ToolSpec } from "@/lib/llm/types";
 import { nextIndexAfterAll } from "./order";
 import { resolveTarget, type CanvasDoc, type ResolvedTarget } from "./textSyntax";
 import { blockWords } from "./textSyntax/relations";
+import { typedWords } from "./wordTargets";
 
 /**
  * Three: what a reply marks is what the student looks at first, and a few
@@ -64,6 +65,7 @@ export const ANNOTATE_TOOL: ToolSpec = {
             target: {
               type: "string",
               description: "The place, as the board text names it: a matrix entry (\"M2 row 1 col 3\"), a word (\"T3 word 2\") or words (\"T3 words 2-4\"), "
+                + "a word of a text box, sticky note or LaTeX, counted between spaces (\"X1 word 4\"), "
                 + "a row or column (\"M2 row 1\", \"M2 col 3\"), or a whole item (\"M2\", \"X1\"). "
                 + "Point at the smallest place that holds what you mean: the one entry or word that is wrong, not the whole matrix or line.",
             },
@@ -109,11 +111,19 @@ function annotationsOf(input: unknown): unknown[] | null {
     }
   }
   const list = value && typeof value === "object" ? (value as { annotations?: unknown }).annotations : undefined;
-  return Array.isArray(list) && list.length > 0 ? list : null;
+  return Array.isArray(list) && list.length > 0 ? list.map(unwrapped) : null;
+}
+
+/** gemma4:12b sends an annotation in a call under its number about half the time — {"1": {target, kind, mark, note}} — which is the annotation inside. */
+function unwrapped(given: unknown): unknown {
+  if (!given || typeof given !== "object" || Array.isArray(given)) return given;
+  const [key, ...more] = Object.keys(given);
+  const inner = key !== undefined && more.length === 0 && /^\d+$/.test(key) ? (given as Record<string, unknown>)[key] : undefined;
+  return inner && typeof inner === "object" && !Array.isArray(inner) ? inner : given;
 }
 
 /** One annotation as asked for: where it goes, or everything wrong with it. */
-function check(given: unknown, doc: CanvasDoc): { place: Place } | { problem: string } {
+function check(given: unknown, { doc, elements }: AnnotateBoard): { place: Place } | { problem: string } {
   const a = (given && typeof given === "object" ? given : {}) as Record<string, unknown>;
   const problems: string[] = [];
   const { kind, mark } = a;
@@ -130,7 +140,7 @@ function check(given: unknown, doc: CanvasDoc): { place: Place } | { problem: st
   if (typeof a.target !== "string" || !a.target.trim()) {
     problems.push(`the target is missing: name a place from the board text, like "M1 row 2 col 3" or "T1 word 2"`);
   } else {
-    const resolved = resolveTarget(a.target, { doc });
+    const resolved = resolveTarget(a.target, { doc, elements });
     const label = resolved.ok ? resolved.address.split(" ")[0]! : "";
     if (!resolved.ok) problems.push(resolved.error);
     else if (doc.items.find((i) => i.label === label)?.kind === "annotation") problems.push(`${label} is one of your own annotations: point at the student's work`);
@@ -142,14 +152,21 @@ function check(given: unknown, doc: CanvasDoc): { place: Place } | { problem: st
 /**
  * Why an error on this place is too coarse to place before asking: it is
  * a whole handwritten matrix or line, or a matrix row or column, of more
- * than one entry or word. Null when it isn't.
+ * than one entry or word, or all of a text box, sticky note or math of more
+ * than one word. Null when it isn't.
  */
-function tooCoarse({ kind, target }: Place, doc: CanvasDoc): string | null {
+function tooCoarse({ kind, target }: Place, { doc, elements }: AnnotateBoard): string | null {
   if (kind !== "error") return null;
   const [label, ...rest] = target.address.split(" ");
-  const block = doc.handwriting.blocks.find((b) => b.id === label);
-  if (!block) return null;
   const again = `— or, if all of ${target.address} is wrong, send this annotation again unchanged`;
+  const block = doc.handwriting.blocks.find((b) => b.id === label);
+  if (!block) {
+    const e = rest.length === 0 && target.elementIds.length === 1 ? elements.find((x) => x.id === target.elementIds[0]) : undefined;
+    const text = e?.type === "text" || e?.type === "note" ? e.props.text : e?.type === "math" ? e.props.latex : "";
+    const n = typedWords(text).length;
+    const what = e?.type === "text" ? "text box" : e?.type === "note" ? "sticky note" : "math element";
+    return n < 2 ? null : `${label} is a whole ${what} of ${n} words: point at the word or words that are wrong, as "${label} word …" or "${label} words …–…", counting words between spaces ${again}`;
+  }
   if (rest.length === 0) {
     const n = blockWords(block).length;
     if (n < 2) return null;
@@ -187,7 +204,7 @@ export function annotate(
     };
   }
 
-  const checked = given.map((a) => check(a, board.doc));
+  const checked = given.map((a) => check(a, board));
   const left = MAX_ANNOTATIONS_PER_TURN - turn.placed.length;
   const fresh = checked.filter((c) => !("place" in c && turn.placed.some(sameAs(c.place)))).length;
   if (fresh > left) {
@@ -208,7 +225,7 @@ export function annotate(
     if ("problem" in c) return void problems.push(`${which}: ${c.problem}`);
     const p = c.place;
     if ([...turn.placed, ...placed].some(sameAs(p))) return void already.push(told(p));
-    const narrow = tooCoarse(p, board.doc);
+    const narrow = tooCoarse(p, board);
     if (narrow && !turn.askedToNarrow.has(p.target.address)) {
       turn.askedToNarrow.add(p.target.address);
       return void narrowing.push(`${which}: ${narrow}`);

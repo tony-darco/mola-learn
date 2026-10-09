@@ -24,7 +24,7 @@ let version = 1;
 
 const work = textBox("sum", 100, 100, "2 + 2 = 5");
 const [k] = annotate(
-  { annotations: [{ target: "X1", kind: "error", mark: "box", note: "2 + 2 is 4, not 5." }] },
+  { annotations: [{ target: "X1 word 5", kind: "error", mark: "box", note: "2 + 2 is 4, not 5." }] },
   { elements: [work], doc: readCanvas([work]).doc }, newAnnotateTurn(),
 ).placed;
 
@@ -75,7 +75,7 @@ describe("a reply to an annotation, stored", () => {
     await db.insert(messages).values({ userId: aliceId, chatId, role: "assistant", content: "Count on 2 from 2." });
 
     const [reply, answer] = await stored();
-    expect(reply).toMatchObject({ role: "user", content: "Why is it 4?", annotationId: k!.id, canvasContext: { replyTo: { label: "K1", kind: "error", target: "X1" } } });
+    expect(reply).toMatchObject({ role: "user", content: "Why is it 4?", annotationId: k!.id, canvasContext: { replyTo: { label: "K1", kind: "error", target: "X1 word 5" } } });
     expect(answer).toMatchObject({ role: "assistant", annotationId: null });
   });
 

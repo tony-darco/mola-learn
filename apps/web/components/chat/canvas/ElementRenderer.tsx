@@ -9,6 +9,7 @@ import type { canvasShapeKindSchema, CanvasAnnotationElement, CanvasElement } fr
 import { strokeToPolylinePath, strokeToSvgPath } from "@/lib/canvas/strokePath";
 import { elementBounds } from "@/lib/canvas/marquee";
 import { AI_ACCENT } from "@/lib/canvas/styleConstants";
+import { latexWordRange, targetWords, typedWordSpans } from "@/lib/canvas/wordTargets";
 import { Markdown } from "../Markdown";
 import type { CanvasTurn } from "./useCanvasChat";
 
@@ -165,7 +166,7 @@ export function SelectionOutline({ element, zoom }: { element: CanvasElement; zo
 export type AnnotationReplies = { thread: CanvasTurn[]; busy: boolean; onReply: (text: string) => void };
 
 export function ElementShape({
-  element, selected, soleSelected, editing, onCommitText, onCommitMath, onMeasureMath, onRenameFrame, onStartEdit, zoom, replies,
+  element, selected, soleSelected, editing, onCommitText, onCommitMath, onMeasureMath, onRenameFrame, onStartEdit, zoom, replies, wordsOf,
 }: {
   element: CanvasElement; selected: boolean; soleSelected: boolean; editing: boolean;
   onCommitText: (id: string, text: string, contentHeight: number) => void;
@@ -178,6 +179,8 @@ export function ElementShape({
   zoom: number;
   /** AI annotations only. */
   replies?: AnnotationReplies;
+  /** AI annotations on words of typed text ("X1 word 11"): the text box, sticky note or math they are in, to find the words in. */
+  wordsOf?: CanvasElement;
 }) {
   if (element.type === "draw") return <DrawShape element={element} />;
 
@@ -302,7 +305,7 @@ export function ElementShape({
     );
   }
 
-  if (element.type === "annotation") return <AnnotationShape element={element} selected={selected} zoom={zoom} replies={replies} />;
+  if (element.type === "annotation") return <AnnotationShape element={element} selected={selected} zoom={zoom} replies={replies} wordsOf={wordsOf} />;
 
   // text
   return (
@@ -323,6 +326,82 @@ const ICON_SIZE = 22;
 const NOTE_WIDTH = 260;
 const NOTE_HEIGHT = 420;
 
+type Place = { x: number; y: number; width: number; height: number };
+
+/**
+ * Where an annotation's words are drawn, in canvas units, measured from the
+ * DOM of the text box, sticky note or math (`wordsOf`) they are in — or null:
+ * not on words, or not found. Offset from the annotation's own box as the
+ * words are from their element's, so the mark stays with the annotation as
+ * it was placed.
+ */
+function useWordPlace(groupRef: React.RefObject<SVGGElement | null>, element: CanvasAnnotationElement, wordsOf: CanvasElement | undefined): Place | null {
+  const [place, setPlace] = useState<Place | null>(null);
+  const words = targetWords(element.props.target);
+  const content = wordsOf?.type === "text" || wordsOf?.type === "note" ? wordsOf.props.text : wordsOf?.type === "math" ? wordsOf.props.latex : null;
+  useLayoutEffect(() => {
+    const svg = groupRef.current?.ownerSVGElement;
+    if (!svg || !wordsOf || !words || content === null) return void setPlace(null);
+    let cancelled = false;
+    const node = svg.querySelector(`[data-element-id="${CSS.escape(wordsOf.id)}"]`);
+    const fo = node?.tagName === "foreignObject" ? node : node?.querySelector("foreignObject");
+    const measure = () => {
+      if (cancelled) return;
+      const rect = fo ? wordRect(fo, wordsOf.type === "math" ? "math" : "text", content, words) : null;
+      const box = fo?.getBoundingClientRect();
+      const scale = box ? box.width / Number(fo!.getAttribute("width")) : 0;
+      if (!rect || !box || !(scale > 0)) return setPlace(null);
+      setPlace({
+        x: element.x + (rect.left - box.left) / scale, y: element.y + (rect.top - box.top) / scale,
+        width: rect.width / scale, height: rect.height / scale,
+      });
+    };
+    // KaTeX draws after mount (on a page just loaded, after this runs), and its metrics change once its fonts load.
+    const frame = requestAnimationFrame(measure);
+    document.fonts?.ready.then(measure);
+    const drawn = fo ? new MutationObserver(measure) : null;
+    drawn?.observe(fo!, { childList: true, subtree: true, characterData: true });
+    return () => { cancelled = true; cancelAnimationFrame(frame); drawn?.disconnect(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- measured again when what is drawn, or where, changes.
+  }, [content, words?.[0], words?.[1], wordsOf?.id, wordsOf?.width, wordsOf?.height, element.x, element.y]);
+  return place;
+}
+
+/**
+ * The screen rect of words `from`–`to` (1-based, split at white space) as
+ * drawn in a foreignObject: a text box's or note's text, or the characters
+ * KaTeX drew for a math element's LaTeX. Null when what is drawn isn't that
+ * text — being edited, empty, or LaTeX this can't follow (wordTargets.ts).
+ */
+function wordRect(fo: Element, kind: "text" | "math", content: string, [from, to]: [number, number]): DOMRect | null {
+  const root = kind === "math" ? fo.querySelector(".katex-html") : fo;
+  if (!root) return null;
+  // Every drawn character, with the text node and offset it is at; for math, only what KaTeX draws as ink.
+  const chars: { node: Text; offset: number }[] = [];
+  let drawn = "";
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    for (let i = 0; i < n.data.length; i++) {
+      if (kind === "math" && /[\s​]/.test(n.data[i]!)) continue;
+      chars.push({ node: n, offset: i });
+      drawn += n.data[i];
+    }
+  }
+  let span: { start: number; length: number } | null;
+  if (kind === "math") span = latexWordRange(content, drawn, from, to);
+  else {
+    const ws = typedWordSpans(content);
+    span = drawn === content && to <= ws.length ? { start: ws[from - 1]!.start, length: ws[to - 1]!.end - ws[from - 1]!.start } : null;
+  }
+  if (!span) return null;
+  const [a, b] = [chars[span.start]!, chars[span.start + span.length - 1]!];
+  const range = document.createRange();
+  range.setStart(a.node, a.offset);
+  range.setEnd(b.node, b.offset + 1);
+  const r = range.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 ? r : null;
+}
+
 /**
  * A note the AI pinned to the board, in the AI's ink (--ai-ink, set on the
  * canvas for its background): the mark round its place, and an icon at the
@@ -332,11 +411,18 @@ const NOTE_HEIGHT = 420;
  * open, a box to reply. Only the icon takes the pointer, and the card while
  * it is open, so the work under the mark is as easy to reach as before. The
  * note's card keeps one size on screen at any zoom.
+ *
+ * An annotation on words of typed text ("X1 word 11") is placed on the whole
+ * element — the server doesn't know where the words are drawn — so the mark
+ * and icon go round the words as this page drew them (useWordPlace), or round
+ * the whole element when they can't be found.
  */
 function AnnotationShape({
-  element, selected, zoom, replies,
-}: { element: CanvasAnnotationElement; selected: boolean; zoom: number; replies?: AnnotationReplies }) {
-  const { x, y, width: w, height: h } = element;
+  element, selected, zoom, replies, wordsOf,
+}: { element: CanvasAnnotationElement; selected: boolean; zoom: number; replies?: AnnotationReplies; wordsOf?: CanvasElement }) {
+  const groupRef = useRef<SVGGElement>(null);
+  const word = useWordPlace(groupRef, element, wordsOf);
+  const { x, y, width: w, height: h } = word ?? element;
   const { kind, mark, note } = element.props;
   const Icon = ANNOTATION_ICONS[kind];
   const cx = x + w + MARK_PAD, cy = y - MARK_PAD;
@@ -355,8 +441,11 @@ function AnnotationShape({
     setDraft("");
   }
   return (
-    <g opacity={element.opacity} className="group">
-      <g fill="none" stroke="var(--ai-ink)" strokeWidth={MARK_WIDTH} strokeLinecap="round" pointerEvents="none">
+    <g ref={groupRef} opacity={element.opacity} className="group">
+      <g
+        data-testid="ai-annotation-mark" data-mark-for={element.id} data-place={word ? "word" : "whole"}
+        fill="none" stroke="var(--ai-ink)" strokeWidth={MARK_WIDTH} strokeLinecap="round" pointerEvents="none"
+      >
         {/* An ellipse through the corners of the place's box, and a little more. */}
         {mark === "circle" && <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / Math.SQRT2 + MARK_PAD} ry={h / Math.SQRT2 + MARK_PAD} />}
         {mark === "box" && <rect x={x - MARK_PAD} y={y - MARK_PAD} width={w + 2 * MARK_PAD} height={h + 2 * MARK_PAD} rx={MARK_PAD} />}
